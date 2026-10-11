@@ -28,6 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 observability = ["opentelemetry-sdk>=1.27", "opentelemetry-exporter-otlp-proto-http>=1.27"]
+observability-phoenix = ["arize-phoenix>=8"]
 prices = ["yfinance>=0.2.50"]
 dev = [
     "pytest>=8.3",

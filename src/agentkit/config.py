@@ -42,6 +42,9 @@ class AgentSettings(BaseSettings):
     usage_request_limit: int | None = None
     usage_total_tokens_limit: int | None = None
 
+    # persona
+    soul_file: str | None = None  # path to SOUL.md (default: <agent_home>/SOUL.md)
+
     # storage
     agent_home: Path = Field(default_factory=_default_home)
     database_url: str | None = None

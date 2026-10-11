@@ -43,11 +43,20 @@ from agentkit.guardrails import (
 from agentkit.health import Check, db_check, health_routes, install_signal_handlers
 from agentkit.logging import get_logger, request_context, setup_logging
 from agentkit.logging import redact as redact_text
-from agentkit.observability import setup_logfire, setup_observability
+from agentkit.observability import setup_logfire, setup_observability, start_phoenix
 from agentkit.orchestrator import Orchestrator, delegate, make_delegate
 from agentkit.policy import ALLOW, APPROVE, DENY, ToolPolicy
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.session import ChatResult, ChatRunner, load_history, save_new_messages
+from agentkit.soul import (
+    DEFAULT_SOUL,
+    SOUL_FILENAME,
+    compose_instructions,
+    ensure_soul,
+    load_soul,
+    soul_path,
+)
+from agentkit.supervise import Service, run_all
 
 __version__ = "0.1.0"
 
@@ -57,6 +66,13 @@ __all__ = [
     "AgentApp",
     "durability",
     "scheduler",
+    # persona (SOUL.md)
+    "DEFAULT_SOUL",
+    "SOUL_FILENAME",
+    "load_soul",
+    "ensure_soul",
+    "soul_path",
+    "compose_instructions",
     # config
     "AgentSettings",
     "get_settings",
@@ -85,6 +101,9 @@ __all__ = [
     # cross-cutting: observability, logging, guardrails, policy, errors, health
     "setup_observability",
     "setup_logfire",
+    "start_phoenix",
+    "Service",
+    "run_all",
     "setup_logging",
     "get_logger",
     "redact_text",

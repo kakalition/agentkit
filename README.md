@@ -196,12 +196,15 @@ sent to any hosted service. PydanticAI's instrumentation is activated via the
 
 ```bash
 OBSERVABILITY=console uv run myapp     # spans to the terminal
-# or export to a backend you run:
-OBSERVABILITY=otlp OTLP_ENDPOINT=http://127.0.0.1:6006/v1/traces uv run myapp
+OBSERVABILITY=phoenix uv run myapp     # launch a local Phoenix UI (zero config)
+# or point at any backend you run:
+OBSERVABILITY=otlp OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces uv run myapp
 ```
 
-Point OTLP at **Arize Phoenix** (`:6006`), **Jaeger**, **Grafana Tempo**,
-**Langfuse**, or an OpenTelemetry Collector. Requires `agentkit[observability]`.
+`phoenix` launches **Arize Phoenix** locally (`http://localhost:6006`) and sends
+spans to it — no account. `otlp` works with Phoenix, **Jaeger**, **Grafana
+Tempo**, **Langfuse**, or an OpenTelemetry Collector. Requires
+`agentkit[observability]` (and `agentkit[observability-phoenix]` for `phoenix`).
 
 ### Structured logging
 
@@ -214,6 +217,35 @@ with request_context() as rid:              # correlation id for the turn
 ```
 
 Secrets and monetary amounts are redacted from all log output.
+
+## Persona (`SOUL.md`)
+
+The agent's identity/behaviour is a Markdown file, not code:
+
+```python
+from agentkit import load_soul, ensure_soul, compose_instructions
+
+ensure_soul()                                     # writes <AGENT_HOME>/SOUL.md if missing
+instructions = compose_instructions(load_soul(), "Route requests to specialists.")
+```
+
+Set `SOUL_FILE` to point at a custom path; `compose_instructions` merges the
+persona with your routing/tool instructions.
+
+## Run the whole stack in one process
+
+```python
+from agentkit import Service, run_all
+
+run_all([
+    Service("a2a", lambda: serve_a2a(settings)),
+    Service("mcp", lambda: serve_mcp(settings)),
+    Service("bot", lambda: run_bot(settings)),
+])
+```
+
+Services run on daemon threads; `run_all` blocks until SIGINT/SIGTERM. A
+crashing service does not take down the others.
 
 ## Production features
 
