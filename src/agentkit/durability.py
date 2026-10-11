@@ -47,7 +47,7 @@ _queues: set[str] = set()
 
 
 def system_database_url(settings: AgentSettings) -> str:
-    return f"sqlite:///{settings.agent_home / 'dbos.sqlite'}"
+    return f"sqlite:///{settings.home / 'dbos.sqlite'}"
 
 
 def init(

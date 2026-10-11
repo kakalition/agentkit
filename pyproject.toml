@@ -20,6 +20,7 @@ dependencies = [
     "typer>=0.15",
     "httpx>=0.28.1",
     "uvicorn>=0.32",
+    "fastapi>=0.115",
     "telegramify-markdown>=1.4.0",
     "python-dateutil>=2.9",
     "babel>=2.16",
@@ -40,6 +41,9 @@ dev = [
     "pip-audit>=2.7",
     "cyclonedx-bom>=4.1",
 ]
+
+[project.scripts]
+agentkit = "agentkit.cli:main"
 
 [build-system]
 requires = ["hatchling"]

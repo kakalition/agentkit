@@ -162,6 +162,22 @@ def configure(
     return _runtime
 
 
+def ensure_configured(
+    settings: AgentSettings | None = None,
+    *,
+    repos_factory: type[Repositories] = Repositories,
+) -> Runtime:
+    """Configure the scheduler runtime **only if** none is set yet.
+
+    Unlike :func:`configure`, this never clobbers a runtime already installed by
+    ``init_scheduler`` in the same process — the in-process web UI reuses it.
+    """
+    global _runtime
+    if _runtime is None:
+        _runtime = build_runtime(settings or get_settings(), repos_factory=repos_factory)
+    return _runtime
+
+
 def init_scheduler(
     settings: AgentSettings | None = None,
     *,
@@ -215,6 +231,12 @@ def list_jobs() -> list[dict[str, Any]]:
             }
             for job in repos.schedules.list()
         ]
+
+
+def set_enabled(name: str, enabled: bool) -> bool:
+    """Enable or disable a scheduled job (keeps its definition)."""
+    with repositories(_require_runtime()) as repos:
+        return repos.schedules.set_enabled(name, enabled)
 
 
 def remove_job(name: str) -> bool:

@@ -28,7 +28,7 @@ def soul_path(settings: AgentSettings | None = None) -> Path:
     soul_file = getattr(settings, "soul_file", None)
     if soul_file:
         return Path(soul_file).expanduser()
-    return settings.agent_home / SOUL_FILENAME
+    return settings.home / SOUL_FILENAME
 
 
 def load_soul(settings: AgentSettings | None = None) -> str:

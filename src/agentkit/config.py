@@ -9,12 +9,14 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_WORKSPACE_ROOT = "~/.agentkit"
 
-def _default_home() -> Path:
-    return Path("~/.local/share/agentkit").expanduser()
+
+def _default_workspace_root() -> Path:
+    return Path(DEFAULT_WORKSPACE_ROOT).expanduser()
 
 
 class AgentSettings(BaseSettings):
@@ -26,6 +28,7 @@ class AgentSettings(BaseSettings):
         extra="ignore",
         case_sensitive=False,
         enable_decoding=False,
+        validate_by_name=True,
     )
 
     # identity
@@ -45,10 +48,20 @@ class AgentSettings(BaseSettings):
     # persona
     soul_file: str | None = None  # path to SOUL.md (default: <agent_home>/SOUL.md)
 
-    # storage
-    agent_home: Path = Field(default_factory=_default_home)
+    # storage — agents live under ``workspace_root``; ``agent_home`` defaults to
+    # ``workspace_root/<agent_name>`` and can be overridden with ``AGENT_HOME``.
+    workspace_root: Path = Field(
+        default_factory=_default_workspace_root,
+        validation_alias=AliasChoices("AGENTKIT_WORKSPACE_ROOT", "AGENTKIT_HOME"),
+    )
+    agent_home: Path | None = None
     database_url: str | None = None
     libsql_auth_token: str | None = None
+
+    # operator web UI, served by the agent process itself (loopback only)
+    webui_enabled: bool = True
+    webui_host: str = "127.0.0.1"
+    webui_port: int = 8787
 
     # observability — on by default with a local Phoenix UI (self-hosted, no account)
     observability: str = "phoenix"  # phoenix | console | otlp | off
@@ -76,15 +89,28 @@ class AgentSettings(BaseSettings):
             return [int(part) for part in value.replace(",", " ").split() if part]
         return value
 
-    @field_validator("agent_home", mode="before")
+    @field_validator("agent_home", "workspace_root", mode="before")
     @classmethod
     def _expand(cls, value: object) -> object:
         return Path(value).expanduser() if isinstance(value, str) else value
 
+    @model_validator(mode="after")
+    def _resolve_agent_home(self) -> AgentSettings:
+        if self.agent_home is None:
+            self.agent_home = self.workspace_root / self.agent_name
+        return self
+
     # derived
     @property
+    def home(self) -> Path:
+        """The resolved agent home (``agent_home`` or ``workspace_root/agent_name``)."""
+        if self.agent_home is None:  # pragma: no cover - set by the model validator
+            raise RuntimeError("agent_home was not resolved")
+        return self.agent_home
+
+    @property
     def db_path(self) -> Path:
-        return self.agent_home / "agent.db"
+        return self.home / "agent.db"
 
     @property
     def resolved_database_url(self) -> str:
@@ -94,11 +120,16 @@ class AgentSettings(BaseSettings):
 
     @property
     def artifacts_dir(self) -> Path:
-        return self.agent_home / "artifacts"
+        return self.home / "artifacts"
+
+    @property
+    def logs_dir(self) -> Path:
+        return self.home / "logs"
 
     def ensure_dirs(self) -> None:
-        self.agent_home.mkdir(parents=True, exist_ok=True)
+        self.home.mkdir(parents=True, exist_ok=True)
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache(maxsize=1)

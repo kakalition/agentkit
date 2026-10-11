@@ -11,8 +11,14 @@ import signal
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from agentkit.logging import get_logger
+
+if TYPE_CHECKING:
+    from agentkit.config import AgentSettings
+    from agentkit.runtime import Runtime
+    from agentkit.webui.context import Answer
 
 log = get_logger("agentkit.supervise")
 
@@ -23,8 +29,33 @@ class Service:
     run: Callable[[], None]
 
 
-def run_all(services: list[Service], *, stop_event: threading.Event | None = None) -> None:
-    """Start every service on its own thread; block until shutdown."""
+def run_all(
+    services: list[Service],
+    *,
+    stop_event: threading.Event | None = None,
+    settings: AgentSettings | None = None,
+    runtime: Runtime | None = None,
+    webui_answer: Answer | None = None,
+    webui: bool = True,
+) -> None:
+    """Start every service on its own thread; block until shutdown.
+
+    When ``settings`` is supplied and its ``webui_enabled`` flag is set, the
+    in-core web UI is appended automatically (unless ``webui=False`` or a
+    service named ``webui`` is already present).
+    """
+    if (
+        webui
+        and settings is not None
+        and getattr(settings, "webui_enabled", False)
+        and not any(service.name == "webui" for service in services)
+    ):
+        from agentkit.webui.server import webui_service
+
+        services = [
+            *services,
+            webui_service(runtime=runtime, settings=settings, answer=webui_answer),
+        ]
     stop = stop_event or threading.Event()
     threads: list[threading.Thread] = []
     for service in services:

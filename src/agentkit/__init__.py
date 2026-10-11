@@ -9,7 +9,7 @@ client registry (:mod:`agentkit.mcp`), A2A client + task-based server
 (:mod:`agentkit.a2a`), and CLI/Telegram gateways (:mod:`agentkit.gateways`).
 """
 
-from agentkit import durability, scheduler
+from agentkit import durability, scheduler, workspace
 from agentkit.app import AgentApp
 from agentkit.approvals import approval_capability, approval_handler, auto_approver
 from agentkit.config import (
@@ -57,6 +57,13 @@ from agentkit.soul import (
     soul_path,
 )
 from agentkit.supervise import Service, run_all
+from agentkit.webui import build_webui_app, serve_webui, webui_service
+from agentkit.workspace import (
+    default_workspace_root,
+    detect_legacy,
+    migrate,
+    workspace_dir,
+)
 
 __version__ = "0.1.0"
 
@@ -66,6 +73,16 @@ __all__ = [
     "AgentApp",
     "durability",
     "scheduler",
+    # workspace layout + legacy migration
+    "workspace",
+    "default_workspace_root",
+    "workspace_dir",
+    "detect_legacy",
+    "migrate",
+    # operator web UI
+    "build_webui_app",
+    "serve_webui",
+    "webui_service",
     # persona (SOUL.md)
     "DEFAULT_SOUL",
     "SOUL_FILENAME",

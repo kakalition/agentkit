@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Workspace layout**: agents now live under `workspace_root` (default
+  `~/.agentkit`), with `agent_home` defaulting to `workspace_root/<agent_name>`
+  (`AGENTKIT_HOME` / `AGENT_HOME` still override). `agentkit.workspace` detects
+  legacy `~/.local/share/...` data and migrates it (`detect_legacy`, `migrate`).
+- **Operator web UI** (`agentkit.webui`): an in-core FastAPI app served by the
+  agent process that inspects conversations/chat, usage, audit, A2A tasks and
+  durable workflows, and manages schedules, workflows, SOUL and config — for the
+  hosting agent only. `run_all(...)` auto-appends it, so every agent gets it.
+- **Web SPA** (`web/`): Vite + React + TypeScript + Tailwind + shadcn/ui
+  console (Overview, Chat, Conversations, Scheduler, Workflows, Usage, Audit,
+  A2A, Persona, Config, Artifacts), built into `agentkit/webui/static`.
+- **CLI**: `agentkit` console script with `webui`/`api` and
+  `workspace list|migrate` commands.
+- Repo helpers: `ConversationRepo.list/get`, `UsageRepo.list`,
+  `ScheduledJobRepo.set_enabled`, `scheduler.ensure_configured`/`set_enabled`.
+
+### Changed
+- `AgentSettings.ensure_dirs()` also creates `logs/`.
+
 ## [0.1.0] - 2026-10-11
 
 ### Added

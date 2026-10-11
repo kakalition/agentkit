@@ -1,14 +1,16 @@
 # agentkit
 
-**Composable building blocks for production PydanticAI assistant agents** —
-CLI + Telegram, MCP + A2A, durable execution, and a durable cron/one-off
-scheduler, on a single local process.
+**The batteries-included framework for production PydanticAI assistant agents.**
+Write your domain; agentkit ships the rest — durable conversation history, an
+orchestrator with specialists, human-in-the-loop approvals, durable execution
+and scheduling, MCP + A2A interop, safe defaults, gateway channels, and a
+built-in **operator web UI** that every agent gets for free.
 
-`agentkit` packages the plumbing every single-user assistant agent needs, so you
-write the domain (your tools, prompts, data) and not the scaffolding: model
-config with retries, an orchestrator that delegates to specialists,
-human-in-the-loop approvals, durable conversation history, durable background
-work, MCP/A2A interop, safe defaults, and channel gateways.
+`agentkit` packages the plumbing every single-user (self-hosted) assistant needs,
+so you ship the product and not the scaffolding: model config with timeouts and
+retries, durable history, background work, token accounting, a hash-chained
+audit log, structured redacted logs, readiness probes, and a loopback web
+console for exploring and operating the running agent.
 
 [![CI](https://github.com/kakalition/agentkit/actions/workflows/ci.yml/badge.svg)](https://github.com/kakalition/agentkit/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
@@ -17,8 +19,25 @@ work, MCP/A2A interop, safe defaults, and channel gateways.
 
 ---
 
+## Highlights
+
+- **One process, one command.** `run_all(...)` supervises the worker, A2A, MCP,
+  bot, and web UI in a single local process — no server to run.
+- **Durable by default.** Conversation history and background work run on DBOS
+  over local SQLite: turns, jobs, cron and one-off schedules survive restarts.
+- **An operator console in the box.** Every agent serves a Vite + React +
+  shadcn/ui web UI at `http://127.0.0.1:8787`: chat, conversations, usage, audit,
+  A2A tasks, durable workflows, schedules, persona, config, and artifacts.
+- **Agents that delegate.** `Orchestrator` gives you an agent that routes to
+  specialist sub-agents as tools.
+- **Safe by construction.** Approvals default-deny; loopback binds; secrets and
+  amounts are redacted from logs; every material action is audited.
+- **Interop, both ways.** Consume and serve MCP servers and A2A agents.
+- **Local-first.** No hosted account, no external services; state is files.
+
 ## Table of contents
 
+- [Highlights](#highlights)
 - [Install](#install)
 - [60-second agent](#60-second-agent)
 - [Orchestrator + specialists](#orchestrator--specialists)
@@ -28,6 +47,7 @@ work, MCP/A2A interop, safe defaults, and channel gateways.
 - [A2A](#a2a)
 - [Persona (`SOUL.md`)](#persona-soulmd)
 - [Run everything in one process](#run-everything-in-one-process)
+- [Operator web UI](#operator-web-ui)
 - [Observability](#observability-self-hosted-no-account)
 - [Production features](#production-features)
 - [Configuration](#configuration-agentsettings)
@@ -44,7 +64,18 @@ uv add "agentkit[observability-phoenix]"   # local trace UI (default observabili
 uv add "agentkit[prices]"                  # yfinance
 ```
 
-Python 3.11–3.12. No external services: state lives in local SQLite/libSQL.
+Python 3.11–3.12. No external services: state lives in local SQLite/libSQL, one
+dir per agent under `~/.agentkit/<agent_name>`.
+
+### Quickstart
+
+```bash
+agentkit workspace list                      # where agents live
+agentkit webui                               # operator console for the current agent
+```
+
+Every agent that calls `run_all(..., settings=settings)` serves the web UI
+automatically on `http://127.0.0.1:8787`.
 
 ## 60-second agent
 
@@ -174,15 +205,52 @@ instructions = compose_instructions(load_soul(), "Route requests to specialists.
 ```python
 from agentkit import Service, run_all
 
-run_all([
-    Service("a2a", lambda: serve_a2a(settings)),
-    Service("mcp", lambda: serve_mcp(settings)),
-    Service("bot", lambda: run_bot(settings)),
-])
+run_all(
+    [
+        Service("a2a", lambda: serve_a2a(settings)),
+        Service("mcp", lambda: serve_mcp(settings)),
+        Service("bot", lambda: run_bot(settings)),
+    ],
+    settings=settings,          # enables the auto-appended web UI
+    runtime=runtime,
+    webui_answer=my_answer,      # optional: (conversation_id, text) -> ChatResult
+)
 ```
 
 Daemon threads; blocks until SIGINT/SIGTERM; a crashing service doesn't take
-down the others.
+down the others. When `settings.webui_enabled` is set, the web UI is appended
+automatically (use `webui=False` to opt out).
+
+## Operator web UI
+
+Every agent normally gets an operator UI at `http://127.0.0.1:8787` (loopback,
+no auth, single operator) showing **only the hosting agent**:
+
+- **Inspect**: conversations + chat, usage, audit (hash-chain verify), A2A tasks,
+  durable workflows.
+- **Manage**: schedules (cron/once CRUD), workflow cancel/resume, SOUL persona,
+  config (secrets masked), artifacts.
+
+Storage runs under `workspace_root` (default `~/.agentkit`), one dir per agent:
+
+```
+~/.agentkit/<agent_name>/
+  agent.db      conversations, messages, jobs, usage, audit, a2a
+  dbos.sqlite   durable workflows
+  SOUL.md, artifacts/, logs/
+```
+
+Manage it from the CLI:
+
+```bash
+agentkit workspace list
+agentkit workspace migrate calliope     # move legacy ~/.local/share data
+agentkit webui                          # standalone UI for the current env
+```
+
+The SPA source lives in `web/` (Vite + React + shadcn/ui). Build it with
+`cd web && bun install && bun run build`; until then a fallback page is served
+and the JSON API under `/api` stays fully usable.
 
 ## Observability (self-hosted, no account)
 
@@ -234,9 +302,11 @@ Secrets and monetary amounts are redacted from all log output.
 | `MODEL_NAME` | `openai:gpt-4o-mini` | Model id |
 | `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Transport resilience |
 | `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Per-run caps |
-| `AGENT_HOME` | `~/.local/share/agentkit` | DB + artifacts |
+| `AGENTKIT_HOME` | `~/.agentkit` | Workspace root (`<root>/<AGENT_NAME>`) |
+| `AGENT_HOME` | `<AGENTKIT_HOME>/<AGENT_NAME>` | Explicit home override |
 | `DATABASE_URL` | local libSQL file | `sqlite+libsql://…` or other |
 | `SOUL_FILE` | `<AGENT_HOME>/SOUL.md` | Persona |
+| `WEBUI_ENABLED` / `WEBUI_HOST` / `WEBUI_PORT` | `true` / `127.0.0.1` / `8787` | Operator UI |
 | `OBSERVABILITY` | `phoenix` | `phoenix` \| `console` \| `otlp` \| `off` |
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `false` | Logging |
 | `A2A_HOST` / `A2A_PORT` / `A2A_PUBLIC_URL` | `127.0.0.1` / `9000` | A2A |
@@ -260,15 +330,16 @@ Subclass `AgentSettings` to add app fields.
 
 ```bash
 uv sync --extra dev --extra observability
-uv run pytest --cov=agentkit        # 49 tests, ≥70% gate
+uv run pytest --cov=agentkit        # 84 tests, ≥70% gate
 uv run ruff check src tests
 uv run mypy src/agentkit
 uv build
 ```
 
 Layout: `config`, `app`, `orchestrator`, `deps`, `approvals`, `session`, `soul`,
-`runtime`, `durability`, `scheduler`, `supervise`, `observability`, `logging`,
-`guardrails`, `policy`, `errors`, `health`, `db/`, `mcp/`, `a2a/`, `gateways/`.
+`runtime`, `durability`, `scheduler`, `supervise`, `workspace`, `cli`,
+`observability`, `logging`, `guardrails`, `policy`, `errors`, `health`,
+`db/`, `mcp/`, `a2a/`, `gateways/`, `webui/` (backend) + `web/` (SPA).
 
 ## License
 

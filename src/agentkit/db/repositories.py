@@ -45,6 +45,20 @@ class ConversationRepo:
             self.session.add(conversation)
             self.session.flush()
 
+    def get(self, conversation_id: str) -> Conversation | None:
+        return self.session.get(Conversation, conversation_id)
+
+    def list(self, limit: int | None = None) -> list[Conversation]:
+        stmt = (
+            select(Conversation)
+            .where(Conversation.owner_id == self.owner_id)
+            .order_by(Conversation.updated_at.desc())
+        )
+        rows = list(self.session.exec(stmt).all())
+        if limit is not None and len(rows) > limit:
+            rows = rows[:limit]
+        return rows
+
 
 class MessageRepo:
     def __init__(self, session: Session, owner_id: str) -> None:
@@ -171,6 +185,16 @@ class ScheduledJobRepo:
         self.session.flush()
         return True
 
+    def set_enabled(self, name: str, enabled: bool) -> bool:
+        job = self.session.get(ScheduledJob, name)
+        if job is None:
+            return False
+        job.enabled = enabled
+        job.updated_at = datetime.now(UTC)
+        self.session.add(job)
+        self.session.flush()
+        return True
+
     def record_run(self, name: str) -> None:
         job = self.session.get(ScheduledJob, name)
         if job is None:
@@ -214,6 +238,17 @@ class UsageRepo:
         self.session.add(record)
         self.session.flush()
         return record
+
+    def list(self, limit: int | None = None) -> list[UsageRecord]:
+        stmt = (
+            select(UsageRecord)
+            .where(UsageRecord.owner_id == self.owner_id)
+            .order_by(UsageRecord.created_at.desc(), UsageRecord.id.desc())
+        )
+        rows = list(self.session.exec(stmt).all())
+        if limit is not None and len(rows) > limit:
+            rows = rows[:limit]
+        return rows
 
     def totals(self, *, since: datetime | None = None) -> dict[str, int]:
         stmt = select(
