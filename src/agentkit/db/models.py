@@ -37,6 +37,24 @@ class Message(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+class ScheduledJob(SQLModel, table=True):
+    """A durable scheduled job: recurring (cron) or one-off (``once``)."""
+
+    __tablename__ = "scheduled_jobs"
+
+    name: str = Field(primary_key=True)
+    owner_id: str | None = Field(default=None, index=True)
+    kind: str = "cron"  # cron | once
+    schedule: str = ""  # cron expression, or an ISO-8601 datetime for "once"
+    task: str = ""  # registered task name
+    args: str = "{}"  # JSON kwargs
+    enabled: bool = True
+    last_run: datetime | None = None
+    run_count: int = 0
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
 class A2ATaskRecord(SQLModel, table=True):
     """Durable A2A task store (protobuf JSON payloads)."""
 

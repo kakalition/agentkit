@@ -1,87 +1,229 @@
 # agentkit
 
-Opinionated building blocks for **PydanticAI v2 personal-assistant agents** —
-extracted from the Artemis finance agent. It gives you, out of the box:
+**Opinionated building blocks for PydanticAI assistant agents** — CLI + Telegram,
+MCP + A2A, durable execution, and a durable cron/one-off scheduler.
 
-- **Orchestrator + specialists** — register sub-agents as delegation tools.
-- **Typed deps + human-in-the-loop approvals** via PydanticAI deferred tools.
-- **Durable history** in libSQL, keyed by conversation id.
-- **Durable execution** (DBOS) on a local SQLite system DB — workflows, queues, cron.
-- **MCP** client registry (prefixed toolsets, process-owned lifecycle) + server serving.
-- **A2A** task-based server with a durable `TaskStore`, plus an outbound client.
-- **CLI (Typer) and Telegram (aiogram)** helpers with Markdown rendering.
-- **Resilience** (timeouts, retries, usage caps) and **free observability** (console / OTLP / Logfire).
+`agentkit` packages the non-domain plumbing you keep rewriting for single-user
+assistant agents: model config with retries, an orchestrator that delegates to
+specialist agents, human-in-the-loop approvals, durable conversation history,
+durable background work, MCP/A2A interop, and channel gateways. You bring the
+domain (your repos, tools, prompts).
+
+[![CI](https://github.com/kakalition/agentkit/actions/workflows/ci.yml/badge.svg)](https://github.com/kakalition/agentkit/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+---
 
 ## Install
 
 ```bash
-uv add git+<repo>            # or: uv sync --extra dev
+uv add agentkit           # or: pip install agentkit
 ```
 
-Requires Python 3.11–3.12.
+Python 3.11–3.12. Optional extras: `agentkit[observability]` (Logfire/OTel),
+`agentkit[prices]` (yfinance).
 
-## Quickstart
+## 30-second agent
 
 ```python
-from agentkit import AgentSettings, Orchestrator, Deps, build_runtime, build_model
-from agentkit.runtime import repositories, build_deps
-from agentkit.session import ChatRunner
+import asyncio
 from pydantic_ai import Agent
+from agentkit import AgentApp, AgentSettings, Deps
 
-# 1) a specialist agent
-notes = Agent(name="notes", deps_type=Deps, output_type=str, instructions="Manage notes.")
+notes = Agent(name="notes", deps_type=Deps, output_type=str,
+              instructions="Manage the owner's notes.")
 
 @notes.tool
 async def add_note(ctx, text: str) -> str:
-    ctx.deps.repos.session.add(...)  # your domain write
-    return "saved"
+    """Save a note.""" 
+    ctx.deps.extras.setdefault("notes", []).append(text)
+    return f"saved: {text}"
 
-# 2) an orchestrator that delegates to it
-orchestrator = Orchestrator(name="assistant", instructions="Route to specialists.")
-orchestrator.add_specialist(notes, tool_name="handle_notes", description="Add/list notes.")
-
-# 3) run a turn with durable history
-runtime = build_runtime(AgentSettings(owner_id="owner"))
-with repositories(runtime) as repos:
-    deps = build_deps(runtime, repos, model=build_model(runtime.settings))
-    runner = ChatRunner(deps, agent=orchestrator.agent, conversation_id="cli:default")
-    result = await runner.send("add a note: buy milk")
-    print(result.output)
+app = AgentApp.build(agent=notes, settings=AgentSettings(owner_id="owner"))
+print(asyncio.run(app.run("add a note: buy milk")).output)
 ```
 
-## Modules
+## Orchestrator + specialists
 
-| Module | Provides |
-| --- | --- |
-| `agentkit.config` | `AgentSettings`, `build_model`, `model_settings`, `usage_limits` |
-| `agentkit.orchestrator` | `Orchestrator`, `make_delegate`, `delegate` |
-| `agentkit.deps` / `agentkit.approvals` | `Deps`, `ApprovalRequest`, `approval_capability` |
-| `agentkit.session` | `ChatRunner`, `load_history`, `save_new_messages` |
-| `agentkit.runtime` / `agentkit.db` | `Runtime`, `repositories`, engine/repos/migrations |
-| `agentkit.durability` | DBOS `init`, `register_queue`, `enqueue`, `apply_schedules` |
-| `agentkit.mcp` | `MCPRegistry`, `MCPServerSpec`, `serve_mcp`, `first_out` |
-| `agentkit.a2a` | `TaskAgentExecutor`, `build_a2a_app`, `A2AClient`, `SQLAlchemyTaskStore` |
-| `agentkit.gateways` | `send_markdown`, `ApprovalBroker`, `is_allowed`, `build_cli` |
-| `agentkit.observability` / `agentkit.guardrails` | `setup_logfire`, `is_loopback`, `warn_if_exposed` |
+PydanticAI v2 removed `Agent.as_tool`; `Orchestrator` generates one delegation
+tool per specialist.
+
+```python
+from agentkit import Orchestrator
+
+orchestrator = (
+    Orchestrator(name="assistant", instructions="Route to the right specialist.")
+    .add_specialist(notes, tool_name="handle_notes", description="Add/list notes.")
+    .add_specialist(calendar, tool_name="handle_calendar", description="Manage events.")
+)
+agent = orchestrator.agent
+```
+
+## Durable scheduling (cron **and** one-off)
+
+Jobs are stored in the database and fired by a DBOS cron tick, with a
+deterministic workflow id so each run happens **exactly once** across restarts.
+
+```python
+from agentkit import scheduler
+
+@scheduler.task("digest")
+def send_digest(*, period: str = "last-month") -> None:
+    ...
+
+scheduler.init_scheduler()                                   # once at startup
+scheduler.schedule_cron("weekly", "0 8 * * 1", "digest", args={"period": "last-month"})
+scheduler.schedule_once("reminder", "2026-11-01T09:00", "digest")
+
+scheduler.list_jobs()      # -> [{name, kind, schedule, task, args, enabled, run_count}, ...]
+scheduler.remove_job("reminder")
+```
+
+Run a durable worker process (`scheduler.init_scheduler()` then keep the process
+alive) to execute the queue and the minute tick.
+
+## Durability
+
+Long/background work runs on **DBOS Transact** on a local SQLite *system
+database* (`$AGENT_HOME/dbos.sqlite`) — no server, unlike Temporal. Wrap your own
+workflows/steps:
+
+```python
+from agentkit import durability
+from dbos import DBOS
+
+@DBOS.step(retries_allowed=True, max_attempts=3)
+def fetch(...): ...
+
+@DBOS.workflow()
+def nightly(...):
+    ...
+
+durability.init(queues=["agentkit"])
+durability.enqueue("agentkit", nightly, ...)
+```
+
+## MCP
+
+**Client** — own N prefixed toolsets for the process lifetime:
+
+```python
+from agentkit.mcp import MCPRegistry, MCPServerSpec
+
+registry = MCPRegistry([
+    MCPServerSpec(name="chart", command="uv", args=["run", "--directory", CHART_DIR, "apollo-charting"]),
+    MCPServerSpec(name="pdf",   url="http://127.0.0.1:8000/mcp"),
+], log_dir=home / "logs")
+
+async with registry:
+    result = await registry.call_tool("chart", "render_chart", {"spec": spec, "force": True})
+    schema = await registry.read_resource("chart", "charting://schema")
+    await agent.run("...", toolsets=registry.toolsets())
+```
+
+**Server** — `agentkit.mcp.serve_mcp(fastmcp_app, transport="streamable-http", host="127.0.0.1", port=8765)`.
+
+## A2A
+
+Task-based server with a durable store, plus an outbound client:
+
+```python
+from agentkit.a2a import build_a2a_app, build_card, TaskAgentExecutor, SQLAlchemyTaskStore, A2AClient
+
+card = build_card(name="MyAgent", description="…", url="http://127.0.0.1:9000",
+                  skills=[{"id": "notes", "name": "Notes", "tags": ["notes"]}])
+app = build_a2a_app(
+    card=card,
+    executor=TaskAgentExecutor(answer=my_answer_fn),   # async (text) -> str
+    task_store=SQLAlchemyTaskStore(runtime),
+    healthz=lambda: True,
+)
+
+# outbound
+text = await A2AClient().call_agent("http://127.0.0.1:9000", "how much did I spend?")
+```
+
+## Gateways
+
+```python
+from agentkit.gateways import send_markdown, ApprovalBroker, is_allowed, build_cli, entrypoint
+```
+
+- `send_markdown` renders Markdown → Telegram entities (telegramify-markdown) and
+  falls back to plain text.
+- `ApprovalBroker` resolves approvals from inline buttons.
+- `build_cli()` + `entrypoint(app)` give you a Typer app with observability wired.
+
+## Approvals (human-in-the-loop)
+
+```python
+from agentkit import Deps, ApprovalRequest, approval_capability
+from pydantic_ai import Agent
+
+agent = Agent(name="a", deps_type=Deps, output_type=str,
+              instructions="…", capabilities=[approval_capability])
+
+@agent.tool(requires_approval=True)
+async def delete_everything(ctx) -> str: ...
+```
+
+Wire `Deps.approve` (CLI prompt, Telegram buttons). With no approver, gated tools
+are **denied by default** — safe for MCP/A2A where there is no interactive user.
+
+## Configuration (`AgentSettings`)
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `AGENT_NAME` / `OWNER_ID` / `OWNER_NAME` | `assistant` / `owner` / `Owner` | Identity |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | – | Any OpenAI-compatible endpoint |
+| `MODEL_NAME` | `openai:gpt-4o-mini` | Model id |
+| `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Transport resilience |
+| `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Per-run caps |
+| `AGENT_HOME` | `~/.local/share/agentkit` | DB + artifacts |
+| `DATABASE_URL` | local libSQL file | `sqlite+libsql://…` or other |
+| `OBSERVABILITY` | `off` | `console` \| `otlp` \| `logfire` |
+| `A2A_HOST` / `A2A_PORT` / `A2A_PUBLIC_URL` | `127.0.0.1` / `9000` | A2A |
+| `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8765` | MCP HTTP |
+
+Subclass `AgentSettings` to add app fields (e.g. Artemis adds `price_source`).
+
+## Observability
+
+Free and local by default:
+
+```bash
+OBSERVABILITY=console uv run myapp        # spans to the terminal, no account
+OBSERVABILITY=otlp OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces uv run myapp
+LOGFIRE_TOKEN=... OBSERVABILITY=logfire uv run myapp   # Logfire free tier
+```
 
 ## Design notes
 
-- **Delegation, not `as_tool`.** PydanticAI v2 removed `Agent.as_tool`; `Orchestrator`
-  generates a tool per specialist that forwards `deps`/`usage`/`model`.
-- **Money/domain logic is out of scope.** Keep domain repos in your app; subclass
-  `agentkit.db.repositories.Repositories` and pass it via `build_runtime(..., repos_factory=...)`.
-- **One writer.** `repositories()` serializes DB access with a process lock; local
-  SQLite/libSQL tolerates a single writer.
-- **Approvals default-deny** when no `deps.approve` is wired (safe over MCP/A2A).
-- **DBOS workflows must be module-level** in your app; agentkit provides the
-  infrastructure and re-exports the decorators you need.
+- **Delegation, not `as_tool`.** v2 removed it; `Orchestrator` writes the tool.
+- **One writer.** `repositories()` serializes DB access with a process lock;
+  local SQLite/libSQL tolerates a single writer. WAL + busy-timeout are set.
+- **Infra vs domain.** `agentkit.db.models` owns only `conversations`, `messages`,
+  `a2a_tasks`, `scheduled_jobs`. Domain tables belong to your app; subclass
+  `Repositories` and pass `repos_factory` to `build_runtime`.
+- **DBOS workflows must be module-level** — agentkit provides the infra + the
+  decorators; your app defines the workflows.
+- **Approvals default-deny** without an approver.
 
-## Tests
+## Development
 
 ```bash
-uv run pytest
+uv sync --extra dev
+uv run pytest            # 26 tests
 uv run ruff check src tests
 uv run mypy src/agentkit
+uv build                 # sdist + wheel
 ```
 
-MIT licensed.
+Layout: `config`, `app`, `orchestrator`, `deps`, `approvals`, `session`,
+`runtime`, `durability`, `scheduler`, `observability`, `guardrails`, `db/`,
+`mcp/`, `a2a/`, `gateways/`.
+
+## License
+
+MIT.

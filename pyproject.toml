@@ -23,6 +23,7 @@ dependencies = [
     "telegramify-markdown>=1.4.0",
     "python-dateutil>=2.9",
     "babel>=2.16",
+    "croniter>=6.0",
 ]
 
 [project.optional-dependencies]

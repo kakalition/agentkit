@@ -9,6 +9,8 @@ client registry (:mod:`agentkit.mcp`), A2A client + task-based server
 (:mod:`agentkit.a2a`), and CLI/Telegram gateways (:mod:`agentkit.gateways`).
 """
 
+from agentkit import durability, scheduler
+from agentkit.app import AgentApp
 from agentkit.approvals import approval_capability, approval_handler, auto_approver
 from agentkit.config import (
     AgentSettings,
@@ -28,6 +30,10 @@ __version__ = "0.1.0"
 
 __all__ = [
     "__version__",
+    # app facade + durable scheduling
+    "AgentApp",
+    "durability",
+    "scheduler",
     # config
     "AgentSettings",
     "get_settings",

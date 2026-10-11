@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from agentkit.db.models import A2ATaskRecord, Conversation, Message
+from agentkit.db.models import A2ATaskRecord, Conversation, Message, ScheduledJob
 
 
 class ConversationRepo:
@@ -117,6 +117,63 @@ class A2ATaskRepo:
         )
 
 
+class ScheduledJobRepo:
+    def __init__(self, session: Session, owner_id: str) -> None:
+        self.session = session
+        self.owner_id = owner_id
+
+    def upsert(
+        self,
+        name: str,
+        *,
+        kind: str,
+        schedule: str,
+        task: str,
+        args: str = "{}",
+        enabled: bool = True,
+    ) -> ScheduledJob:
+        job = self.session.get(ScheduledJob, name)
+        if job is None:
+            job = ScheduledJob(name=name, owner_id=self.owner_id)
+        job.kind = kind
+        job.schedule = schedule
+        job.task = task
+        job.args = args
+        job.enabled = enabled
+        job.updated_at = datetime.now(UTC)
+        self.session.add(job)
+        self.session.flush()
+        return job
+
+    def get(self, name: str) -> ScheduledJob | None:
+        return self.session.get(ScheduledJob, name)
+
+    def list(self, *, enabled_only: bool = False) -> list[ScheduledJob]:
+        stmt = select(ScheduledJob)
+        if enabled_only:
+            stmt = stmt.where(ScheduledJob.enabled == True)  # noqa: E712
+        return list(self.session.exec(stmt.order_by(ScheduledJob.name)).all())
+
+    def remove(self, name: str) -> bool:
+        job = self.session.get(ScheduledJob, name)
+        if job is None:
+            return False
+        self.session.delete(job)
+        self.session.flush()
+        return True
+
+    def record_run(self, name: str) -> None:
+        job = self.session.get(ScheduledJob, name)
+        if job is None:
+            return
+        job.last_run = datetime.now(UTC)
+        job.run_count += 1
+        if job.kind == "once":
+            job.enabled = False
+        self.session.add(job)
+        self.session.flush()
+
+
 @dataclass
 class Repositories:
     """Base container. Domain apps add their own repos (e.g. ``self.transactions``)."""
@@ -128,3 +185,4 @@ class Repositories:
         self.conversations = ConversationRepo(self.session, self.owner_id)
         self.messages = MessageRepo(self.session, self.owner_id)
         self.a2a = A2ATaskRepo(self.session, self.owner_id)
+        self.schedules = ScheduledJobRepo(self.session, self.owner_id)

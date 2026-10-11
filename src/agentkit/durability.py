@@ -1,8 +1,8 @@
 """Durable execution on DBOS Transact (local SQLite system database).
 
-This module provides the *infrastructure* (init/launch, queues, schedules) and
-re-exports DBOS decorators. Applications define their own ``@DBOS.workflow`` /
-``@DBOS.step`` functions — DBOS requires them to be module-level.
+Infrastructure only: init/launch, queues, schedules, and re-exports of the DBOS
+decorators. Applications define their own ``@DBOS.workflow`` / ``@DBOS.step``
+functions at module level (DBOS requires it).
 """
 
 from __future__ import annotations
@@ -10,21 +10,29 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from dbos import DBOS, DBOSConfig
+from dbos import DBOS, DBOSConfig, SetWorkflowID
 
 from agentkit.config import AgentSettings, get_settings
+
+__all__ = ["DBOS", "SetWorkflowID", "init", "register_queue", "enqueue", "apply_schedules", "list_schedules"]
 
 _lock = threading.Lock()
 _initialized = False
 _launched = False
+_queues: set[str] = set()
 
 
 def system_database_url(settings: AgentSettings) -> str:
     return f"sqlite:///{settings.agent_home / 'dbos.sqlite'}"
 
 
-def init(settings: AgentSettings | None = None, *, launch: bool = True) -> type[DBOS]:
-    """Configure and launch DBOS once per process (idempotent)."""
+def init(
+    settings: AgentSettings | None = None,
+    *,
+    launch: bool = True,
+    queues: list[str] | None = None,
+) -> type[DBOS]:
+    """Configure and launch DBOS once per process, registering queues once."""
     global _initialized, _launched
     settings = settings or get_settings()
     settings.ensure_dirs()
@@ -35,11 +43,18 @@ def init(settings: AgentSettings | None = None, *, launch: bool = True) -> type[
         if launch and not _launched:
             DBOS.launch()
             _launched = True
+        for queue in queues or []:
+            if queue not in _queues:
+                DBOS.register_queue(queue)
+                _queues.add(queue)
     return DBOS
 
 
 def register_queue(name: str, **kwargs: Any) -> Any:
-    return DBOS.register_queue(name, **kwargs)
+    if name not in _queues:
+        DBOS.register_queue(name, **kwargs)
+        _queues.add(name)
+    return name
 
 
 def enqueue(queue: str, func: Any, *args: Any, **kwargs: Any) -> str:
