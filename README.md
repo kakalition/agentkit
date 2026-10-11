@@ -188,15 +188,46 @@ are **denied by default** — safe for MCP/A2A where there is no interactive use
 
 Subclass `AgentSettings` to add app fields (e.g. Artemis adds `price_source`).
 
-## Observability
+## Observability (self-hosted, no account)
 
-Free and local by default:
+Spans are exported through **OpenTelemetry** to a backend you run; nothing is
+sent to any hosted service. PydanticAI's instrumentation is activated via the
+`logfire` library in local mode (`send_to_logfire=False`) — no token, no account.
 
 ```bash
-OBSERVABILITY=console uv run myapp        # spans to the terminal, no account
-OBSERVABILITY=otlp OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces uv run myapp
-LOGFIRE_TOKEN=... OBSERVABILITY=logfire uv run myapp   # Logfire free tier
+OBSERVABILITY=console uv run myapp     # spans to the terminal
+# or export to a backend you run:
+OBSERVABILITY=otlp OTLP_ENDPOINT=http://127.0.0.1:6006/v1/traces uv run myapp
 ```
+
+Point OTLP at **Arize Phoenix** (`:6006`), **Jaeger**, **Grafana Tempo**,
+**Langfuse**, or an OpenTelemetry Collector. Requires `agentkit[observability]`.
+
+### Structured logging
+
+```python
+from agentkit import setup_logging, request_context, get_logger
+
+setup_logging(settings)                     # JSON when settings.log_json
+with request_context() as rid:              # correlation id for the turn
+    get_logger("turn").info("handling %s", text)
+```
+
+Secrets and monetary amounts are redacted from all log output.
+
+## Production features
+
+| Area | API |
+| --- | --- |
+| **Logging** | `setup_logging`, `request_context`, `get_logger` (redaction built in) |
+| **Token accounting** | automatic per-turn recording in `ChatRunner` → `repos.usage.totals()` |
+| **Audit log** | `repos.audit.append(action, target=…, detail=…)` + `verify()` (hash chain) |
+| **Tool RBAC / approval policy** | `ToolPolicy(allow=…, deny=…, require_approval=…)` |
+| **Guardrails** | `scan_injection`, `wrap_untrusted`, `redact`, `check_egress` |
+| **Error taxonomy** | `InvalidInput`, `NotFound`, `Conflict`, `PermissionDenied`, `DependencyMissing`, `RateLimited`, `UpstreamError` |
+| **Health** | `health_routes([db_check(runtime)])` → `/healthz` + `/readyz`; `install_signal_handlers` |
+| **Dead letters** | `durability.failed_workflows(queue=…)` |
+| **Queues** | `durability.init(queues={"work": {"worker_concurrency": 4}})` |
 
 ## Design notes
 

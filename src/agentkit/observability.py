@@ -1,8 +1,21 @@
-"""Optional observability via Logfire / OpenTelemetry.
+"""Observability via OpenTelemetry — self-hosted, **no account required**.
 
-Modes (``OBSERVABILITY``): ``off`` | ``console`` (local, free) | ``otlp`` (any
-OpenTelemetry backend) | ``logfire`` (cloud free tier). Requires the optional
-``observability`` extra; otherwise a no-op.
+PydanticAI has no native instrumenter; its spans are produced through the
+``logfire`` *library* (a dependency of PydanticAI) used purely as the
+instrumenter. We always run it in **local mode** (``send_to_logfire=False``):
+spans are never sent to logfire.dev or any hosted account. Export goes to your
+own OpenTelemetry backend via the OTLP exporter.
+
+Modes (``OBSERVABILITY``):
+
+* ``off``     — disabled (default).
+* ``console`` — print spans to the terminal (local, free).
+* ``otlp``    — export over OTLP to a backend you run: **Arize Phoenix**
+  (``http://127.0.0.1:6006/v1/traces``), **Jaeger**, **Grafana Tempo**,
+  **Langfuse**, or an OpenTelemetry Collector. Set ``OTLP_ENDPOINT`` or
+  ``OTEL_EXPORTER_OTLP_ENDPOINT``.
+
+Requires the optional ``observability`` extra (OpenTelemetry OTLP HTTP exporter).
 """
 
 from __future__ import annotations
@@ -12,24 +25,16 @@ import os
 from agentkit.config import AgentSettings, get_settings
 
 
-def setup_logfire(settings: AgentSettings | None = None) -> bool:
+def setup_observability(settings: AgentSettings | None = None) -> bool:
+    """Configure local span export + instrument PydanticAI. True if enabled."""
     settings = settings or get_settings()
     mode = settings.observability.strip().lower() or "off"
-    token = settings.logfire_token or os.environ.get("LOGFIRE_TOKEN")
     if mode == "off":
-        if not token:
-            return False
-        mode = "logfire"
-    try:
-        import logfire
-    except ImportError:
         return False
     try:
-        if mode == "logfire":
-            if not token:
-                return False
-            logfire.configure(token=token)
-        elif mode == "console":
+        import logfire
+
+        if mode == "console":
             logfire.configure(send_to_logfire=False)
         elif mode == "otlp":
             logfire.configure(
@@ -52,3 +57,7 @@ def _otlp_processor(settings: AgentSettings):  # pragma: no cover - needs OTEL d
     endpoint = settings.otlp_endpoint or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
     exporter = OTLPSpanExporter(endpoint=endpoint) if endpoint else OTLPSpanExporter()
     return BatchSpanProcessor(exporter)
+
+
+# Backwards-compatible aliases.
+setup_logfire = setup_observability

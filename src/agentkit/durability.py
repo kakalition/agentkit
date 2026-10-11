@@ -14,7 +14,16 @@ from dbos import DBOS, DBOSConfig, SetWorkflowID
 
 from agentkit.config import AgentSettings, get_settings
 
-__all__ = ["DBOS", "SetWorkflowID", "init", "register_queue", "enqueue", "apply_schedules", "list_schedules"]
+__all__ = [
+    "DBOS",
+    "SetWorkflowID",
+    "init",
+    "register_queue",
+    "enqueue",
+    "apply_schedules",
+    "list_schedules",
+    "failed_workflows",
+]
 
 _lock = threading.Lock()
 _initialized = False
@@ -30,9 +39,13 @@ def init(
     settings: AgentSettings | None = None,
     *,
     launch: bool = True,
-    queues: list[str] | None = None,
+    queues: list[str] | dict[str, dict[str, Any]] | None = None,
 ) -> type[DBOS]:
-    """Configure and launch DBOS once per process, registering queues once."""
+    """Configure and launch DBOS once per process, registering queues once.
+
+    ``queues`` may be a list of names or a mapping of ``name -> options``
+    (``worker_concurrency``, ``concurrency``, ``limiter``, ``polling_interval_sec``…).
+    """
     global _initialized, _launched
     settings = settings or get_settings()
     settings.ensure_dirs()
@@ -43,11 +56,32 @@ def init(
         if launch and not _launched:
             DBOS.launch()
             _launched = True
-        for queue in queues or []:
-            if queue not in _queues:
-                DBOS.register_queue(queue)
-                _queues.add(queue)
+        items = queues.items() if isinstance(queues, dict) else [(q, {}) for q in (queues or [])]
+        for name, options in items:
+            if name not in _queues:
+                DBOS.register_queue(name, **options)
+                _queues.add(name)
     return DBOS
+
+
+def failed_workflows(*, queue: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    """Recently failed workflows (a dead-letter view)."""
+    workflows = DBOS.list_workflows(
+        status=["ERROR", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"],
+        queue_name=queue,
+        limit=limit,
+        sort_desc=True,
+    )
+    return [
+        {
+            "id": w.workflow_id,
+            "name": w.name,
+            "status": w.status,
+            "queue": w.queue_name,
+            "error": w.error,
+        }
+        for w in workflows
+    ]
 
 
 def register_queue(name: str, **kwargs: Any) -> Any:

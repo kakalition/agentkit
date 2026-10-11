@@ -19,10 +19,32 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Sync
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra observability
       - name: Lint
         run: uv run ruff check src tests
       - name: Types
         run: uv run mypy src/agentkit
-      - name: Tests
-        run: uv run pytest -q
+      - name: Tests + coverage
+        run: uv run pytest --cov=agentkit --cov-report=term-missing --cov-fail-under=70
+      - name: Build
+        run: uv build
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Sync
+        run: uv sync --extra dev
+      - name: Bandit (SAST)
+        run: uv run bandit -q -r src/agentkit
+      - name: pip-audit (dependency CVEs)
+        run: uv run pip-audit --skip-editable
+      - name: SBOM
+        run: uv run cyclonedx-py environment --output-file sbom.json || true
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json

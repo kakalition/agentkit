@@ -64,6 +64,7 @@ class ChatResult:
     output: str
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     history_length: int = 0
+    usage: dict[str, int] | None = None
 
 
 class ChatRunner:
@@ -100,11 +101,37 @@ class ChatRunner:
         all_messages = result.all_messages()
         save_new_messages(repos, self.conversation_id, all_messages, start_index=len(history))
         repos.conversations.touch(self.conversation_id)
+
+        usage = self._record_usage(repos, result)
         return ChatResult(
             output=result.output if isinstance(result.output, str) else str(result.output),
             artifacts=list(self.deps.artifacts),
             history_length=len(all_messages),
+            usage=usage,
         )
+
+    def _record_usage(self, repos: Any, result: Any) -> dict[str, int] | None:
+        """Record token usage (counts only) if the repos expose a usage store."""
+        store = getattr(repos, "usage", None)
+        if store is None:
+            return None
+        try:
+            run_usage = result.usage()
+        except Exception:  # pragma: no cover - defensive
+            return None
+        totals = {
+            "requests": int(getattr(run_usage, "requests", 0) or 0),
+            "input_tokens": int(getattr(run_usage, "request_tokens", 0) or 0),
+            "output_tokens": int(getattr(run_usage, "response_tokens", 0) or 0),
+            "total_tokens": int(getattr(run_usage, "total_tokens", 0) or 0),
+        }
+        store.add(
+            conversation_id=self.conversation_id,
+            kind="turn",
+            model=self.deps.settings.model_name if self.deps.settings else "",
+            **totals,
+        )
+        return totals
 
     def reset(self) -> None:
         self.deps.repos.messages.clear(self.conversation_id)

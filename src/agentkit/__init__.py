@@ -20,9 +20,32 @@ from agentkit.config import (
     usage_limits,
 )
 from agentkit.deps import ApprovalCallback, ApprovalRequest, Deps
-from agentkit.guardrails import is_loopback, warn_if_exposed
-from agentkit.observability import setup_logfire
+from agentkit.errors import (
+    AgentKitError,
+    ConfigurationError,
+    Conflict,
+    DependencyMissing,
+    InvalidInput,
+    NotFound,
+    PermissionDenied,
+    RateLimited,
+    UpstreamError,
+)
+from agentkit.guardrails import (
+    check_egress,
+    is_loopback,
+    is_suspicious,
+    redact,
+    scan_injection,
+    warn_if_exposed,
+    wrap_untrusted,
+)
+from agentkit.health import Check, db_check, health_routes, install_signal_handlers
+from agentkit.logging import get_logger, request_context, setup_logging
+from agentkit.logging import redact as redact_text
+from agentkit.observability import setup_logfire, setup_observability
 from agentkit.orchestrator import Orchestrator, delegate, make_delegate
+from agentkit.policy import ALLOW, APPROVE, DENY, ToolPolicy
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.session import ChatResult, ChatRunner, load_history, save_new_messages
 
@@ -59,8 +82,35 @@ __all__ = [
     "ChatResult",
     "load_history",
     "save_new_messages",
-    # cross-cutting
+    # cross-cutting: observability, logging, guardrails, policy, errors, health
+    "setup_observability",
     "setup_logfire",
+    "setup_logging",
+    "get_logger",
+    "redact_text",
+    "request_context",
     "is_loopback",
     "warn_if_exposed",
+    "is_suspicious",
+    "scan_injection",
+    "redact",
+    "wrap_untrusted",
+    "check_egress",
+    "ToolPolicy",
+    "ALLOW",
+    "APPROVE",
+    "DENY",
+    "AgentKitError",
+    "ConfigurationError",
+    "InvalidInput",
+    "NotFound",
+    "Conflict",
+    "PermissionDenied",
+    "RateLimited",
+    "DependencyMissing",
+    "UpstreamError",
+    "Check",
+    "db_check",
+    "health_routes",
+    "install_signal_handlers",
 ]

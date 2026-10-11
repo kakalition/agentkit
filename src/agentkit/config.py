@@ -48,10 +48,10 @@ class AgentSettings(BaseSettings):
     libsql_auth_token: str | None = None
 
     # observability
-    observability: str = "off"
-    logfire_token: str | None = None
+    observability: str = "off"  # off | console | otlp (self-hosted, no account)
     otlp_endpoint: str | None = None
     log_level: str = "INFO"
+    log_json: bool = False
 
     # channels / protocols
     telegram_bot_token: str | None = None

@@ -55,6 +55,40 @@ class ScheduledJob(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
+class UsageRecord(SQLModel, table=True):
+    """Token accounting per run (counts only — no cost)."""
+
+    __tablename__ = "usage_records"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    conversation_id: str | None = None
+    kind: str = "turn"  # turn | job
+    model: str = ""
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class AuditEntry(SQLModel, table=True):
+    """Append-only, hash-chained audit log of material actions."""
+
+    __tablename__ = "audit_log"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    seq: int = 0
+    action: str
+    target: str = ""
+    detail: str = "{}"
+    actor: str = ""
+    prev_hash: str = ""
+    entry_hash: str = ""
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
 class A2ATaskRecord(SQLModel, table=True):
     """Durable A2A task store (protobuf JSON payloads)."""
 

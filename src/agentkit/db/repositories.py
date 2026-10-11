@@ -6,13 +6,22 @@ All access is owner-scoped.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import func
 from sqlmodel import Session, select
 
-from agentkit.db.models import A2ATaskRecord, Conversation, Message, ScheduledJob
+from agentkit.db.models import (
+    A2ATaskRecord,
+    AuditEntry,
+    Conversation,
+    Message,
+    ScheduledJob,
+    UsageRecord,
+)
 
 
 class ConversationRepo:
@@ -174,6 +183,119 @@ class ScheduledJobRepo:
         self.session.flush()
 
 
+class UsageRepo:
+    """Token accounting (counts only)."""
+
+    def __init__(self, session: Session, owner_id: str) -> None:
+        self.session = session
+        self.owner_id = owner_id
+
+    def add(
+        self,
+        *,
+        conversation_id: str | None = None,
+        kind: str = "turn",
+        model: str = "",
+        requests: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        total_tokens: int = 0,
+    ) -> UsageRecord:
+        record = UsageRecord(
+            owner_id=self.owner_id,
+            conversation_id=conversation_id,
+            kind=kind,
+            model=model,
+            requests=requests,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+        )
+        self.session.add(record)
+        self.session.flush()
+        return record
+
+    def totals(self, *, since: datetime | None = None) -> dict[str, int]:
+        stmt = select(
+            func.coalesce(func.sum(UsageRecord.requests), 0),
+            func.coalesce(func.sum(UsageRecord.input_tokens), 0),
+            func.coalesce(func.sum(UsageRecord.output_tokens), 0),
+            func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+        ).where(UsageRecord.owner_id == self.owner_id)
+        if since is not None:
+            stmt = stmt.where(UsageRecord.created_at >= since)
+        requests, input_tokens, output_tokens, total_tokens = self.session.exec(stmt).one()
+        return {
+            "requests": int(requests),
+            "input_tokens": int(input_tokens),
+            "output_tokens": int(output_tokens),
+            "total_tokens": int(total_tokens),
+        }
+
+
+class AuditRepo:
+    """Append-only, hash-chained audit log (tamper-evident)."""
+
+    def __init__(self, session: Session, owner_id: str) -> None:
+        self.session = session
+        self.owner_id = owner_id
+
+    @staticmethod
+    def _hash(seq: int, action: str, target: str, detail: dict, actor: str, prev: str) -> str:
+        payload = json.dumps(
+            {"seq": seq, "action": action, "target": target, "detail": detail, "actor": actor, "prev": prev},
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def append(
+        self, action: str, *, target: str = "", detail: dict | None = None, actor: str = ""
+    ) -> AuditEntry:
+        last = self.session.exec(
+            select(AuditEntry)
+            .where(AuditEntry.owner_id == self.owner_id)
+            .order_by(AuditEntry.seq.desc())
+        ).first()
+        seq = last.seq + 1 if last else 0
+        prev = last.entry_hash if last else ""
+        entry_hash = self._hash(seq, action, target, detail or {}, actor, prev)
+        entry = AuditEntry(
+            owner_id=self.owner_id,
+            seq=seq,
+            action=action,
+            target=target,
+            detail=json.dumps(detail or {}, sort_keys=True),
+            actor=actor,
+            prev_hash=prev,
+            entry_hash=entry_hash,
+        )
+        self.session.add(entry)
+        self.session.flush()
+        return entry
+
+    def entries(self, limit: int | None = None) -> list[AuditEntry]:
+        stmt = (
+            select(AuditEntry)
+            .where(AuditEntry.owner_id == self.owner_id)
+            .order_by(AuditEntry.seq)
+        )
+        rows = list(self.session.exec(stmt).all())
+        if limit is not None and len(rows) > limit:
+            rows = rows[-limit:]
+        return rows
+
+    def verify(self) -> bool:
+        prev = ""
+        for entry in self.entries():
+            expected = self._hash(
+                entry.seq, entry.action, entry.target, json.loads(entry.detail or "{}"), entry.actor, prev
+            )
+            if entry.prev_hash != prev or entry.entry_hash != expected:
+                return False
+            prev = entry.entry_hash
+        return True
+
+
 @dataclass
 class Repositories:
     """Base container. Domain apps add their own repos (e.g. ``self.transactions``)."""
@@ -186,3 +308,5 @@ class Repositories:
         self.messages = MessageRepo(self.session, self.owner_id)
         self.a2a = A2ATaskRepo(self.session, self.owner_id)
         self.schedules = ScheduledJobRepo(self.session, self.owner_id)
+        self.usage = UsageRepo(self.session, self.owner_id)
+        self.audit = AuditRepo(self.session, self.owner_id)
