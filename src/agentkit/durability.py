@@ -10,20 +10,40 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from dbos import DBOS, DBOSConfig, SetWorkflowID
+from dbos import DBOS, DBOSClient, DBOSConfig, SetWorkflowID
 
 from agentkit.config import AgentSettings, get_settings
 
 __all__ = [
     "DBOS",
+    "DBOSClient",
     "SetWorkflowID",
+    "workflow",
+    "step",
     "init",
     "register_queue",
     "enqueue",
     "apply_schedules",
     "list_schedules",
     "failed_workflows",
+    # durable primitives
+    "sleep",
+    "send",
+    "recv",
+    "set_event",
+    "get_event",
+    # workflow management
+    "list_workflows",
+    "get_workflow",
+    "cancel_workflow",
+    "resume_workflow",
+    "fork_workflow",
+    "client",
 ]
+
+# Decorators (re-exported so apps use DBOS through agentkit).
+workflow = DBOS.workflow
+step = DBOS.step
 
 _lock = threading.Lock()
 _initialized = False
@@ -62,6 +82,68 @@ def init(
                 DBOS.register_queue(name, **options)
                 _queues.add(name)
     return DBOS
+
+
+# --------------------------------------------------------------------------
+# Durable primitives (thin pass-throughs to DBOS)
+# --------------------------------------------------------------------------
+
+
+def sleep(seconds: float) -> None:
+    """Durable timer: survives restarts (used inside workflows)."""
+    DBOS.sleep(seconds)
+
+
+def send(destination_id: str, message: Any, topic: str | None = None) -> None:
+    """Send a durable message to a workflow."""
+    DBOS.send(destination_id, message, topic)
+
+
+def recv(topic: str | None = None, timeout_seconds: float = 60) -> Any:
+    """Receive a durable message (used inside workflows)."""
+    return DBOS.recv(topic, timeout_seconds)
+
+
+def set_event(key: str, value: Any) -> None:
+    """Publish a durable event on the current workflow."""
+    DBOS.set_event(key, value)
+
+
+def get_event(workflow_id: str, key: str, timeout_seconds: float = 60) -> Any:
+    """Wait for a durable event published by another workflow."""
+    return DBOS.get_event(workflow_id, key, timeout_seconds)
+
+
+# --------------------------------------------------------------------------
+# Workflow management
+# --------------------------------------------------------------------------
+
+
+def list_workflows(**kwargs: Any) -> list[Any]:
+    return DBOS.list_workflows(**kwargs)
+
+
+def get_workflow(workflow_id: str) -> Any:
+    return DBOS.retrieve_workflow(workflow_id).get_status()
+
+
+def cancel_workflow(workflow_id: str, *, cancel_children: bool = False) -> None:
+    DBOS.cancel_workflow(workflow_id, cancel_children=cancel_children)
+
+
+def resume_workflow(workflow_id: str, *, queue_name: str | None = None) -> Any:
+    return DBOS.resume_workflow(workflow_id, queue_name=queue_name)
+
+
+def fork_workflow(workflow_id: str, start_step: int, **kwargs: Any) -> Any:
+    return DBOS.fork_workflow(workflow_id, start_step, **kwargs)
+
+
+def client(settings: AgentSettings | None = None) -> DBOSClient:
+    """A standalone DBOS client (inspect/enqueue without launching a worker)."""
+    settings = settings or get_settings()
+    settings.ensure_dirs()
+    return DBOSClient(system_database_url=system_database_url(settings))
 
 
 def failed_workflows(*, queue: str | None = None, limit: int = 50) -> list[dict[str, Any]]:

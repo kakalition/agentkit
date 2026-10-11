@@ -50,8 +50,8 @@ class AgentSettings(BaseSettings):
     database_url: str | None = None
     libsql_auth_token: str | None = None
 
-    # observability — on by default (local console spans; self-hosted, no account)
-    observability: str = "console"  # off | console | otlp | phoenix
+    # observability — on by default with a local Phoenix UI (self-hosted, no account)
+    observability: str = "phoenix"  # phoenix | console | otlp | off
     otlp_endpoint: str | None = None
     log_level: str = "INFO"
     log_json: bool = False

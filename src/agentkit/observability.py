@@ -24,12 +24,15 @@ import os
 
 from agentkit.config import AgentSettings, get_settings
 
+_phoenix_started = False
+
 
 def setup_observability(settings: AgentSettings | None = None) -> bool:
     """Configure local span export + instrument PydanticAI. True if enabled.
 
-    ``OBSERVABILITY=phoenix`` launches a local Arize Phoenix UI (no account) and
-    sends spans to it — zero-config.
+    ``OBSERVABILITY=phoenix`` (the default) launches a local Arize Phoenix UI
+    (no account) and sends spans to it, falling back to console output if the
+    Phoenix package is not installed.
     """
     settings = settings or get_settings()
     mode = settings.observability.strip().lower() or "off"
@@ -47,12 +50,15 @@ def setup_observability(settings: AgentSettings | None = None) -> bool:
                 additional_span_processors=[_otlp_processor(settings)],
             )
         elif mode == "phoenix":
-            endpoint = start_phoenix(settings)
-            logfire.configure(
-                send_to_logfire=False,
-                console=False,
-                additional_span_processors=[_exporter_processor(endpoint)],
-            )
+            endpoint = _ensure_phoenix(settings)
+            if endpoint:
+                logfire.configure(
+                    send_to_logfire=False,
+                    console=False,
+                    additional_span_processors=[_exporter_processor(endpoint)],
+                )
+            else:  # Phoenix not installed -> still useful: console spans
+                logfire.configure(send_to_logfire=False)
         else:
             return False
         logfire.instrument_pydantic_ai()
@@ -62,6 +68,30 @@ def setup_observability(settings: AgentSettings | None = None) -> bool:
 
 
 PHOENIX_PORT = 6006
+
+
+def _phoenix_endpoint(settings: AgentSettings) -> str:
+    return f"http://127.0.0.1:{_phoenix_port()}/v1/traces"
+
+
+def _phoenix_port() -> int:
+    return int(os.environ.get("PHOENIX_PORT", PHOENIX_PORT))
+
+
+def _ensure_phoenix(settings: AgentSettings) -> str | None:
+    """Launch the local Phoenix UI once per process; ``None`` if unavailable."""
+    global _phoenix_started
+    try:
+        import phoenix  # noqa: F401
+    except ImportError:
+        return None
+    if not _phoenix_started:
+        try:
+            start_phoenix(settings)
+            _phoenix_started = True
+        except Exception:  # already running or failed to start
+            pass
+    return _phoenix_endpoint(settings)
 
 
 def start_phoenix(settings: AgentSettings | None = None, *, port: int | None = None) -> str:

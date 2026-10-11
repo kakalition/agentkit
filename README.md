@@ -104,6 +104,13 @@ durability.init(queues=["agentkit"])
 durability.enqueue("agentkit", nightly, ...)
 ```
 
+The full DBOS surface is available through `agentkit.durability`:
+`workflow`/`step`, **`sleep`** (durable timers), **`send`/`recv`** (durable
+messaging), **`set_event`/`get_event`** (pub/sub), queues, and workflow
+management — `list_workflows`, `get_workflow`, `cancel_workflow`,
+`resume_workflow`, `fork_workflow`, `failed_workflows` — plus `client()` for a
+standalone `DBOSClient` (inspect/enqueue without launching a worker).
+
 ## MCP
 
 **Client** — own N prefixed toolsets for the process lifetime:
@@ -182,7 +189,7 @@ are **denied by default** — safe for MCP/A2A where there is no interactive use
 | `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Per-run caps |
 | `AGENT_HOME` | `~/.local/share/agentkit` | DB + artifacts |
 | `DATABASE_URL` | local libSQL file | `sqlite+libsql://…` or other |
-| `OBSERVABILITY` | `console` | `console` \| `otlp` \| `phoenix` \| `off` |
+| `OBSERVABILITY` | `phoenix` | `phoenix` \| `console` \| `otlp` \| `off` |
 | `A2A_HOST` / `A2A_PORT` / `A2A_PUBLIC_URL` | `127.0.0.1` / `9000` | A2A |
 | `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8765` | MCP HTTP |
 
@@ -190,22 +197,20 @@ Subclass `AgentSettings` to add app fields (e.g. Artemis adds `price_source`).
 
 ## Observability (self-hosted, no account)
 
-**On by default** (`OBSERVABILITY=console`). Spans are exported through
-**OpenTelemetry** to a backend you run; nothing is sent to any hosted service.
-PydanticAI's instrumentation is activated via the `logfire` library in local mode
-(`send_to_logfire=False`) — no token, no account.
+**On by default** with a local **Arize Phoenix** UI (`OBSERVABILITY=phoenix`).
+Spans are exported through **OpenTelemetry** to a backend you run; nothing is
+sent to any hosted service. PydanticAI's instrumentation is activated via the
+`logfire` library in local mode (`send_to_logfire=False`) — no token, no account.
 
 ```bash
-OBSERVABILITY=console uv run myapp     # spans to the terminal
-OBSERVABILITY=phoenix uv run myapp     # launch a local Phoenix UI (zero config)
-# or point at any backend you run:
+uv add "agentkit[observability-phoenix]"   # to get the Phoenix UI
+OBSERVABILITY=phoenix uv run myapp         # default: launch Phoenix (localhost:6006)
+OBSERVABILITY=console uv run myapp         # spans to the terminal
 OBSERVABILITY=otlp OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces uv run myapp
 ```
 
-`phoenix` launches **Arize Phoenix** locally (`http://localhost:6006`) and sends
-spans to it — no account. `otlp` works with Phoenix, **Jaeger**, **Grafana
-Tempo**, **Langfuse**, or an OpenTelemetry Collector. Requires
-`agentkit[observability]` (and `agentkit[observability-phoenix]` for `phoenix`).
+If Phoenix isn't installed, `phoenix` mode falls back to console spans. `otlp`
+works with Phoenix, **Jaeger**, **Grafana Tempo**, **Langfuse**, or a collector.
 
 ### Structured logging
 
