@@ -104,12 +104,15 @@ durability.init(queues=["agentkit"])
 durability.enqueue("agentkit", nightly, ...)
 ```
 
-The full DBOS surface is available through `agentkit.durability`:
-`workflow`/`step`, **`sleep`** (durable timers), **`send`/`recv`** (durable
-messaging), **`set_event`/`get_event`** (pub/sub), queues, and workflow
-management — `list_workflows`, `get_workflow`, `cancel_workflow`,
-`resume_workflow`, `fork_workflow`, `failed_workflows` — plus `client()` for a
-standalone `DBOSClient` (inspect/enqueue without launching a worker).
+`agentkit.durability` exposes the DBOS pieces a lightweight PydanticAI app
+needs: `workflow`/`step`, **`sleep`** (durable timers), queues, schedules, and
+workflow management — `list_workflows`, `get_workflow`, `cancel_workflow`,
+`resume_workflow`, `failed_workflows` — plus `client()` for a standalone
+`DBOSClient` (inspect/manage workflows without launching a worker).
+
+Deliberately **not** wrapped: DBOS's workflow-context-only primitives
+(`send`/`recv`, `set_event`/`get_event`, `fork_workflow`) — they only make sense
+for multi-workflow choreography and add surface a single-agent app doesn't use.
 
 ## MCP
 

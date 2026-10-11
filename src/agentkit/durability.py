@@ -28,16 +28,11 @@ __all__ = [
     "failed_workflows",
     # durable primitives
     "sleep",
-    "send",
-    "recv",
-    "set_event",
-    "get_event",
     # workflow management
     "list_workflows",
     "get_workflow",
     "cancel_workflow",
     "resume_workflow",
-    "fork_workflow",
     "client",
 ]
 
@@ -94,26 +89,6 @@ def sleep(seconds: float) -> None:
     DBOS.sleep(seconds)
 
 
-def send(destination_id: str, message: Any, topic: str | None = None) -> None:
-    """Send a durable message to a workflow."""
-    DBOS.send(destination_id, message, topic)
-
-
-def recv(topic: str | None = None, timeout_seconds: float = 60) -> Any:
-    """Receive a durable message (used inside workflows)."""
-    return DBOS.recv(topic, timeout_seconds)
-
-
-def set_event(key: str, value: Any) -> None:
-    """Publish a durable event on the current workflow."""
-    DBOS.set_event(key, value)
-
-
-def get_event(workflow_id: str, key: str, timeout_seconds: float = 60) -> Any:
-    """Wait for a durable event published by another workflow."""
-    return DBOS.get_event(workflow_id, key, timeout_seconds)
-
-
 # --------------------------------------------------------------------------
 # Workflow management
 # --------------------------------------------------------------------------
@@ -133,10 +108,6 @@ def cancel_workflow(workflow_id: str, *, cancel_children: bool = False) -> None:
 
 def resume_workflow(workflow_id: str, *, queue_name: str | None = None) -> Any:
     return DBOS.resume_workflow(workflow_id, queue_name=queue_name)
-
-
-def fork_workflow(workflow_id: str, start_step: int, **kwargs: Any) -> Any:
-    return DBOS.fork_workflow(workflow_id, start_step, **kwargs)
 
 
 def client(settings: AgentSettings | None = None) -> DBOSClient:
