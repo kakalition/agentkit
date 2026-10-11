@@ -1,30 +1,52 @@
 # agentkit
 
-**Opinionated building blocks for PydanticAI assistant agents** — CLI + Telegram,
-MCP + A2A, durable execution, and a durable cron/one-off scheduler.
+**Composable building blocks for production PydanticAI assistant agents** —
+CLI + Telegram, MCP + A2A, durable execution, and a durable cron/one-off
+scheduler, on a single local process.
 
-`agentkit` packages the non-domain plumbing you keep rewriting for single-user
-assistant agents: model config with retries, an orchestrator that delegates to
-specialist agents, human-in-the-loop approvals, durable conversation history,
-durable background work, MCP/A2A interop, and channel gateways. You bring the
-domain (your repos, tools, prompts).
+`agentkit` packages the plumbing every single-user assistant agent needs, so you
+write the domain (your tools, prompts, data) and not the scaffolding: model
+config with retries, an orchestrator that delegates to specialists,
+human-in-the-loop approvals, durable conversation history, durable background
+work, MCP/A2A interop, safe defaults, and channel gateways.
 
 [![CI](https://github.com/kakalition/agentkit/actions/workflows/ci.yml/badge.svg)](https://github.com/kakalition/agentkit/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Coverage](https://img.shields.io/badge/coverage-76%25-brightgreen)
 
 ---
+
+## Table of contents
+
+- [Install](#install)
+- [60-second agent](#60-second-agent)
+- [Orchestrator + specialists](#orchestrator--specialists)
+- [Durable scheduling](#durable-scheduling-cron--one-off)
+- [Durability](#durability)
+- [MCP](#mcp)
+- [A2A](#a2a)
+- [Persona (`SOUL.md`)](#persona-soulmd)
+- [Run everything in one process](#run-everything-in-one-process)
+- [Observability](#observability-self-hosted-no-account)
+- [Production features](#production-features)
+- [Configuration](#configuration-agentsettings)
+- [Design notes](#design-notes)
+- [Development](#development)
+- [License](#license)
 
 ## Install
 
 ```bash
-uv add agentkit           # or: pip install agentkit
+uv add agentkit
+# optional extras
+uv add "agentkit[observability-phoenix]"   # local trace UI (default observability)
+uv add "agentkit[prices]"                  # yfinance
 ```
 
-Python 3.11–3.12. Optional extras: `agentkit[observability]` (Logfire/OTel),
-`agentkit[prices]` (yfinance).
+Python 3.11–3.12. No external services: state lives in local SQLite/libSQL.
 
-## 30-second agent
+## 60-second agent
 
 ```python
 import asyncio
@@ -36,7 +58,7 @@ notes = Agent(name="notes", deps_type=Deps, output_type=str,
 
 @notes.tool
 async def add_note(ctx, text: str) -> str:
-    """Save a note.""" 
+    """Save a note."""
     ctx.deps.extras.setdefault("notes", []).append(text)
     return f"saved: {text}"
 
@@ -60,34 +82,27 @@ orchestrator = (
 agent = orchestrator.agent
 ```
 
-## Durable scheduling (cron **and** one-off)
+## Durable scheduling (cron *and* one-off)
 
-Jobs are stored in the database and fired by a DBOS cron tick, with a
-deterministic workflow id so each run happens **exactly once** across restarts.
+Jobs live in the database and are fired by a DBOS cron tick with a deterministic
+workflow id, so each run happens **exactly once** across restarts.
 
 ```python
 from agentkit import scheduler
 
 @scheduler.task("digest")
-def send_digest(*, period: str = "last-month") -> None:
-    ...
+def send_digest(*, period: str = "last-month") -> None: ...
 
 scheduler.init_scheduler()                                   # once at startup
 scheduler.schedule_cron("weekly", "0 8 * * 1", "digest", args={"period": "last-month"})
 scheduler.schedule_once("reminder", "2026-11-01T09:00", "digest")
-
-scheduler.list_jobs()      # -> [{name, kind, schedule, task, args, enabled, run_count}, ...]
-scheduler.remove_job("reminder")
+scheduler.list_jobs(); scheduler.remove_job("reminder")
 ```
-
-Run a durable worker process (`scheduler.init_scheduler()` then keep the process
-alive) to execute the queue and the minute tick.
 
 ## Durability
 
 Long/background work runs on **DBOS Transact** on a local SQLite *system
-database* (`$AGENT_HOME/dbos.sqlite`) — no server, unlike Temporal. Wrap your own
-workflows/steps:
+database* (`$AGENT_HOME/dbos.sqlite`) — no server, unlike Temporal.
 
 ```python
 from agentkit import durability
@@ -97,26 +112,20 @@ from dbos import DBOS
 def fetch(...): ...
 
 @DBOS.workflow()
-def nightly(...):
-    ...
+def nightly(...): ...
 
 durability.init(queues=["agentkit"])
 durability.enqueue("agentkit", nightly, ...)
 ```
 
-`agentkit.durability` exposes the DBOS pieces a lightweight PydanticAI app
-needs: `workflow`/`step`, **`sleep`** (durable timers), queues, schedules, and
-workflow management — `list_workflows`, `get_workflow`, `cancel_workflow`,
-`resume_workflow`, `failed_workflows` — plus `client()` for a standalone
-`DBOSClient` (inspect/manage workflows without launching a worker).
-
-Deliberately **not** wrapped: DBOS's workflow-context-only primitives
-(`send`/`recv`, `set_event`/`get_event`, `fork_workflow`) — they only make sense
-for multi-workflow choreography and add surface a single-agent app doesn't use.
+`agentkit.durability` exposes the pieces a lightweight app needs:
+`workflow`/`step`, `sleep` (durable timers), queues, schedules, and workflow
+management (`list_workflows`, `get_workflow`, `cancel_workflow`,
+`resume_workflow`, `failed_workflows`) plus `client()` (a standalone
+`DBOSClient`). Workflow-context-only primitives (`send`/`recv`,
+`set_event`/`get_event`, `fork_workflow`) are intentionally not wrapped.
 
 ## MCP
-
-**Client** — own N prefixed toolsets for the process lifetime:
 
 ```python
 from agentkit.mcp import MCPRegistry, MCPServerSpec
@@ -126,17 +135,14 @@ registry = MCPRegistry([
     MCPServerSpec(name="pdf",   url="http://127.0.0.1:8000/mcp"),
 ], log_dir=home / "logs")
 
-async with registry:
+async with registry:                       # entered once, closed on shutdown
     result = await registry.call_tool("chart", "render_chart", {"spec": spec, "force": True})
-    schema = await registry.read_resource("chart", "charting://schema")
     await agent.run("...", toolsets=registry.toolsets())
 ```
 
-**Server** — `agentkit.mcp.serve_mcp(fastmcp_app, transport="streamable-http", host="127.0.0.1", port=8765)`.
+Serve an MCP server with `agentkit.mcp.serve_mcp(app, transport="streamable-http")`.
 
 ## A2A
-
-Task-based server with a durable store, plus an outbound client:
 
 ```python
 from agentkit.a2a import build_a2a_app, build_card, TaskAgentExecutor, SQLAlchemyTaskStore, A2AClient
@@ -149,71 +155,49 @@ app = build_a2a_app(
     task_store=SQLAlchemyTaskStore(runtime),
     healthz=lambda: True,
 )
-
-# outbound
 text = await A2AClient().call_agent("http://127.0.0.1:9000", "how much did I spend?")
 ```
 
-## Gateways
+## Persona (`SOUL.md`)
+
+The agent's identity/behaviour is a Markdown file, not code:
 
 ```python
-from agentkit.gateways import send_markdown, ApprovalBroker, is_allowed, build_cli, entrypoint
+from agentkit import load_soul, ensure_soul, compose_instructions
+
+ensure_soul()                                     # <AGENT_HOME>/SOUL.md if missing
+instructions = compose_instructions(load_soul(), "Route requests to specialists.")
 ```
 
-- `send_markdown` renders Markdown → Telegram entities (telegramify-markdown) and
-  falls back to plain text.
-- `ApprovalBroker` resolves approvals from inline buttons.
-- `build_cli()` + `entrypoint(app)` give you a Typer app with observability wired.
-
-## Approvals (human-in-the-loop)
+## Run everything in one process
 
 ```python
-from agentkit import Deps, ApprovalRequest, approval_capability
-from pydantic_ai import Agent
+from agentkit import Service, run_all
 
-agent = Agent(name="a", deps_type=Deps, output_type=str,
-              instructions="…", capabilities=[approval_capability])
-
-@agent.tool(requires_approval=True)
-async def delete_everything(ctx) -> str: ...
+run_all([
+    Service("a2a", lambda: serve_a2a(settings)),
+    Service("mcp", lambda: serve_mcp(settings)),
+    Service("bot", lambda: run_bot(settings)),
+])
 ```
 
-Wire `Deps.approve` (CLI prompt, Telegram buttons). With no approver, gated tools
-are **denied by default** — safe for MCP/A2A where there is no interactive user.
-
-## Configuration (`AgentSettings`)
-
-| Var | Default | Purpose |
-| --- | --- | --- |
-| `AGENT_NAME` / `OWNER_ID` / `OWNER_NAME` | `assistant` / `owner` / `Owner` | Identity |
-| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | – | Any OpenAI-compatible endpoint |
-| `MODEL_NAME` | `openai:gpt-4o-mini` | Model id |
-| `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Transport resilience |
-| `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Per-run caps |
-| `AGENT_HOME` | `~/.local/share/agentkit` | DB + artifacts |
-| `DATABASE_URL` | local libSQL file | `sqlite+libsql://…` or other |
-| `OBSERVABILITY` | `phoenix` | `phoenix` \| `console` \| `otlp` \| `off` |
-| `A2A_HOST` / `A2A_PORT` / `A2A_PUBLIC_URL` | `127.0.0.1` / `9000` | A2A |
-| `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8765` | MCP HTTP |
-
-Subclass `AgentSettings` to add app fields (e.g. Artemis adds `price_source`).
+Daemon threads; blocks until SIGINT/SIGTERM; a crashing service doesn't take
+down the others.
 
 ## Observability (self-hosted, no account)
 
 **On by default** with a local **Arize Phoenix** UI (`OBSERVABILITY=phoenix`).
-Spans are exported through **OpenTelemetry** to a backend you run; nothing is
-sent to any hosted service. PydanticAI's instrumentation is activated via the
-`logfire` library in local mode (`send_to_logfire=False`) — no token, no account.
+Spans go to a backend you run via OpenTelemetry; nothing is sent to any hosted
+service (PydanticAI is instrumented through `logfire` in local mode only).
 
 ```bash
-uv add "agentkit[observability-phoenix]"   # to get the Phoenix UI
-OBSERVABILITY=phoenix uv run myapp         # default: launch Phoenix (localhost:6006)
-OBSERVABILITY=console uv run myapp         # spans to the terminal
+OBSERVABILITY=phoenix uv run myapp         # default: Phoenix on localhost:6006
+OBSERVABILITY=console uv run myapp         # terminal spans
 OBSERVABILITY=otlp OTLP_ENDPOINT=http://127.0.0.1:4318/v1/traces uv run myapp
 ```
 
-If Phoenix isn't installed, `phoenix` mode falls back to console spans. `otlp`
-works with Phoenix, **Jaeger**, **Grafana Tempo**, **Langfuse**, or a collector.
+Falls back to console if Phoenix isn't installed. `otlp` works with Jaeger,
+Grafana Tempo, Langfuse, or a collector.
 
 ### Structured logging
 
@@ -227,42 +211,13 @@ with request_context() as rid:              # correlation id for the turn
 
 Secrets and monetary amounts are redacted from all log output.
 
-## Persona (`SOUL.md`)
-
-The agent's identity/behaviour is a Markdown file, not code:
-
-```python
-from agentkit import load_soul, ensure_soul, compose_instructions
-
-ensure_soul()                                     # writes <AGENT_HOME>/SOUL.md if missing
-instructions = compose_instructions(load_soul(), "Route requests to specialists.")
-```
-
-Set `SOUL_FILE` to point at a custom path; `compose_instructions` merges the
-persona with your routing/tool instructions.
-
-## Run the whole stack in one process
-
-```python
-from agentkit import Service, run_all
-
-run_all([
-    Service("a2a", lambda: serve_a2a(settings)),
-    Service("mcp", lambda: serve_mcp(settings)),
-    Service("bot", lambda: run_bot(settings)),
-])
-```
-
-Services run on daemon threads; `run_all` blocks until SIGINT/SIGTERM. A
-crashing service does not take down the others.
-
 ## Production features
 
 | Area | API |
 | --- | --- |
 | **Logging** | `setup_logging`, `request_context`, `get_logger` (redaction built in) |
-| **Token accounting** | automatic per-turn recording in `ChatRunner` → `repos.usage.totals()` |
-| **Audit log** | `repos.audit.append(action, target=…, detail=…)` + `verify()` (hash chain) |
+| **Token accounting** | automatic per-turn recording → `repos.usage.totals()` |
+| **Audit log** | `repos.audit.append(action, …)` + `verify()` (hash chain) |
 | **Tool RBAC / approval policy** | `ToolPolicy(allow=…, deny=…, require_approval=…)` |
 | **Guardrails** | `scan_injection`, `wrap_untrusted`, `redact`, `check_egress` |
 | **Error taxonomy** | `InvalidInput`, `NotFound`, `Conflict`, `PermissionDenied`, `DependencyMissing`, `RateLimited`, `UpstreamError` |
@@ -270,31 +225,50 @@ crashing service does not take down the others.
 | **Dead letters** | `durability.failed_workflows(queue=…)` |
 | **Queues** | `durability.init(queues={"work": {"worker_concurrency": 4}})` |
 
+## Configuration (`AgentSettings`)
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `AGENT_NAME` / `OWNER_ID` / `OWNER_NAME` | `assistant` / `owner` / `Owner` | Identity |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` | – | Any OpenAI-compatible endpoint |
+| `MODEL_NAME` | `openai:gpt-4o-mini` | Model id |
+| `MODEL_TIMEOUT` / `MODEL_RETRIES` | `60` / `2` | Transport resilience |
+| `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Per-run caps |
+| `AGENT_HOME` | `~/.local/share/agentkit` | DB + artifacts |
+| `DATABASE_URL` | local libSQL file | `sqlite+libsql://…` or other |
+| `SOUL_FILE` | `<AGENT_HOME>/SOUL.md` | Persona |
+| `OBSERVABILITY` | `phoenix` | `phoenix` \| `console` \| `otlp` \| `off` |
+| `LOG_LEVEL` / `LOG_JSON` | `INFO` / `false` | Logging |
+| `A2A_HOST` / `A2A_PORT` / `A2A_PUBLIC_URL` | `127.0.0.1` / `9000` | A2A |
+| `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8765` | MCP HTTP |
+
+Subclass `AgentSettings` to add app fields.
+
 ## Design notes
 
-- **Delegation, not `as_tool`.** v2 removed it; `Orchestrator` writes the tool.
+- **Delegation, not `as_tool`.** `Orchestrator` writes the delegation tool.
 - **One writer.** `repositories()` serializes DB access with a process lock;
-  local SQLite/libSQL tolerates a single writer. WAL + busy-timeout are set.
-- **Infra vs domain.** `agentkit.db.models` owns only `conversations`, `messages`,
-  `a2a_tasks`, `scheduled_jobs`. Domain tables belong to your app; subclass
-  `Repositories` and pass `repos_factory` to `build_runtime`.
-- **DBOS workflows must be module-level** — agentkit provides the infra + the
-  decorators; your app defines the workflows.
+  schema bootstrap uses the same lock. WAL + busy-timeout are set.
+- **Infra vs domain.** agentkit owns only `conversations`, `messages`,
+  `a2a_tasks`, `scheduled_jobs`, `usage_records`, `audit_log`. Domain tables
+  belong to your app; subclass `Repositories` and pass `repos_factory`.
+- **DBOS workflows must be module-level** — agentkit provides infra + decorators.
 - **Approvals default-deny** without an approver.
+- **Loopback by default**; servers warn when bound elsewhere.
 
 ## Development
 
 ```bash
-uv sync --extra dev
-uv run pytest            # 26 tests
+uv sync --extra dev --extra observability
+uv run pytest --cov=agentkit        # 49 tests, ≥70% gate
 uv run ruff check src tests
 uv run mypy src/agentkit
-uv build                 # sdist + wheel
+uv build
 ```
 
-Layout: `config`, `app`, `orchestrator`, `deps`, `approvals`, `session`,
-`runtime`, `durability`, `scheduler`, `observability`, `guardrails`, `db/`,
-`mcp/`, `a2a/`, `gateways/`.
+Layout: `config`, `app`, `orchestrator`, `deps`, `approvals`, `session`, `soul`,
+`runtime`, `durability`, `scheduler`, `supervise`, `observability`, `logging`,
+`guardrails`, `policy`, `errors`, `health`, `db/`, `mcp/`, `a2a/`, `gateways/`.
 
 ## License
 
