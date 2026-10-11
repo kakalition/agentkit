@@ -31,6 +31,10 @@ dependencies = [
 observability = ["opentelemetry-sdk>=1.27", "opentelemetry-exporter-otlp-proto-http>=1.27"]
 observability-phoenix = ["arize-phoenix>=8"]
 prices = ["yfinance>=0.2.50"]
+# semantic memory embeddings (CPU). `sentence-transformers` runs BAAI/bge-m3;
+# `fastembed` is a lighter ONNX alternative for smaller models.
+memory = ["sentence-transformers>=3.0"]
+memory-fastembed = ["fastembed>=0.4"]
 dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",

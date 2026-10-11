@@ -16,6 +16,7 @@ from agentkit.db.engine import DB_LOCK, create_db_engine, make_session_factory
 from agentkit.db.migrations import init_db
 from agentkit.db.repositories import Repositories
 from agentkit.deps import ApprovalCallback, Deps
+from agentkit.embeddings import build_embedder, configure
 
 
 @dataclass
@@ -36,6 +37,7 @@ def build_runtime(
     engine = create_db_engine(settings.resolved_database_url, auth_token=settings.libsql_auth_token)
     with DB_LOCK:
         init_db(engine)
+    configure(build_embedder(settings))
     return Runtime(
         settings=settings,
         engine=engine,

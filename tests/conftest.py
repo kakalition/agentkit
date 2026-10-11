@@ -12,7 +12,9 @@ from agentkit.runtime import Runtime, build_runtime, repositories
 
 @pytest.fixture
 def runtime(tmp_path) -> Runtime:
-    settings = AgentSettings(owner_id="owner", agent_home=tmp_path)
+    settings = AgentSettings(
+        owner_id="owner", agent_home=tmp_path, memory_embedding_backend="hash"
+    )
     return build_runtime(settings)
 
 

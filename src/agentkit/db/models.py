@@ -116,5 +116,6 @@ class Memory(SQLModel, table=True):
     owner_id: str = Field(index=True)
     kind: str = "fact"  # fact | preference | person | date
     content: str
+    embedding: str | None = Field(default=None)  # base64 float32 vector for semantic recall
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)

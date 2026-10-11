@@ -49,8 +49,16 @@ class AgentSettings(BaseSettings):
     soul_file: str | None = None  # path to SOUL.md (default: <agent_home>/SOUL.md)
 
     # memory — durable facts about the owner (name, preferences, …) the agent can
-    # save and recall across conversations.
+    # save and recall across conversations. Recall is semantic by default.
     memory_enabled: bool = True
+    memory_embedding_backend: str = (
+        "sentence-transformers"  # sentence-transformers | fastembed | hash | none
+    )
+    memory_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    memory_embedding_device: str = "cpu"
+    # optional prefixes for instruction-aware models (e.g. Qwen3/e5); empty for MiniLM
+    memory_embedding_query_prompt: str = ""
+    memory_embedding_document_prompt: str = ""
 
     # storage — agents live under ``workspace_root``; ``agent_home`` defaults to
     # ``workspace_root/<agent_name>`` and can be overridden with ``AGENT_HOME``.

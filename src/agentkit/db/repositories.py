@@ -10,6 +10,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func, or_
 from sqlmodel import Session, select
@@ -22,6 +23,14 @@ from agentkit.db.models import (
     Message,
     ScheduledJob,
     UsageRecord,
+)
+from agentkit.embeddings import (
+    cosine_similarity,
+    embed_documents,
+    embed_query,
+    get_default_embedder,
+    pack_vector,
+    unpack_vector,
 )
 
 
@@ -333,53 +342,75 @@ class AuditRepo:
 
 
 class MemoryRepo:
-    """Owner-scoped durable memories (free text the agent should not forget)."""
+    """Owner-scoped durable memories with semantic recall.
 
-    def __init__(self, session: Session, owner_id: str) -> None:
+    Each row stores a float32 embedding. ``search`` ranks by cosine similarity
+    (falling back to a keyword match when no embedder is configured or the query
+    cannot be embedded). Pass an explicit ``embedder`` to override the process
+    default; pass ``None`` to force keyword-only search.
+    """
+
+    _UNSET = object()
+
+    def __init__(self, session: Session, owner_id: str, embedder: Any = _UNSET) -> None:
         self.session = session
         self.owner_id = owner_id
+        self._embedder = embedder
+        self._embedder_resolved = embedder is not MemoryRepo._UNSET
+        self._embedder_failed = False
 
+    # -- embeddings -----------------------------------------------------
+    def _get_embedder(self) -> Any:
+        if not self._embedder_resolved:
+            self._embedder = get_default_embedder()
+            self._embedder_resolved = True
+        if self._embedder_failed:
+            return None
+        return self._embedder
+
+    def _embed_document(self, text: str) -> list[float] | None:
+        embedder = self._get_embedder()
+        if embedder is None:
+            return None
+        try:
+            vectors = embed_documents(embedder, [text])
+        except Exception:  # model missing, download failure, … → keyword fallback
+            self._embedder_failed = True
+            return None
+        return vectors[0] if vectors else None
+
+    def _embed_query(self, text: str) -> list[float] | None:
+        embedder = self._get_embedder()
+        if embedder is None:
+            return None
+        try:
+            return embed_query(embedder, text)
+        except Exception:  # model missing, download failure, … → keyword fallback
+            self._embedder_failed = True
+            return None
+
+    # -- writes ---------------------------------------------------------
     def add(self, content: str, *, kind: str = "fact") -> Memory:
-        memory = Memory(owner_id=self.owner_id, content=content.strip(), kind=kind)
+        content = content.strip()
+        vector = self._embed_document(content)
+        memory = Memory(
+            owner_id=self.owner_id,
+            content=content,
+            kind=kind,
+            embedding=pack_vector(vector) if vector else None,
+        )
         self.session.add(memory)
         self.session.flush()
         return memory
-
-    def get(self, memory_id: int) -> Memory | None:
-        memory = self.session.get(Memory, memory_id)
-        if memory is not None and memory.owner_id != self.owner_id:
-            return None
-        return memory
-
-    def list(self, limit: int | None = None) -> list[Memory]:
-        stmt = (
-            select(Memory)
-            .where(Memory.owner_id == self.owner_id)
-            .order_by(Memory.updated_at.desc(), Memory.id.desc())
-        )
-        rows = list(self.session.exec(stmt).all())
-        if limit is not None and len(rows) > limit:
-            rows = rows[:limit]
-        return rows
-
-    def search(self, query: str, *, limit: int = 5) -> list[Memory]:
-        text = f"%{query.strip()}%"
-        stmt = (
-            select(Memory)
-            .where(
-                Memory.owner_id == self.owner_id,
-                or_(Memory.content.ilike(text), Memory.kind.ilike(text)),
-            )
-            .order_by(Memory.updated_at.desc(), Memory.id.desc())
-            .limit(limit)
-        )
-        return list(self.session.exec(stmt).all())
 
     def update(self, memory_id: int, content: str) -> bool:
         memory = self.get(memory_id)
         if memory is None:
             return False
-        memory.content = content.strip()
+        content = content.strip()
+        vector = self._embed_document(content)
+        memory.content = content
+        memory.embedding = pack_vector(vector) if vector else None
         memory.updated_at = datetime.now(UTC)
         self.session.add(memory)
         self.session.flush()
@@ -399,6 +430,70 @@ class MemoryRepo:
             self.session.delete(memory)
         self.session.flush()
         return len(rows)
+
+    # -- reads ----------------------------------------------------------
+    def get(self, memory_id: int) -> Memory | None:
+        memory = self.session.get(Memory, memory_id)
+        if memory is not None and memory.owner_id != self.owner_id:
+            return None
+        return memory
+
+    def list(self, limit: int | None = None) -> list[Memory]:
+        stmt = (
+            select(Memory)
+            .where(Memory.owner_id == self.owner_id)
+            .order_by(Memory.updated_at.desc(), Memory.id.desc())
+        )
+        rows = list(self.session.exec(stmt).all())
+        if limit is not None and len(rows) > limit:
+            rows = rows[:limit]
+        return rows
+
+    def search(self, query: str, *, limit: int = 5) -> list[Memory]:
+        query = query.strip()
+        if not query:
+            return []
+        semantic = self._semantic_search(query, limit)
+        ordered = list(semantic)
+        seen = {memory.id for memory in semantic}
+        for memory in self._keyword_search(query, limit):
+            if memory.id not in seen:
+                ordered.append(memory)
+                seen.add(memory.id)
+        return ordered[:limit]
+
+    def _keyword_search(self, query: str, limit: int) -> list[Memory]:
+        text = f"%{query}%"
+        stmt = (
+            select(Memory)
+            .where(
+                Memory.owner_id == self.owner_id,
+                or_(Memory.content.ilike(text), Memory.kind.ilike(text)),
+            )
+            .order_by(Memory.updated_at.desc(), Memory.id.desc())
+            .limit(limit)
+        )
+        return list(self.session.exec(stmt).all())
+
+    def _semantic_search(self, query: str, limit: int) -> list[Memory]:
+        query_vector = self._embed_query(query)
+        if query_vector is None:
+            return []
+        stmt = select(Memory).where(
+            Memory.owner_id == self.owner_id, Memory.embedding.is_not(None)
+        )
+        scored: list[tuple[float, Memory]] = []
+        for memory in self.session.exec(stmt).all():
+            try:
+                vector = unpack_vector(memory.embedding)  # type: ignore[arg-type]
+            except Exception:
+                continue
+            if len(vector) != len(query_vector):
+                continue
+            scored.append((cosine_similarity(query_vector, vector), memory))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [memory for _, memory in scored[:limit]]
+
 
 
 @dataclass

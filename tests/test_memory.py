@@ -16,7 +16,9 @@ def test_memory_repo_crud(repos: Repositories):
 
     assert len(repos.memories.list()) == 2
     assert repos.memories.get(first.id) is not None
-    assert [m.content for m in repos.memories.search("ada")] == ["My name is Ada"]
+    assert first.embedding is not None
+    # Semantic ranking puts the lexically-closest memory first.
+    assert repos.memories.search("ada")[0].content == "My name is Ada"
 
     assert repos.memories.update(first.id, "My name is Ada Lovelace") is True
     assert repos.memories.search("lovelace")[0].content == "My name is Ada Lovelace"
@@ -25,6 +27,37 @@ def test_memory_repo_crud(repos: Repositories):
     assert repos.memories.forget(first.id) is False
     assert repos.memories.clear() == 1
     assert repos.memories.list() == []
+
+
+def test_memory_search_keyword_fallback(repos: Repositories):
+    repo = MemoryRepo(repos.session, "owner", embedder=None)
+    repo.add("My name is Ada")
+    repo.add("Prefers metric units")
+    assert repo.search("ada")[0].content == "My name is Ada"
+    assert repo.search("nomatch") == []
+
+
+def test_memory_search_uses_embeddings(repos: Repositories):
+    """A stub embedder proves ranking is by vector similarity, not keywords."""
+
+    class StubEmbedder:
+        def __init__(self) -> None:
+            self.vectors = {
+                "The user keeps a cat named Mochi": [1.0, 0.0, 0.0],
+                "The user commutes by train": [0.0, 1.0, 0.0],
+                "kitten": [0.9, 0.1, 0.0],
+                "train": [0.0, 1.0, 0.0],
+            }
+
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return [self.vectors[text] for text in texts]
+
+    repo = MemoryRepo(repos.session, "owner", embedder=StubEmbedder())
+    repo.add("The user keeps a cat named Mochi")
+    repo.add("The user commutes by train")
+    # "kitten" appears in neither memory as a keyword, yet ranks the cat first.
+    hits = repo.search("kitten")
+    assert hits[0].content == "The user keeps a cat named Mochi"
 
 
 def test_memory_digest(repos: Repositories):

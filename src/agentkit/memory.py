@@ -1,10 +1,12 @@
 """Durable per-owner memory: facts the agent should not forget between chats.
 
-Memories are plain rows in the same database as conversations (owner-scoped).
-:func:`attach_memory` gives a PydanticAI agent three tools — ``remember``,
-``recall`` and ``forget_memory`` — and a dynamic instructions block that lists
-what it already knows, so it can greet the user by name, keep their
-preferences, and stop asking the same thing twice.
+Memories are plain rows in the same database as conversations (owner-scoped),
+each with a CPU-computed embedding. :func:`attach_memory` gives a PydanticAI
+agent three tools — ``remember``, ``recall`` and ``forget_memory`` — and a
+dynamic instructions block that lists what it already knows, so it can greet the
+user by name, keep their preferences, and stop asking the same thing twice.
+Recall is semantic (cosine over embeddings); when no embedder is available it
+falls back to keyword matching. See :mod:`agentkit.embeddings`.
 """
 
 from __future__ import annotations
