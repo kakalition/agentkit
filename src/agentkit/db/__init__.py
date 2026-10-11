@@ -1,5 +1,11 @@
 from agentkit.db.engine import create_db_engine, make_session_factory, session_scope
-from agentkit.db.repositories import A2ATaskRepo, ConversationRepo, MessageRepo, Repositories
+from agentkit.db.repositories import (
+    A2ATaskRepo,
+    ConversationRepo,
+    MemoryRepo,
+    MessageRepo,
+    Repositories,
+)
 
 __all__ = [
     "create_db_engine",
@@ -9,4 +15,5 @@ __all__ = [
     "ConversationRepo",
     "MessageRepo",
     "A2ATaskRepo",
+    "MemoryRepo",
 ]

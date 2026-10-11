@@ -48,6 +48,10 @@ class AgentSettings(BaseSettings):
     # persona
     soul_file: str | None = None  # path to SOUL.md (default: <agent_home>/SOUL.md)
 
+    # memory — durable facts about the owner (name, preferences, …) the agent can
+    # save and recall across conversations.
+    memory_enabled: bool = True
+
     # storage — agents live under ``workspace_root``; ``agent_home`` defaults to
     # ``workspace_root/<agent_name>`` and can be overridden with ``AGENT_HOME``.
     workspace_root: Path = Field(

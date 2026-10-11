@@ -11,13 +11,14 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlmodel import Session, select
 
 from agentkit.db.models import (
     A2ATaskRecord,
     AuditEntry,
     Conversation,
+    Memory,
     Message,
     ScheduledJob,
     UsageRecord,
@@ -331,6 +332,75 @@ class AuditRepo:
         return True
 
 
+class MemoryRepo:
+    """Owner-scoped durable memories (free text the agent should not forget)."""
+
+    def __init__(self, session: Session, owner_id: str) -> None:
+        self.session = session
+        self.owner_id = owner_id
+
+    def add(self, content: str, *, kind: str = "fact") -> Memory:
+        memory = Memory(owner_id=self.owner_id, content=content.strip(), kind=kind)
+        self.session.add(memory)
+        self.session.flush()
+        return memory
+
+    def get(self, memory_id: int) -> Memory | None:
+        memory = self.session.get(Memory, memory_id)
+        if memory is not None and memory.owner_id != self.owner_id:
+            return None
+        return memory
+
+    def list(self, limit: int | None = None) -> list[Memory]:
+        stmt = (
+            select(Memory)
+            .where(Memory.owner_id == self.owner_id)
+            .order_by(Memory.updated_at.desc(), Memory.id.desc())
+        )
+        rows = list(self.session.exec(stmt).all())
+        if limit is not None and len(rows) > limit:
+            rows = rows[:limit]
+        return rows
+
+    def search(self, query: str, *, limit: int = 5) -> list[Memory]:
+        text = f"%{query.strip()}%"
+        stmt = (
+            select(Memory)
+            .where(
+                Memory.owner_id == self.owner_id,
+                or_(Memory.content.ilike(text), Memory.kind.ilike(text)),
+            )
+            .order_by(Memory.updated_at.desc(), Memory.id.desc())
+            .limit(limit)
+        )
+        return list(self.session.exec(stmt).all())
+
+    def update(self, memory_id: int, content: str) -> bool:
+        memory = self.get(memory_id)
+        if memory is None:
+            return False
+        memory.content = content.strip()
+        memory.updated_at = datetime.now(UTC)
+        self.session.add(memory)
+        self.session.flush()
+        return True
+
+    def forget(self, memory_id: int) -> bool:
+        memory = self.get(memory_id)
+        if memory is None:
+            return False
+        self.session.delete(memory)
+        self.session.flush()
+        return True
+
+    def clear(self) -> int:
+        rows = self.list()
+        for memory in rows:
+            self.session.delete(memory)
+        self.session.flush()
+        return len(rows)
+
+
 @dataclass
 class Repositories:
     """Base container. Domain apps add their own repos (e.g. ``self.transactions``)."""
@@ -345,3 +415,4 @@ class Repositories:
         self.schedules = ScheduledJobRepo(self.session, self.owner_id)
         self.usage = UsageRepo(self.session, self.owner_id)
         self.audit = AuditRepo(self.session, self.owner_id)
+        self.memories = MemoryRepo(self.session, self.owner_id)

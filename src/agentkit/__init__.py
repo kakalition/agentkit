@@ -43,6 +43,7 @@ from agentkit.guardrails import (
 from agentkit.health import Check, db_check, health_routes, install_signal_handlers
 from agentkit.logging import get_logger, request_context, setup_logging
 from agentkit.logging import redact as redact_text
+from agentkit.memory import attach_memory, memory_digest
 from agentkit.observability import setup_logfire, setup_observability, start_phoenix
 from agentkit.orchestrator import Orchestrator, delegate, make_delegate
 from agentkit.policy import ALLOW, APPROVE, DENY, ToolPolicy
@@ -115,6 +116,9 @@ __all__ = [
     "ChatResult",
     "load_history",
     "save_new_messages",
+    # memory
+    "attach_memory",
+    "memory_digest",
     # cross-cutting: observability, logging, guardrails, policy, errors, health
     "setup_observability",
     "setup_logfire",

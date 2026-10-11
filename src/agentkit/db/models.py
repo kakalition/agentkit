@@ -101,3 +101,20 @@ class A2ATaskRecord(SQLModel, table=True):
     payload: str = "{}"
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class Memory(SQLModel, table=True):
+    """A durable fact about the owner the agent should remember across chats.
+
+    Owner-scoped free text (name, preferences, important dates, …). Kept plain
+    so it can be shown in the system prompt and searched without extra infra.
+    """
+
+    __tablename__ = "memories"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    kind: str = "fact"  # fact | preference | person | date
+    content: str
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
