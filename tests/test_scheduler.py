@@ -71,3 +71,11 @@ def test_remove_job(sched):
 def test_invalid_cron_rejected(sched):
     with pytest.raises(ValueError):
         sched.schedule_cron("bad", "not a cron", "t")
+
+
+def test_tick_accepts_dbos_scheduled_signature():
+    import inspect
+
+    # DBOS invokes scheduled workflows as fn(scheduled_time, context).
+    params = list(inspect.signature(scheduler.tick).parameters)
+    assert len(params) >= 2
