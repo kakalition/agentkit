@@ -72,6 +72,12 @@ class AgentSettings(BaseSettings):
     # channels / protocols
     telegram_bot_token: str | None = None
     telegram_allowed_chat_ids: list[int] = Field(default_factory=list)
+    # turn UX — acknowledge the message with a reaction and keep an ever-changing
+    # status line alive while the model works (both toggleable).
+    telegram_seen_reaction: bool = True
+    telegram_live_status: bool = True
+    telegram_typing_action: bool = True
+    telegram_status_interval_s: float = 2.5
     a2a_public_url: str = "http://127.0.0.1:9000"
     a2a_card_name: str = "Agent"
     a2a_host: str = "127.0.0.1"

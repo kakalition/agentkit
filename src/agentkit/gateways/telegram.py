@@ -1,10 +1,12 @@
-"""Telegram helpers: Markdown rendering + inline approval broker."""
+"""Telegram helpers: Markdown rendering, turn UX + inline approval broker."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any
+import time
+from collections.abc import Awaitable, Callable, Sequence
+from typing import Any, TypeVar
 
 from aiogram import Bot
 from aiogram.types import (
@@ -21,21 +23,109 @@ from telegramify_markdown import Text as TGText
 from telegramify_markdown import telegramify
 
 from agentkit.deps import ApprovalRequest
+from agentkit.gateways.live_status import (
+    DEFAULT_STATUS_INTERVAL_S,
+    DEFAULT_TYPING_INTERVAL_S,
+    idle_phrase,
+    typing_keepalive,
+)
 
 MAX_MESSAGE_LEN = 4096
 MIN_FILE_LINES = 200
 APPROVAL_TIMEOUT = 300.0
 SEEN_REACTION = "👀"
 
+T = TypeVar("T")
+
 
 def is_allowed(allowed_chat_ids: list[int], chat_id: int) -> bool:
     return not allowed_chat_ids or chat_id in allowed_chat_ids
 
 
-async def react_seen(message: Message, emoji: str = SEEN_REACTION) -> None:
+async def react_seen(
+    message: Message, emoji: str = SEEN_REACTION, *, enabled: bool = True
+) -> None:
     """Acknowledge an incoming user message with an emoji reaction (best-effort)."""
+    if not enabled:
+        return
     with contextlib.suppress(Exception):
         await message.react([ReactionTypeEmoji(emoji=emoji)])
+
+
+async def run_turn(
+    factory: Callable[[], Awaitable[T]],
+    *,
+    bot: Bot,
+    chat_id: int,
+    live_status: bool = True,
+    typing: bool = True,
+    phrase_interval_s: float = DEFAULT_STATUS_INTERVAL_S,
+    typing_interval_s: float = DEFAULT_TYPING_INTERVAL_S,
+    phrases: Sequence[str] | None = None,
+) -> T:
+    """Run one chat turn with an ever-changing status bubble + typing indicator.
+
+    A placeholder message is posted and edited to a fresh phrase every
+    ``phrase_interval_s`` while ``factory`` runs, so the chat never looks idle.
+    The bubble is deleted once the turn returns (or raises). ``live_status`` and
+    ``typing`` toggle each behaviour; both are best-effort and never break the
+    turn.
+    """
+    stop = asyncio.Event()
+    tasks: list[asyncio.Task[None]] = []
+    status_message: Message | None = None
+    started = time.monotonic()
+
+    def _status_text(index: int) -> str:
+        elapsed = time.monotonic() - started
+        return f"{idle_phrase(index, phrases)} ({elapsed:.0f}s)"
+
+    async def _typing() -> None:
+        with contextlib.suppress(Exception):
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+
+    if typing:
+        await _typing()
+        tasks.append(
+            asyncio.create_task(
+                typing_keepalive(_typing, interval_s=typing_interval_s, stop=stop)
+            )
+        )
+
+    if live_status:
+        with contextlib.suppress(Exception):
+            status_message = await bot.send_message(chat_id, _status_text(0))
+        if status_message is not None:
+            message_id = status_message.message_id
+
+            async def _rotate() -> None:
+                index = 1
+                while not stop.is_set():
+                    try:
+                        await asyncio.wait_for(stop.wait(), timeout=phrase_interval_s)
+                        return
+                    except TimeoutError:
+                        pass
+                    with contextlib.suppress(Exception):
+                        await bot.edit_message_text(
+                            text=_status_text(index), chat_id=chat_id, message_id=message_id
+                        )
+                    index += 1
+
+            tasks.append(asyncio.create_task(_rotate()))
+
+    try:
+        return await factory()
+    finally:
+        stop.set()
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        if status_message is not None:
+            with contextlib.suppress(Exception):
+                await bot.delete_message(chat_id=chat_id, message_id=status_message.message_id)
 
 
 def _tg_entities(entities: list[Any]) -> list[MessageEntity] | None:
