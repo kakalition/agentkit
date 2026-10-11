@@ -33,7 +33,7 @@ def create_db_engine(
                 cursor.execute("PRAGMA busy_timeout=30000")
                 cursor.execute("PRAGMA synchronous=NORMAL")
                 cursor.close()
-            except Exception:  # pragma: no cover - best effort
+            except Exception:  # pragma: no cover - best effort  # nosec B110
                 pass
 
     return engine
