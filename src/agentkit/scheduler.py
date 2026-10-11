@@ -130,8 +130,12 @@ def run_job(task_name: str, args_json: str) -> Any:
 
 
 @DBOS.workflow()
-def tick() -> list[str]:
-    """Enqueues all jobs due at the current minute (exactly once per run key)."""
+def tick(scheduled_time: Any = None, context: Any = None) -> list[str]:
+    """Enqueues all jobs due at the current minute (exactly once per run key).
+
+    DBOS invokes scheduled workflows as ``fn(scheduled_time, context)``; the
+    arguments are unused here because due-ness is computed from the clock.
+    """
     due = _load_due_step(datetime.now(UTC).isoformat())
     fired: list[str] = []
     for item in due:

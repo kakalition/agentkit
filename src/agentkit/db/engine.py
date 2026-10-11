@@ -6,6 +6,7 @@ than fail with "database is locked".
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -13,6 +14,10 @@ from typing import Any
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Session
+
+# A single process-wide lock: local SQLite/libSQL tolerates one writer, and the
+# lock is shared by runtime.repositories() and schema bootstrap.
+DB_LOCK = threading.RLock()
 
 
 def create_db_engine(

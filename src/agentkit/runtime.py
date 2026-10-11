@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -13,7 +12,7 @@ from sqlalchemy import Engine
 from sqlmodel import Session
 
 from agentkit.config import AgentSettings, get_settings
-from agentkit.db.engine import create_db_engine, make_session_factory
+from agentkit.db.engine import DB_LOCK, create_db_engine, make_session_factory
 from agentkit.db.migrations import init_db
 from agentkit.db.repositories import Repositories
 from agentkit.deps import ApprovalCallback, Deps
@@ -35,7 +34,8 @@ def build_runtime(
     settings = settings or get_settings()
     settings.ensure_dirs()
     engine = create_db_engine(settings.resolved_database_url, auth_token=settings.libsql_auth_token)
-    init_db(engine)
+    with DB_LOCK:
+        init_db(engine)
     return Runtime(
         settings=settings,
         engine=engine,
@@ -44,13 +44,9 @@ def build_runtime(
     )
 
 
-# Local SQLite tolerates one writer; serialize access across threads.
-_db_lock = threading.RLock()
-
-
 @contextmanager
 def repositories(runtime: Runtime) -> Iterator[Repositories]:
-    with _db_lock:
+    with DB_LOCK:
         session: Session = runtime.session_factory()
         try:
             yield runtime.repos_factory(session, runtime.settings.owner_id)
