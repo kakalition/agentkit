@@ -182,7 +182,7 @@ are **denied by default** — safe for MCP/A2A where there is no interactive use
 | `USAGE_REQUEST_LIMIT` / `USAGE_TOTAL_TOKENS_LIMIT` | (unlimited) | Per-run caps |
 | `AGENT_HOME` | `~/.local/share/agentkit` | DB + artifacts |
 | `DATABASE_URL` | local libSQL file | `sqlite+libsql://…` or other |
-| `OBSERVABILITY` | `off` | `console` \| `otlp` \| `logfire` |
+| `OBSERVABILITY` | `console` | `console` \| `otlp` \| `phoenix` \| `off` |
 | `A2A_HOST` / `A2A_PORT` / `A2A_PUBLIC_URL` | `127.0.0.1` / `9000` | A2A |
 | `MCP_HOST` / `MCP_PORT` | `127.0.0.1` / `8765` | MCP HTTP |
 
@@ -190,9 +190,10 @@ Subclass `AgentSettings` to add app fields (e.g. Artemis adds `price_source`).
 
 ## Observability (self-hosted, no account)
 
-Spans are exported through **OpenTelemetry** to a backend you run; nothing is
-sent to any hosted service. PydanticAI's instrumentation is activated via the
-`logfire` library in local mode (`send_to_logfire=False`) — no token, no account.
+**On by default** (`OBSERVABILITY=console`). Spans are exported through
+**OpenTelemetry** to a backend you run; nothing is sent to any hosted service.
+PydanticAI's instrumentation is activated via the `logfire` library in local mode
+(`send_to_logfire=False`) — no token, no account.
 
 ```bash
 OBSERVABILITY=console uv run myapp     # spans to the terminal
