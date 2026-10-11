@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agentkit.gateways.telegram import ApprovalBroker, is_allowed, send_markdown
+from agentkit.gateways.telegram import ApprovalBroker, is_allowed, react_seen, send_markdown
 
 
 class FakeBot:
@@ -43,6 +43,20 @@ async def test_send_markdown_falls_back():
     await send_markdown(bot, 1, "**bold** reply")  # type: ignore[arg-type]
     assert bot._failed is True
     assert any("bold reply" in text for text, _ in bot.messages)
+
+
+async def test_react_seen_sets_eyes_reaction():
+    class FakeMessage:
+        def __init__(self) -> None:
+            self.reactions: list = []
+
+        async def react(self, reaction, **kwargs):  # noqa: ANN001
+            self.reactions = list(reaction)
+
+    message = FakeMessage()
+    await react_seen(message)  # type: ignore[arg-type]
+    assert len(message.reactions) == 1
+    assert message.reactions[0].emoji == "👀"
 
 
 async def test_approval_broker_resolve():

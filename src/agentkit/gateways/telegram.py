@@ -11,7 +11,9 @@ from aiogram.types import (
     BufferedInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    Message,
     MessageEntity,
+    ReactionTypeEmoji,
 )
 from telegramify_markdown import File as TGFile
 from telegramify_markdown import Photo as TGPhoto
@@ -23,10 +25,17 @@ from agentkit.deps import ApprovalRequest
 MAX_MESSAGE_LEN = 4096
 MIN_FILE_LINES = 200
 APPROVAL_TIMEOUT = 300.0
+SEEN_REACTION = "👀"
 
 
 def is_allowed(allowed_chat_ids: list[int], chat_id: int) -> bool:
     return not allowed_chat_ids or chat_id in allowed_chat_ids
+
+
+async def react_seen(message: Message, emoji: str = SEEN_REACTION) -> None:
+    """Acknowledge an incoming user message with an emoji reaction (best-effort)."""
+    with contextlib.suppress(Exception):
+        await message.react([ReactionTypeEmoji(emoji=emoji)])
 
 
 def _tg_entities(entities: list[Any]) -> list[MessageEntity] | None:
