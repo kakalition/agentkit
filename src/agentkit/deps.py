@@ -51,3 +51,8 @@ class Deps:
     @property
     def owner_id(self) -> str:
         return getattr(self.settings, "owner_id", "owner")
+
+    @property
+    def conversation_id(self) -> str:
+        """The conversation this turn belongs to (set by ``ChatRunner``)."""
+        return self.extras.get("conversation_id", "cli:default")

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 from typing import Any
 
 DEFAULT_BOOTSTRAP = "bootstrap:app"
@@ -27,12 +28,25 @@ class Command:
         raise NotImplementedError
 
 
+def _add_cwd_to_path() -> None:
+    """Make the current project importable, so ``bootstrap:app`` resolves.
+
+    Console scripts run with the script's directory on ``sys.path``, not the
+    working directory, so ``agentkit serve`` from a project root would otherwise
+    fail to import its own ``bootstrap.py``.
+    """
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+
+
 def load_bootstrap(target: str | None = None) -> Any:
     """Import and return the app named by ``target`` (``module:attr``)."""
     from agentkit.foundation.application import App
 
     reference = target or os.environ.get("AGENTKIT_BOOTSTRAP", DEFAULT_BOOTSTRAP)
     module_name, _, attr = reference.partition(":")
+    _add_cwd_to_path()
     module = importlib.import_module(module_name)
     obj = getattr(module, attr) if attr else module
     if isinstance(obj, App):

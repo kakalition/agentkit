@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import subprocess
 from pathlib import Path
 
 import typer
@@ -185,6 +186,37 @@ def schedule_list(
 # ---------------------------------------------------------------------------
 # Generators
 # ---------------------------------------------------------------------------
+
+
+@app.command("new")
+def new_project(
+    name: str = typer.Argument(..., help="Project name, e.g. my-agent."),
+    path: Path = typer.Option(
+        Path("."), "--path", help="Parent directory to create the project in."
+    ),
+    force: bool = typer.Option(False, "--force", help="Write into a non-empty directory."),
+    git: bool = typer.Option(True, "--git/--no-git", help="Initialise a git repository."),
+) -> None:
+    """Create a new agentkit project from the default skeleton."""
+    from agentkit.foundation.scaffold import scaffold_project
+
+    try:
+        target = scaffold_project(name, path, force=force)
+    except FileExistsError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+    if git:
+        with contextlib.suppress(Exception):
+            subprocess.run(["git", "init"], cwd=target, capture_output=True, check=False)
+            subprocess.run(["git", "add", "-A"], cwd=target, capture_output=True, check=False)
+
+    typer.echo(f"Created {target}")
+    typer.echo("Next steps:")
+    typer.echo(f"  cd {target}")
+    typer.echo("  cp .env.example .env   # then set OPENAI_API_KEY")
+    typer.echo("  uv sync                # or: pip install -e .")
+    typer.echo("  agentkit tinker        # chat with your agent")
 
 
 def _run_generate(kind: str, name: str, path: Path, force: bool) -> None:

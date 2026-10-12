@@ -27,8 +27,21 @@ All notable changes to this project are documented here. The format follows
   `about`, and `make:agent|provider|tool|channel|command|model` generators
   (overwrite-guarded); boot target from `AGENTKIT_BOOTSTRAP` (default
   `bootstrap:app`). `Command` base for provider-contributed commands.
+- **Project scaffold**: `agentkit new <name>` writes a bare, runnable skeleton
+  (App + provider + assistant agent + tool + skill + prompt + config section +
+  eval suite + test), the Laravel-style "new project" experience.
+  `scaffold_project(...)` is also available programmatically.
 - **Thin `Model` / `DB`**: `Model.where/create/get/update/delete/count/paginate`
   and `DB.session()/transaction()` over SQLModel, with ambient transactions.
+- **Laravel-style superclasses & primitives**: a generic `Repository` base
+  (`RepositoryQuery` + CRUD for free) with a declarative `Repositories`
+  `repositories` map; a fluent `Schedule` builder
+  (`app.schedule("t").every_minute()`); `Notification` + `Notifier` with
+  `log`/`conversation`/`telegram` channels and `app.notify(...)`; `Job` +
+  `app.dispatch(...)`; `Cache` and `Storage` facades (`CacheStore`, `Filesystem`);
+  `Rule`/`validate`; and `Listener`/`Middleware` base classes. `agentkit new`
+  now generates a Laravel-style flat `app/` package (models, repositories,
+  providers, tools) instead of a nested project package.
 - **Skills** (`agentkit.skills`): discoverable `SKILL.md` folders with YAML front
   matter (`Skill`, `SkillRegistry`, `load_skill_file`, `parse_front_matter`).
   `Agent.make(...).skills()` adds a compact index to the instructions and the

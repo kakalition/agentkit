@@ -15,9 +15,9 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
-Listener = Callable[["Event"], Any]
+ListenerFunc = Callable[["Event"], Any]
 
 
 @dataclass
@@ -46,16 +46,16 @@ class Dispatcher:
 
     def __init__(self, app: Any = None) -> None:
         self.app = app
-        self._listeners: dict[str, list[Listener]] = {}
+        self._listeners: dict[str, list[ListenerFunc]] = {}
 
-    def listen(self, event: str, listener: Listener) -> Listener:
+    def listen(self, event: str, listener: ListenerFunc) -> ListenerFunc:
         self._listeners.setdefault(event, []).append(listener)
         return listener
 
-    def on(self, event: str, listener: Listener) -> Listener:
+    def on(self, event: str, listener: ListenerFunc) -> ListenerFunc:
         return self.listen(event, listener)
 
-    def listeners(self, event: str) -> list[Listener]:
+    def listeners(self, event: str) -> list[ListenerFunc]:
         return [*self._listeners.get(event, []), *self._listeners.get("*", [])]
 
     def forget(self, event: str | None = None) -> None:
@@ -98,4 +98,27 @@ class Dispatcher:
         return results
 
 
-__all__ = ["Dispatcher", "Event", "Listener"]
+__all__ = ["Dispatcher", "Event", "Listener", "ListenerFunc"]
+
+
+class Listener:
+    """Base class for event listeners.
+
+    Subclass and set ``event`` (a name or names); register with ``app.on`` or the
+    provider helper. Instances are callable, so they work anywhere a listener does.
+    """
+
+    event: ClassVar[str | tuple[str, ...]] = ()
+
+    def handle(self, event: Event) -> Any:
+        raise NotImplementedError
+
+    def __call__(self, event: Event) -> Any:
+        return self.handle(event)
+
+    @classmethod
+    def events(cls) -> list[str]:
+        value = cls.event
+        if not value:
+            return []
+        return [value] if isinstance(value, str) else list(value)

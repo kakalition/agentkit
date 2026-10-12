@@ -78,6 +78,17 @@ dir per agent under `~/.agentkit/<agent_name>`.
 
 ### Quickstart
 
+Scaffold a project — a bare, sane skeleton you own and edit:
+
+```bash
+agentkit new my-agent && cd my-agent
+cp .env.example .env          # set OPENAI_API_KEY
+uv sync
+agentkit tinker               # chat with your agent
+```
+
+Or work in an existing project:
+
 ```bash
 agentkit workspace list                      # where agents live
 agentkit webui                               # operator console for the current agent
@@ -202,12 +213,19 @@ inside channels.
 | --- | --- |
 | Service container | `App` (`bind`/`singleton`/`make`) |
 | Service provider | `Provider` (`register`/`boot`) |
-| Facade | `Memory`, `Schedule`, `DB`, `Events`, `Log` |
-| Artisan | `agentkit` CLI (`make:*`, `serve`, `tinker`, `inspect`) |
-| Events & listeners | `app.on("turn.end", ...)` (`Dispatcher`) |
-| Middleware | `app.middleware(...)` (`Pipeline` over the turn) |
+| Facade | `Memory`, `Schedule`, `DB`, `Events`, `Log`, `Cache`, `Storage`, `Feedback` |
+| Artisan | `agentkit` CLI (`new`, `make:*`, `serve`, `tinker`, `inspect`) |
+| Events & listeners | `app.on("turn.end", ...)` + `Listener` |
+| Middleware | `app.middleware(...)` + `Middleware` over the turn |
 | `config/*.php` | `config/<name>.py` + `Section` (`defaults < file < env`) |
-| Eloquent model | `Model` (thin: `where`/`create`/`update`/`paginate`) |
+| Eloquent model | `Model` + `Repository` (`where`/`create`/`update`/`paginate` for free) |
+| Notifications | `Notification` + `app.notify(...)` (log/conversation/telegram) |
+| Jobs & queues | `Job` + `await app.dispatch(...)` (durable via DBOS) |
+| Scheduler | `app.schedule("task").every_minute()` |
+| Cache | `Cache` facade (`put`/`get`/`remember`) |
+| Filesystem | `Storage` facade |
+| Validation | `Rule` + `validate(...)` |
+| Services | `Service` base (from `agentkit.foundation.service`) |
 | `php artisan serve` | `agentkit serve` |
 
 ## Advanced primitives

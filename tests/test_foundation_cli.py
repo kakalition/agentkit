@@ -84,3 +84,21 @@ def test_cli_inspect_against_bootstrap(tmp_path: Path, monkeypatch):
     result = runner.invoke(cli_app, ["inspect", "--bootstrap", "inspect_bootstrap_mod:app"])
     assert result.exit_code == 0, result.stdout
     assert "inspected" in result.stdout
+
+
+def test_load_bootstrap_resolves_from_cwd(tmp_path: Path, monkeypatch):
+    """`agentkit serve` should import bootstrap.py from the project root."""
+    import sys
+
+    monkeypatch.delenv("AGENTKIT_BOOTSTRAP", raising=False)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "bootstrap.py").write_text(
+        "from agentkit import App\napp = App('from-cwd', discover=False)\n"
+    )
+    sys.modules.pop("bootstrap", None)
+    # Ensure cwd is not already importable before the call.
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p not in ("", str(tmp_path))])
+
+    loaded = load_bootstrap()
+    assert loaded.name == "from-cwd"
+    sys.modules.pop("bootstrap", None)

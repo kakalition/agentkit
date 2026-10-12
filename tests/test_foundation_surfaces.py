@@ -195,3 +195,32 @@ def test_load_bootstrap_on_module_object(tmp_path: Path, monkeypatch):
     monkeypatch.syspath_prepend(str(tmp_path))
     with pytest.raises(TypeError):
         load_bootstrap("module_obj")
+
+
+async def test_tools_see_conversation_id(runtime: Runtime):
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+    from pydantic_ai.models.function import AgentInfo, FunctionModel
+
+    from agentkit import Agent as _Agent
+
+    seen: list[str] = []
+
+    async def where(ctx: RunContext[Deps], value: str) -> str:
+        """Record the conversation id."""
+        seen.append(ctx.deps.conversation_id)
+        return value
+
+    def model_fn(messages, info: AgentInfo) -> ModelResponse:
+        if any(
+            isinstance(p, ToolReturnPart) for m in messages for p in getattr(m, "parts", [])
+        ):
+            return ModelResponse(parts=[TextPart("done")])
+        return ModelResponse(parts=[ToolCallPart("where", {"value": "x"})])
+
+    app = App(name="conv", settings=runtime.settings, discover=False, model=FunctionModel(model_fn))
+    app._runtime = runtime
+    app.agent(_Agent.make("conv").instructions("i").tool(where).output(str))
+    app.boot()
+
+    await app.run("go", conversation_id="cli:42")
+    assert seen == ["cli:42"]

@@ -27,14 +27,20 @@ from agentkit.foundation.container import Container
 from agentkit.foundation.events import Dispatcher
 from agentkit.foundation.facade import set_current_app
 from agentkit.foundation.facades import (
+    CacheService,
     DBService,
     EventsService,
     FeedbackService,
     LogService,
     MemoryService,
     ScheduleService,
+    StorageService,
 )
+from agentkit.foundation.jobs import CacheStore
+from agentkit.foundation.notifications import Notifier
 from agentkit.foundation.provider import Provider
+from agentkit.foundation.schedule import ScheduleBuilder
+from agentkit.foundation.storage import Filesystem
 from agentkit.logging import get_logger
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.session import ChatResult, ChatRunner
@@ -99,6 +105,9 @@ class App:
         self._model_resolver: Any = None
         self._clarify_handler: Any = None
         self._budget: Any = None
+        self._cache = CacheStore()
+        self._notifier = Notifier(self)
+        self._storage: Filesystem | None = None
 
         self.container.instance("app", self)
         self._bind_facades()
@@ -223,6 +232,19 @@ class App:
         self._schedules.extend(schedules)
         return self
 
+    def schedule(
+        self,
+        task: str,
+        *,
+        name: str | None = None,
+        args: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> ScheduleBuilder:
+        """Declare a durable schedule fluently (``.every_minute()``, ``.daily_at()``)."""
+        builder = ScheduleBuilder(task, name=name, args=args, enabled=enabled)
+        self._schedules.append(builder)
+        return builder
+
     def schedule_specs(self) -> list[Any]:
         return list(self._schedules)
 
@@ -245,7 +267,12 @@ class App:
                 log.exception("could not register schedule %r", spec)
 
     def _register_schedule(self, spec: Any) -> None:
-        fields = spec if isinstance(spec, dict) else _spec_fields(spec)
+        if hasattr(spec, "build"):
+            fields = spec.build()
+        elif isinstance(spec, dict):
+            fields = spec
+        else:
+            fields = _spec_fields(spec)
         name = fields["name"]
         task = fields["task"]
         args = fields.get("args")
@@ -374,6 +401,39 @@ class App:
     def db(self) -> Any:
         """The ``DB`` service (sessions/transactions/repositories) bound to this app."""
         return self.make("db")
+
+    @property
+    def cache(self) -> CacheStore:
+        """The in-process cache store (see the ``Cache`` facade)."""
+        return self._cache
+
+    @property
+    def storage(self) -> Filesystem:
+        """The agent's file store under ``<agent_home>/storage``."""
+        if self._storage is None:
+            self._storage = Filesystem(self.settings.home / "storage")
+        return self._storage
+
+    @property
+    def notifier(self) -> Notifier:
+        """The notifier; register channels with ``app.notifier.channel(name, sender)``."""
+        return self._notifier
+
+    def notify(self, notification: Any, *, to: Any = None, conversation_id: str | None = None) -> Any:
+        """Send a :class:`~agentkit.foundation.notifications.Notification`."""
+        return self._notifier.send(notification, to=to, conversation_id=conversation_id)
+
+    async def dispatch(self, job: Any, *, queue: str | None = None) -> Any:
+        """Run a :class:`~agentkit.foundation.jobs.Job`.
+
+        When durability is initialised the job runs as a durable, retryable
+        workflow; otherwise it runs inline.
+        """
+        from agentkit.foundation.jobs import Job
+
+        if not isinstance(job, Job):
+            raise TypeError("dispatch() expects a Job instance")
+        return await job.dispatch(self)
 
     # -- runtime / deps -------------------------------------------------
     @property
@@ -527,6 +587,8 @@ class App:
         self.container.instance("events", EventsService(self))
         self.container.instance("log", LogService(self))
         self.container.instance("feedback", FeedbackService(self))
+        self.container.instance("cache", CacheService(self))
+        self.container.instance("storage", StorageService(self))
 
 
 class ChannelSpec:

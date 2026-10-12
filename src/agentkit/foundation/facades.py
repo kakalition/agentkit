@@ -165,9 +165,9 @@ class FeedbackService:
         with session_scope(self.app) as repos:
             return repos.feedback.average(conversation_id=conversation_id)
 
-
 class LogService:
     """Backs the ``Log`` facade (structured logging with redaction)."""
+
     def __init__(self, app: Any) -> None:
         self.app = app
 
@@ -185,6 +185,67 @@ class LogService:
 
     def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
         get_logger("agentkit").debug(message, *args, **kwargs)
+
+
+class CacheService:
+    """Backs the ``Cache`` facade."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    @property
+    def store(self) -> Any:
+        return self.app.cache
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self.store.get(key, default)
+
+    def put(self, key: str, value: Any, ttl: float | None = None) -> Any:
+        return self.store.put(key, value, ttl)
+
+    def remember(self, key: str, factory: Any, ttl: float | None = None) -> Any:
+        return self.store.remember(key, factory, ttl)
+
+    def has(self, key: str) -> bool:
+        return self.store.has(key)
+
+    def forget(self, key: str) -> None:
+        self.store.forget(key)
+
+    def flush(self) -> None:
+        self.store.flush()
+
+
+class StorageService:
+    """Backs the ``Storage`` facade."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    @property
+    def store(self) -> Any:
+        return self.app.storage
+
+    def put(self, relative: Any, data: Any) -> str:
+        return self.store.put(relative, data)
+
+    def get(self, relative: Any) -> str:
+        return self.store.get(relative)
+
+    def get_bytes(self, relative: Any) -> bytes:
+        return self.store.get_bytes(relative)
+
+    def exists(self, relative: Any) -> bool:
+        return self.store.exists(relative)
+
+    def list(self, prefix: str = "") -> list[str]:
+        return self.store.list(prefix)
+
+    def delete(self, relative: Any) -> bool:
+        return self.store.delete(relative)
+
+    def metadata(self, relative: Any) -> dict[str, Any]:
+        return self.store.metadata(relative)
 
 
 class Memory(Facade):
@@ -223,7 +284,21 @@ class Feedback(Facade):
         return "feedback"
 
 
+class Cache(Facade):
+    @classmethod
+    def binding(cls) -> str:
+        return "cache"
+
+
+class Storage(Facade):
+    @classmethod
+    def binding(cls) -> str:
+        return "storage"
+
+
 __all__ = [
+    "Cache",
+    "CacheService",
     "DB",
     "DBService",
     "Events",
@@ -236,4 +311,6 @@ __all__ = [
     "MemoryService",
     "Schedule",
     "ScheduleService",
+    "Storage",
+    "StorageService",
 ]

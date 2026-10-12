@@ -19,15 +19,15 @@ import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-Middleware = Callable[[Any, Callable[[Any], Awaitable[Any]]], Any]
+MiddlewareFunc = Callable[[Any, Callable[[Any], Awaitable[Any]]], Any]
 Destination = Callable[[Any], Any]
 
 
 class Pipeline:
     """A reusable async middleware stack."""
 
-    def __init__(self, middlewares: list[Middleware] | None = None, *, passable: Any = None) -> None:
-        self._middlewares: list[Middleware] = list(middlewares or [])
+    def __init__(self, middlewares: list[MiddlewareFunc] | None = None, *, passable: Any = None) -> None:
+        self._middlewares: list[MiddlewareFunc] = list(middlewares or [])
         self._passable = passable
 
     def send(self, passable: Any) -> Pipeline:
@@ -35,7 +35,7 @@ class Pipeline:
         clone._passable = passable
         return clone
 
-    def through(self, *middlewares: Middleware) -> Pipeline:
+    def through(self, *middlewares: MiddlewareFunc) -> Pipeline:
         clone = self._clone()
         clone._middlewares.extend(middlewares)
         return clone
@@ -53,7 +53,7 @@ class Pipeline:
         return result
 
 
-def _wrap(middleware: Middleware, nxt: Destination) -> Destination:
+def _wrap(middleware: MiddlewareFunc, nxt: Destination) -> Destination:
     async def handler(passable: Any) -> Any:
         async def call_next(next_passable: Any = None) -> Any:
             result = nxt(passable if next_passable is None else next_passable)
@@ -69,9 +69,23 @@ def _wrap(middleware: Middleware, nxt: Destination) -> Destination:
     return handler
 
 
-async def run_pipeline(middlewares: list[Middleware], passable: Any, destination: Destination) -> Any:
+async def run_pipeline(middlewares: list[MiddlewareFunc], passable: Any, destination: Destination) -> Any:
     """Convenience: run ``middlewares`` once around ``destination(passable)``."""
     return await Pipeline(middlewares).send(passable).then(destination)
 
 
-__all__ = ["Middleware", "Pipeline", "run_pipeline"]
+__all__ = ["Middleware", "MiddlewareFunc", "Pipeline", "run_pipeline"]
+
+
+class Middleware:
+    """Base class for turn middleware.
+
+    Subclass and override :meth:`handle`; instances are callable, so they can be
+    passed to ``app.middleware(...)`` directly.
+    """
+
+    async def handle(self, turn: Any, call_next: Any) -> Any:
+        raise NotImplementedError
+
+    async def __call__(self, turn: Any, call_next: Any) -> Any:
+        return await self.handle(turn, call_next)

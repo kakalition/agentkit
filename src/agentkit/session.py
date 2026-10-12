@@ -142,6 +142,8 @@ class ChatRunner:
         self.conversation_id = conversation_id
         self.max_history = max_history
         self.history_processor = history_processor
+        # Make the conversation id available to tools (e.g. to deliver later).
+        self.deps.extras["conversation_id"] = conversation_id
 
     async def send(self, text: Any) -> ChatResult:
         repos, channel, history = await self._begin(text)

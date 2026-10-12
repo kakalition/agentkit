@@ -10,7 +10,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from sqlalchemy import func, or_
 from sqlmodel import Session, delete, select
@@ -730,7 +730,16 @@ class FeedbackRepo:
 
 @dataclass
 class Repositories:
-    """Base container. Domain apps add their own repos (e.g. ``self.transactions``)."""
+    """Base container. Domain apps add their own repos (e.g. ``self.transactions``).
+
+    Declare extra repositories with a class attribute — the base attaches them
+    automatically::
+
+        class AppRepositories(Repositories):
+            repositories = {"reminders": ReminderRepo}
+    """
+
+    repositories: ClassVar[dict[str, type]] = {}
 
     session: Session
     owner_id: str
@@ -745,3 +754,5 @@ class Repositories:
         self.memories = MemoryRepo(self.session, self.owner_id)
         self.knowledge = KnowledgeRepo(self.session, self.owner_id)
         self.feedback = FeedbackRepo(self.session, self.owner_id)
+        for attribute, repo_class in type(self).repositories.items():
+            setattr(self, attribute, repo_class(self.session, self.owner_id))
