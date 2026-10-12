@@ -62,3 +62,17 @@ class DependencyMissing(AgentKitError):
 class UpstreamError(AgentKitError):
     code = "upstream_error"
     http_status = 502
+
+
+class ContentBlocked(AgentKitError):
+    """Raised when moderation blocks input or output."""
+
+    code = "content_blocked"
+    http_status = 422
+
+
+class BudgetExceeded(AgentKitError):
+    """Raised when a token/cost/request budget is exhausted."""
+
+    code = "budget_exceeded"
+    http_status = 429

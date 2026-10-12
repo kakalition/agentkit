@@ -69,6 +69,7 @@ class UsageRecord(SQLModel, table=True):
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    cost_usd: float = 0.0  # estimated from pricing (see agentkit.pricing)
     created_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -119,3 +120,31 @@ class Memory(SQLModel, table=True):
     embedding: str | None = Field(default=None)  # base64 float32 vector for semantic recall
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class KnowledgeChunk(SQLModel, table=True):
+    """A chunk of indexed source material for retrieval-augmented generation."""
+
+    __tablename__ = "knowledge_chunks"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    source: str = Field(default="", index=True)  # file path / label
+    seq: int = 0  # chunk index within the source
+    content: str
+    embedding: str | None = Field(default=None)  # base64 float32 vector
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class Feedback(SQLModel, table=True):
+    """User feedback (👍/👎 or a rating) on a conversation/message."""
+
+    __tablename__ = "feedback"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    conversation_id: str = Field(default="", index=True)
+    message_id: int | None = Field(default=None)
+    rating: int = 0  # -1 / +1, or 1..5
+    comment: str = ""
+    created_at: datetime = Field(default_factory=_utcnow)

@@ -13,12 +13,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, or_
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from agentkit.db.models import (
     A2ATaskRecord,
     AuditEntry,
     Conversation,
+    Feedback,
+    KnowledgeChunk,
     Memory,
     Message,
     ScheduledJob,
@@ -68,6 +70,28 @@ class ConversationRepo:
         if limit is not None and len(rows) > limit:
             rows = rows[:limit]
         return rows
+
+    def fork(self, source: str, target: str, *, upto: int | None = None) -> int:
+        """Copy ``source``'s messages into a new conversation ``target``.
+
+        ``upto`` limits how many messages are copied (a branch point). Returns the
+        number of messages copied.
+        """
+        src = self.get_or_create(source)
+        self.get_or_create(target, channel=src.channel)
+        stmt = (
+            select(Message)
+            .where(Message.conversation_id == source)
+            .order_by(Message.seq, Message.id)
+        )
+        rows = list(self.session.exec(stmt).all())
+        if upto is not None:
+            rows = rows[:upto]
+        self.session.exec(delete(Message).where(Message.conversation_id == target))
+        for seq, row in enumerate(rows):
+            self.session.add(Message(conversation_id=target, seq=seq, payload=row.payload))
+        self.session.flush()
+        return len(rows)
 
 
 class MessageRepo:
@@ -234,6 +258,7 @@ class UsageRepo:
         input_tokens: int = 0,
         output_tokens: int = 0,
         total_tokens: int = 0,
+        cost_usd: float = 0.0,
     ) -> UsageRecord:
         record = UsageRecord(
             owner_id=self.owner_id,
@@ -244,6 +269,7 @@ class UsageRepo:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
+            cost_usd=cost_usd,
         )
         self.session.add(record)
         self.session.flush()
@@ -260,21 +286,25 @@ class UsageRepo:
             rows = rows[:limit]
         return rows
 
-    def totals(self, *, since: datetime | None = None) -> dict[str, int]:
-        stmt = select(
+    def totals(self, *, since: datetime | None = None) -> dict[str, int | float]:
+        columns = (
             func.coalesce(func.sum(UsageRecord.requests), 0),
             func.coalesce(func.sum(UsageRecord.input_tokens), 0),
             func.coalesce(func.sum(UsageRecord.output_tokens), 0),
             func.coalesce(func.sum(UsageRecord.total_tokens), 0),
-        ).where(UsageRecord.owner_id == self.owner_id)
+            func.coalesce(func.sum(UsageRecord.cost_usd), 0.0),
+        )
+        stmt: Any = select(*columns).where(UsageRecord.owner_id == self.owner_id)  # type: ignore[call-overload]
         if since is not None:
             stmt = stmt.where(UsageRecord.created_at >= since)
-        requests, input_tokens, output_tokens, total_tokens = self.session.exec(stmt).one()
+        row: Any = self.session.exec(stmt).one()
+        requests, input_tokens, output_tokens, total_tokens, cost_usd = row
         return {
             "requests": int(requests),
             "input_tokens": int(input_tokens),
             "output_tokens": int(output_tokens),
             "total_tokens": int(total_tokens),
+            "cost_usd": round(float(cost_usd), 6),
         }
 
 
@@ -326,7 +356,7 @@ class AuditRepo:
         )
         rows = list(self.session.exec(stmt).all())
         if limit is not None and len(rows) > limit:
-            rows = rows[-limit:]
+            rows = rows[:limit]
         return rows
 
     def verify(self) -> bool:
@@ -495,6 +525,208 @@ class MemoryRepo:
         return [memory for _, memory in scored[:limit]]
 
 
+class KnowledgeRepo:
+    """Owner-scoped indexed source chunks with semantic recall (RAG).
+
+    Each chunk stores a float32 embedding; ``search`` ranks by cosine similarity
+    and falls back to keyword matching when no embedder is configured.
+    """
+
+    _UNSET = object()
+
+    def __init__(self, session: Session, owner_id: str, embedder: Any = _UNSET) -> None:
+        self.session = session
+        self.owner_id = owner_id
+        self._embedder = embedder
+        self._embedder_resolved = embedder is not KnowledgeRepo._UNSET
+        self._embedder_failed = False
+
+    def _get_embedder(self) -> Any:
+        if not self._embedder_resolved:
+            self._embedder = get_default_embedder()
+            self._embedder_resolved = True
+        if self._embedder_failed:
+            return None
+        return self._embedder
+
+    def _embed_document(self, text: str) -> list[float] | None:
+        embedder = self._get_embedder()
+        if embedder is None:
+            return None
+        try:
+            vectors = embed_documents(embedder, [text])
+        except Exception:
+            self._embedder_failed = True
+            return None
+        return vectors[0] if vectors else None
+
+    def _embed_query(self, text: str) -> list[float] | None:
+        embedder = self._get_embedder()
+        if embedder is None:
+            return None
+        try:
+            return embed_query(embedder, text)
+        except Exception:
+            self._embedder_failed = True
+            return None
+
+    def add(self, source: str, contents: list[str]) -> int:
+        added = 0
+        for seq, content in enumerate(contents):
+            text = content.strip()
+            if not text:
+                continue
+            vector = self._embed_document(text)
+            self.session.add(
+                KnowledgeChunk(
+                    owner_id=self.owner_id,
+                    source=source,
+                    seq=seq,
+                    content=text,
+                    embedding=pack_vector(vector) if vector else None,
+                )
+            )
+            added += 1
+        self.session.flush()
+        return added
+
+    def replace(self, source: str, contents: list[str]) -> int:
+        self.clear(source)
+        return self.add(source, contents)
+
+    def clear(self, source: str | None = None) -> int:
+        rows = self.list(source) if source is not None else self.list()
+        for row in rows:
+            self.session.delete(row)
+        self.session.flush()
+        return len(rows)
+
+    def get(self, chunk_id: int) -> KnowledgeChunk | None:
+        chunk = self.session.get(KnowledgeChunk, chunk_id)
+        if chunk is not None and chunk.owner_id != self.owner_id:
+            return None
+        return chunk
+
+    def list(self, source: str | None = None, limit: int | None = None) -> list[KnowledgeChunk]:
+        stmt = select(KnowledgeChunk).where(KnowledgeChunk.owner_id == self.owner_id)
+        if source is not None:
+            stmt = stmt.where(KnowledgeChunk.source == source)
+        stmt = stmt.order_by(KnowledgeChunk.source, KnowledgeChunk.seq)
+        rows = list(self.session.exec(stmt).all())
+        if limit is not None and len(rows) > limit:
+            rows = rows[:limit]
+        return rows
+
+    def sources(self) -> list[str]:
+        stmt = (
+            select(KnowledgeChunk.source)
+            .where(KnowledgeChunk.owner_id == self.owner_id)
+            .distinct()
+            .order_by(KnowledgeChunk.source)
+        )
+        return [source for source in self.session.exec(stmt).all() if source]
+
+    def count(self, source: str | None = None) -> int:
+        stmt = select(func.count()).select_from(KnowledgeChunk).where(
+            KnowledgeChunk.owner_id == self.owner_id
+        )
+        if source is not None:
+            stmt = stmt.where(KnowledgeChunk.source == source)
+        return int(self.session.exec(stmt).one())
+
+    def search(self, query: str, *, limit: int = 5, source: str | None = None) -> list[KnowledgeChunk]:
+        query = (query or "").strip()
+        if not query:
+            return []
+        semantic = self._semantic_search(query, limit, source)
+        ordered = list(semantic)
+        seen = {row.id for row in semantic}
+        for row in self._keyword_search(query, limit, source):
+            if row.id not in seen:
+                ordered.append(row)
+                seen.add(row.id)
+        return ordered[:limit]
+
+    def _keyword_search(
+        self, query: str, limit: int, source: str | None
+    ) -> list[KnowledgeChunk]:
+        stmt = select(KnowledgeChunk).where(
+            KnowledgeChunk.owner_id == self.owner_id, KnowledgeChunk.content.ilike(f"%{query}%")
+        )
+        if source is not None:
+            stmt = stmt.where(KnowledgeChunk.source == source)
+        return list(self.session.exec(stmt.limit(limit)).all())
+
+    def _semantic_search(
+        self, query: str, limit: int, source: str | None
+    ) -> list[KnowledgeChunk]:
+        query_vector = self._embed_query(query)
+        if query_vector is None:
+            return []
+        stmt = select(KnowledgeChunk).where(
+            KnowledgeChunk.owner_id == self.owner_id, KnowledgeChunk.embedding.is_not(None)
+        )
+        if source is not None:
+            stmt = stmt.where(KnowledgeChunk.source == source)
+        scored: list[tuple[float, KnowledgeChunk]] = []
+        for chunk in self.session.exec(stmt).all():
+            try:
+                vector = unpack_vector(chunk.embedding)  # type: ignore[arg-type]
+            except Exception:
+                continue
+            if len(vector) != len(query_vector):
+                continue
+            scored.append((cosine_similarity(query_vector, vector), chunk))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [chunk for _, chunk in scored[:limit]]
+
+
+class FeedbackRepo:
+    """Owner-scoped user feedback (ratings / comments) on conversations."""
+
+    def __init__(self, session: Session, owner_id: str) -> None:
+        self.session = session
+        self.owner_id = owner_id
+
+    def add(
+        self,
+        *,
+        rating: int,
+        conversation_id: str = "",
+        message_id: int | None = None,
+        comment: str = "",
+    ) -> Feedback:
+        entry = Feedback(
+            owner_id=self.owner_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            rating=int(rating),
+            comment=comment,
+        )
+        self.session.add(entry)
+        self.session.flush()
+        return entry
+
+    def list(self, *, conversation_id: str | None = None, limit: int = 50) -> list[Feedback]:
+        stmt = select(Feedback).where(Feedback.owner_id == self.owner_id)
+        if conversation_id is not None:
+            stmt = stmt.where(Feedback.conversation_id == conversation_id)
+        stmt = stmt.order_by(Feedback.created_at.desc(), Feedback.id.desc()).limit(limit)
+        return list(self.session.exec(stmt).all())
+
+    def count(self, *, conversation_id: str | None = None) -> int:
+        stmt = select(func.count()).select_from(Feedback).where(Feedback.owner_id == self.owner_id)
+        if conversation_id is not None:
+            stmt = stmt.where(Feedback.conversation_id == conversation_id)
+        return int(self.session.exec(stmt).one())
+
+    def average(self, *, conversation_id: str | None = None) -> float | None:
+        stmt = select(func.avg(Feedback.rating)).where(Feedback.owner_id == self.owner_id)
+        if conversation_id is not None:
+            stmt = stmt.where(Feedback.conversation_id == conversation_id)
+        value = self.session.exec(stmt).one()
+        return round(float(value), 4) if value is not None else None
+
 
 @dataclass
 class Repositories:
@@ -511,3 +743,5 @@ class Repositories:
         self.usage = UsageRepo(self.session, self.owner_id)
         self.audit = AuditRepo(self.session, self.owner_id)
         self.memories = MemoryRepo(self.session, self.owner_id)
+        self.knowledge = KnowledgeRepo(self.session, self.owner_id)
+        self.feedback = FeedbackRepo(self.session, self.owner_id)

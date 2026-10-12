@@ -37,12 +37,17 @@ def run_all(
     runtime: Runtime | None = None,
     webui_answer: Answer | None = None,
     webui: bool = True,
+    app: object | None = None,
 ) -> None:
     """Start every service on its own thread; block until shutdown.
 
     When ``settings`` is supplied and its ``webui_enabled`` flag is set, the
     in-core web UI is appended automatically (unless ``webui=False`` or a
     service named ``webui`` is already present).
+
+    When ``app`` is supplied it becomes the *current app* inside every worker
+    thread, so facades resolve even though a contextvar would not cross the
+    thread boundary.
     """
     if (
         webui
@@ -59,7 +64,9 @@ def run_all(
     stop = stop_event or threading.Event()
     threads: list[threading.Thread] = []
     for service in services:
-        thread = threading.Thread(target=_guarded, args=(service,), name=service.name, daemon=True)
+        thread = threading.Thread(
+            target=_guarded, args=(service, app), name=service.name, daemon=True
+        )
         thread.start()
         threads.append(thread)
         log.info("started service %s", service.name)
@@ -76,7 +83,11 @@ def run_all(
         stop.wait(0.25)
 
 
-def _guarded(service: Service) -> None:
+def _guarded(service: Service, app: object | None = None) -> None:
+    if app is not None:
+        from agentkit.foundation.facade import set_current_app
+
+        set_current_app(app)
     try:
         service.run()
     except (KeyboardInterrupt, SystemExit):  # normal during shutdown

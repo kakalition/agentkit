@@ -7,6 +7,72 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Framework front door** (`agentkit.foundation`): an `App` container with
+  `Provider` (`register`/`boot`) service providers, entry-point discovery
+  (`agentkit.providers`), typed concerns (`agent`/`tool`/`channel`/`commands`/
+  `schedules`/`migrations`/`config`/`on`/`middleware`/`bind`), plus `run`/`serve`/
+  `answer`. The fluent `Agent.make(...).persona().instructions().tool()/
+  .specialist().memory().approvals().policy().output().build()` builder assembles
+  a PydanticAI agent. `agentkit.Agent` is the app-facing builder; internal modules
+  keep importing `pydantic_ai.Agent`.
+- **Facades**: `Memory`, `Schedule`, `DB`, `Events`, `Log` resolve the current
+  `App` through a contextvar **and** a thread-local (`run_all` seeds worker
+  threads), with `facade.using(app)` scoping.
+- **Events + middleware**: a `Dispatcher` (`app.on("turn.end", ...)`) with
+  lifecycle events (`boot`, `turn.start`/`turn.end`, `channel.message`,
+  `tool.start`/`tool.end`, `approval.asked`, `guardrails.injection`) and a turn
+  `Pipeline`; capability middleware for lifecycle, `ToolPolicy` and guardrails.
+- **Per-concern config**: `Section` with `defaults < config/<name>.py < env`.
+- **Artisan-style CLI**: `serve`/`up`, `tinker`, `inspect`, `schedule:list`,
+  `about`, and `make:agent|provider|tool|channel|command|model` generators
+  (overwrite-guarded); boot target from `AGENTKIT_BOOTSTRAP` (default
+  `bootstrap:app`). `Command` base for provider-contributed commands.
+- **Thin `Model` / `DB`**: `Model.where/create/get/update/delete/count/paginate`
+  and `DB.session()/transaction()` over SQLModel, with ambient transactions.
+- **Skills** (`agentkit.skills`): discoverable `SKILL.md` folders with YAML front
+  matter (`Skill`, `SkillRegistry`, `load_skill_file`, `parse_front_matter`).
+  `Agent.make(...).skills()` adds a compact index to the instructions and the
+  `list_skills`/`load_skill`/`read_skill_file` tools (progressive disclosure;
+  path-traversal safe). Roots from `skills_dir` (or `./skills` +
+  `<agent_home>/skills`); `skills_enabled` toggles them. CLI: `agentkit skills
+  list` / `skills show`.
+- **Streaming**: `ChatRunner.stream` / `App.stream` yield `StreamEvent`s
+  (`text`, `final`); history and usage are recorded as for `run`.
+- **Model routing + cost**: `ModelRouter` (`route`/`otherwise`/`with_fallbacks`)
+  via `App.model_resolver`, and `Pricing`/`default_pricing` estimating per-turn
+  `cost_usd` recorded on usage.
+- **Context compaction**: `Compactor` — tiered (pinned facts/constraints, verbatim
+  recent, folded older) with a structured rolling summary; `App.compact(...)`;
+  `summarize_older`/`truncating_processor` kept as simple alternatives.
+- **Knowledge (RAG)**: `KnowledgeBase` indexes chunked sources with embeddings and
+  exposes a `search_knowledge` tool via `Agent.make(...).knowledge(...)`; CLI
+  `agentkit knowledge add|add-text|search|list`.
+- **Capability shortcuts**: builder pass-throughs `.web_search()`, `.web_fetch()`,
+  `.x_search()`, `.thinking()`, `.caching()`, `.tool_search()`,
+  `.image_generation()`, `.instrumentation()`, `.native_tool()`.
+- **Sandboxed workspace**: `Sandbox` (backed by `pydantic_ai.workspaces`) and
+  `Agent.make(...).workspace(...)` adding `read_file`/`list_files`/`write_file`/
+  `run_command`; skill `allowed-tools` can be enforced with `.skills(enforce=True)`.
+- **Evaluations** (`agentkit.evals`): `Case`/`EvalSuite`/`Report` with output, tool
+  and custom assertions; `EvalSuite.from_file` (YAML/JSON); CLI `agentkit eval`.
+  Execution/reporting delegated to `pydantic_evals`.
+- **Cost via `genai_prices`**: `agentkit.pricing` wraps Pydantic's `genai_prices`
+  (no bundled price table); per-turn cost prefers `RunUsage.cost`, else
+  `estimate_cost(...)`. `Pricing` supports overrides.
+- **Human-in-the-loop**: `Clarification` + `ask_user` tool (`Agent.make(...).clarify()`)
+  and `App.clarify(handler)`; `App.resume(deferred_tool_results)`; `.output_validator(fn)`.
+- **Planning / graphs / teams**: `Planner` (plan-and-execute), `StateGraph` (async
+  state machine with conditional edges), `Supervisor` and `spawn_tool`/`team_tools`.
+- **Tooling**: per-tool `retries`/`timeout`/`sequential`/`defer_loading`, `cached_tool`
+  (TTL result cache) and `.toolset(...)`.
+- **Safety**: PII `scan_pii`/`redact_pii`, `ModerationPolicy` +
+  `moderation_middleware`/`moderation_hooks`, and `Feedback` (repo + facade).
+- **Ops**: `PromptRegistry` (file-backed, versioned prompts + `.prompt(...)`),
+  `Budget`/`check_budget` with `App.budget(...)`, and conversation branching
+  (`ConversationRepo.fork`, `App.fork`, `App.replay`).
+- **Multimodal + audio**: `image`/`audio`/`document`/`content` content-part helpers,
+  generated-media artifacts, and `transcribe`/`synthesize` (OpenAI audio).
+- **Compaction** now estimates tokens with `tiktoken` when available.
 - **Workspace layout**: agents now live under `workspace_root` (default
   `~/.agentkit`), with `agent_home` defaulting to `workspace_root/<agent_name>`
   (`AGENTKIT_HOME` / `AGENT_HOME` still override). `agentkit.workspace` detects
@@ -25,6 +91,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 - `AgentSettings.ensure_dirs()` also creates `logs/`.
+- `AgentApp` is now a deprecated shim over `App` (same `build`/`run`/`deps`/
+  `repositories` surface); `ChatRunner.send` now emits `turn.start`/`turn.end`/
+  `channel.message` and `approval_handler` emits `approval.asked`.
 
 ## [0.1.0] - 2026-10-11
 

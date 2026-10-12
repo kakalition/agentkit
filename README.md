@@ -15,12 +15,18 @@ console for exploring and operating the running agent.
 [![CI](https://github.com/kakalition/agentkit/actions/workflows/ci.yml/badge.svg)](https://github.com/kakalition/agentkit/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Coverage](https://img.shields.io/badge/coverage-76%25-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-79%25-brightgreen)
 
 ---
 
 ## Highlights
 
+- **A framework front door.** An `App` container with service providers
+  (`register`/`boot`), a fluent `Agent` builder, short facades
+  (`Memory`/`Schedule`/`DB`/`Events`/`Log`), lifecycle events + turn middleware,
+  per-concern config, discoverable **skills** (`SKILL.md`), an Artisan-style
+  `make:*` CLI, and a thin `Model`/`DB` layer — all additive over the building
+  blocks below.
 - **One process, one command.** `run_all(...)` supervises the worker, A2A, MCP,
   bot, and web UI in a single local process — no server to run.
 - **Durable by default.** Conversation history and background work run on DBOS
@@ -40,12 +46,15 @@ console for exploring and operating the running agent.
 - [Highlights](#highlights)
 - [Install](#install)
 - [60-second agent](#60-second-agent)
+- [Framework front door (Laravel-style)](#framework-front-door-laravel-style)
+- [Advanced primitives](#advanced-primitives)
 - [Orchestrator + specialists](#orchestrator--specialists)
 - [Durable scheduling](#durable-scheduling-cron--one-off)
 - [Durability](#durability)
 - [MCP](#mcp)
 - [A2A](#a2a)
 - [Persona (`SOUL.md`)](#persona-soulmd)
+- [Skills (`SKILL.md`)](#skills-skillmd)
 - [Run everything in one process](#run-everything-in-one-process)
 - [Operator web UI](#operator-web-ui)
 - [Observability](#observability-self-hosted-no-account)
@@ -81,21 +90,275 @@ automatically on `http://127.0.0.1:8787`.
 
 ```python
 import asyncio
-from pydantic_ai import Agent
-from agentkit import AgentApp, AgentSettings, Deps
+from pydantic_ai import RunContext
+from agentkit import Agent, AgentSettings, App, Deps
 
-notes = Agent(name="notes", deps_type=Deps, output_type=str,
-              instructions="Manage the owner's notes.")
-
-@notes.tool
-async def add_note(ctx, text: str) -> str:
+async def add_note(ctx: RunContext[Deps], text: str) -> str:
     """Save a note."""
     ctx.deps.extras.setdefault("notes", []).append(text)
     return f"saved: {text}"
 
-app = AgentApp.build(agent=notes, settings=AgentSettings(owner_id="owner"))
+notes = (
+    Agent.make("notes", deps_type=Deps)
+    .instructions("Manage the owner's notes.")
+    .memory()
+    .tool(add_note)
+    .output(str)
+)
+app = App(name="notes", settings=AgentSettings(owner_id="owner"), discover=False)
+app.agent(notes)
+app.boot()
 print(asyncio.run(app.run("add a note: buy milk")).output)
 ```
+
+`agentkit.Agent` here is the fluent **builder**; internal code that wants the raw
+PydanticAI agent keeps `from pydantic_ai import Agent`. The legacy
+`AgentApp.build(agent=..., settings=...)` still works as a deprecated shim.
+
+## Framework front door (Laravel-style)
+
+Everything above is the low-level surface and keeps working. On top of it sits an
+`App` container with `Provider`s, a fluent `Agent` builder, short facades, an
+event bus, a middleware pipeline, per-concern config, an Artisan-style CLI, and a
+thin `Model`/`DB` layer.
+
+```python
+# bootstrap.py  —  `agentkit serve` boots bootstrap:app
+from agentkit import App
+from nudge.providers import NudgeProvider
+
+app = App(name="nudge", settings=Settings)
+app.providers([NudgeProvider])          # package providers auto-load via entry points
+```
+
+```python
+# providers/nudge.py
+from agentkit import Agent, Provider
+
+class NudgeProvider(Provider):
+    def register(self, app):
+        app.agent(
+            Agent.make("nudge")
+            .persona()                  # SOUL.md (read live every run)
+            .instructions(ORCHESTRATOR)
+            .memory()                   # remember/recall/forget tools
+            .tool(handle_reminders)
+            .output(str)
+        )
+        app.config("memory", MemorySection)
+
+    def boot(self, app):
+        def audit(event):
+            with app.repositories() as repos:
+                repos.audit.append("turn.end", target=event.conversation_id)
+        app.on("turn.end", audit)
+```
+
+```python
+# facades resolve the current App
+from agentkit import DB, Memory, Model, Schedule
+
+await Memory.remember("My name is Ada")
+Schedule.cron("weekly", "0 8 * * 1", "digest")
+
+class Reminder(Model, table=True):
+    name: str
+    cron: str
+
+with DB.transaction():
+    Reminder.create(name="digest", cron="0 8 * * 1")
+Reminder.where(cron="0 8 * * 1").first()
+```
+
+```bash
+agentkit make:provider notes     # scaffold generators (overwrite-guarded)
+agentkit make:tool add_note
+agentkit serve                   # boot bootstrap:app and run its channels
+agentkit tinker                  # REPL against the booted app
+agentkit inspect                 # agents, tools, channels, commands, config
+agentkit schedule:list
+agentkit about
+```
+
+**IMPORTANT — `Agent` shadowing.** In *application* code, `from agentkit import
+Agent` is the **builder**. Internal/low-level code keeps importing PydanticAI
+directly:
+
+```python
+from pydantic_ai import Agent        # internal: the raw PydanticAI agent
+from agentkit import Agent           # app-facing: the fluent builder
+```
+
+**Lifecycle.** `App.boot()` is idempotent and ordered: every `Provider.register()`
+runs first (bindings/concerns, no side effects), then every `Provider.boot()`
+(schedules, listeners), then services. Importing a provider must be
+side-effect-free. Facades resolve the current app through a contextvar **and** a
+thread-local, and `run_all` seeds the app into its worker threads, so facades work
+inside channels.
+
+### Laravel → agentkit concept map
+
+| Laravel | agentkit |
+| --- | --- |
+| Service container | `App` (`bind`/`singleton`/`make`) |
+| Service provider | `Provider` (`register`/`boot`) |
+| Facade | `Memory`, `Schedule`, `DB`, `Events`, `Log` |
+| Artisan | `agentkit` CLI (`make:*`, `serve`, `tinker`, `inspect`) |
+| Events & listeners | `app.on("turn.end", ...)` (`Dispatcher`) |
+| Middleware | `app.middleware(...)` (`Pipeline` over the turn) |
+| `config/*.php` | `config/<name>.py` + `Section` (`defaults < file < env`) |
+| Eloquent model | `Model` (thin: `where`/`create`/`update`/`paginate`) |
+| `php artisan serve` | `agentkit serve` |
+
+## Advanced primitives
+
+### Streaming
+```python
+async for event in app.stream("hello", conversation_id="cli:1"):
+    if event.kind == "text":
+        print(event.text, end="")
+    elif event.kind == "final":
+        print("\n" + event.result.output)
+```
+`App.stream` / `ChatRunner.stream` yield `StreamEvent`s (`text`, `final`); history and
+usage are recorded exactly as for `run`. Tool events keep firing via the lifecycle hooks.
+
+### Model routing + cost
+```python
+from agentkit import ModelRouter, default_pricing
+
+router = (
+    ModelRouter()
+    .route("openai:gpt-5-mini", when=lambda ctx: len(ctx.text) < 500)
+    .route("openai:gpt-5")
+    .otherwise("openai:gpt-4o-mini")
+    .with_fallbacks("openai:gpt-4o")
+)
+app.model_resolver(router)                       # chosen per turn from the Turn context
+default_pricing().set("openai:gpt-5-mini", input=0.00025, output=0.002)
+```
+Every turn records an estimated `cost_usd` alongside token counts.
+
+### Context compaction
+```python
+from agentkit import Compactor
+
+app.history_processor(Compactor(max_tokens=8000, keep_recent=0.45))
+# or, shorthand:  app.compact(max_tokens=8000)
+```
+Tiered and rolling: **pinned** facts/constraints stay verbatim, the **recent** turns stay
+verbatim, and older turns are folded into a structured summary (objective, facts,
+constraints, decisions, tool results, open threads) that is merged incrementally — so
+compaction is cheap and does not drift. Heuristic offline; pass `model=` for model-based
+extraction. `summarize_older` and `truncating_processor` remain simple alternatives.
+
+### Knowledge (RAG)
+```python
+from agentkit import Agent, KnowledgeBase
+
+kb = KnowledgeBase()
+kb.add_directory("docs", pattern="**/*.md")
+kb.add("Free-form note text", source="note")
+agent = Agent.make("notes").instructions("…").knowledge(kb).output(str).build()
+```
+Indexes chunks with embeddings and adds a `search_knowledge` tool (plus a source listing
+in the instructions). Index from the CLI with `agentkit knowledge add|add-text|search|list`.
+
+### Capability shortcuts
+Builder pass-throughs to the PydanticAI capabilities of the same name:
+`.web_search()` `.web_fetch()` `.x_search()` `.thinking(effort=...)` `.caching()`
+`.tool_search()` `.image_generation()` `.instrumentation()` `.native_tool(...)` `.sandbox(...)`.
+
+### Sandboxed workspace
+```python
+from agentkit import Agent, Sandbox
+
+agent = Agent.make("coder").instructions("…").workspace(Sandbox("./work")).output(str).build()
+```
+Backed by `pydantic_ai.workspaces` (`LocalWorkspaceBackend` + `ReadOnlyWorkspace`) — agentkit
+does not re-implement confinement or process execution. Adds `read_file`/`list_files`/
+`write_file`/`run_command`. `Sandbox(path, read_only=True, env={...})` to restrict. This is a
+*workspace*, not an OS sandbox: use a container/VM for untrusted code.
+
+### Evaluations
+```python
+from agentkit.evals import Case, EvalSuite
+
+report = await EvalSuite(
+    [
+        Case("adds", input="2+2?", expect="4"),
+        Case("uses the tool", input="find x", calls="lookup"),
+        Case("in persona", input="hi", not_contains=["As an AI language model"]),
+    ],
+    name="smoke",
+).run(app)
+report.raise_for_failures()
+```
+Assertions: `expect`, `contains`, `not_contains`, `regex`, `calls`, `not_calls` and a custom
+`check`; load suites from YAML/JSON with `EvalSuite.from_file`; run with `agentkit eval suite.yaml`.
+Executed and reported by Pydantic's `pydantic_evals`.
+
+### Human-in-the-loop
+```python
+agent = Agent.make("desk").instructions("…").clarify().output(str).build()
+app.agent(agent).clarify(lambda question, options: ask_the_user(question))
+```
+`ask_user` hands a question to your handler; with no handler it instructs the model to ask
+in its reply. `App.resume(deferred_tool_results)` continues a turn that paused on deferred tool
+calls (see [Approvals/scheduling](#production-features)). Register output checks with
+`.output_validator(fn)`.
+
+### Planning, graphs, teams
+```python
+from agentkit import StateGraph, END, Supervisor
+from agentkit.planning import Planner
+
+plan = await Planner(agent).execute("Launch the beta")     # plan-and-execute
+graph = StateGraph(); graph.add_node("draft", draft); graph.add_edge("draft", END); ...
+supervisor = Supervisor({"writer": writer, "researcher": researcher}).build()
+```
+`Planner` decomposes a goal then runs each step; `StateGraph` is a small async state machine
+(conditional edges, cycle guard); `Supervisor`/`spawn_tool` route to or spawn sub-agents
+(usage/model forwarded).
+
+### Tooling
+```python
+agent = (Agent.make("t").instructions("…")
+    .tool(lookup, cache_ttl=60, timeout=5, sequential=False, defer_loading=True)
+    .toolset(my_toolset)
+    .output(str).build())
+```
+Per-tool `retries`/`timeout`/`sequential`/`defer_loading`, a TTL result cache
+(`cached_tool`), and generic toolsets (MCP, function toolsets).
+
+### Safety
+```python
+from agentkit import ModerationPolicy
+from agentkit.moderation import moderation_middleware, moderation_hooks
+
+app.middleware(moderation_middleware(ModerationPolicy(banned=["…"], redact_pii=True)))
+```
+`scan_pii`/`redact_pii` (email, phone, SSN, card, IBAN), moderation middleware + output hooks,
+and user feedback (`Feedback.add(rating=1, conversation_id=…)`, `Feedback.average()`).
+
+### Ops
+```python
+from agentkit import Budget, PromptRegistry
+app.budget(Budget(max_cost=5.0, max_tokens=1_000_000, window_seconds=86400))
+prompts = PromptRegistry.from_settings().discover()       # prompts/<name>.md, versioned
+agent = Agent.make("x").prompt(prompts, "greeting", name="Ada").output(str).build()
+```
+Budgets are checked before each turn (`BudgetExceeded`); the prompt registry is file-backed and
+versioned; conversations branch with `app.fork(...)` / re-run with `app.replay(...)`.
+
+### Multimodal + audio
+```python
+from agentkit import image, transcribe, synthesize
+await app.run(content(text("What is this?"), image("cat.png")))
+text = transcribe("note.m4a"); audio_bytes = synthesize("Call mom at 5.")
+```
+`image`/`audio`/`document` build content parts from files, bytes or URLs; generated media is
+captured into `ChatResult.artifacts`; STT/TTS use the OpenAI audio API (client injectable).
 
 ## Orchestrator + specialists
 
@@ -198,6 +461,50 @@ from agentkit import load_soul, ensure_soul, compose_instructions
 
 ensure_soul()                                     # <AGENT_HOME>/SOUL.md if missing
 instructions = compose_instructions(load_soul(), "Route requests to specialists.")
+```
+
+## Skills (`SKILL.md`)
+
+Skills are discoverable folders of instructions the agent loads **on demand**
+(progressive disclosure): the model sees a cheap name+description index and
+pulls the full how-to only when it is relevant.
+
+```
+skills/
+  pdf-tools/
+    SKILL.md              # front matter + instructions
+    references/style.md   # bundled files, read via read_skill_file
+    scripts/extract.py
+```
+
+```markdown
+---
+name: pdf-tools
+description: Extract text and tables from PDF files.
+allowed-tools: [read_skill_file]
+---
+
+# PDF tools
+Call `read_skill_file("pdf-tools", "references/style.md")` for house style, then …
+```
+
+```python
+from agentkit import Agent, SkillRegistry
+
+registry = SkillRegistry.from_settings().discover()   # ./skills + <AGENT_HOME>/skills
+agent = Agent.make("notes").instructions("…").skills(registry).output(str).build()
+# or discover lazily from settings:  Agent.make("notes").skills()
+```
+
+`skills()` adds a compact index to the instructions plus three tools —
+`list_skills`, `load_skill(name)` (full instructions) and
+`read_skill_file(name, path)` (bundled files, path-traversal safe). Roots come
+from `skills_dir` (or the project `./skills` and `<agent_home>/skills` when
+unset); set `skills_enabled=false` to turn them off. Inspect from the CLI:
+
+```bash
+agentkit skills list
+agentkit skills show pdf-tools
 ```
 
 ## Run everything in one process

@@ -1,14 +1,20 @@
-"""A high-level facade that wires settings -> runtime -> deps -> chat runner.
+"""Deprecated shim: :class:`AgentApp` over the new :class:`~agentkit.foundation.App`.
+
+The old dataclass-style surface is preserved exactly (``settings``, ``agent``,
+``runtime``, ``mcp``, ``a2a``, ``model``; ``build``/``deps``/``repositories``/
+``run``). It now delegates to an internal :class:`App`, so facades and events
+work through it too.
 
     from agentkit import AgentApp
-    app = AgentApp(agent=my_orchestrator_agent, settings=AgentSettings())
+    app = AgentApp.build(agent=my_orchestrator_agent, settings=AgentSettings())
     result = await app.run("hello")
     print(result.output)
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import warnings
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic_ai import Agent
@@ -16,6 +22,7 @@ from pydantic_ai import Agent
 from agentkit.config import AgentSettings, build_model, get_settings
 from agentkit.db.repositories import Repositories
 from agentkit.deps import ApprovalCallback, Deps
+from agentkit.foundation.application import App
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.session import ChatResult, ChatRunner
 
@@ -24,10 +31,26 @@ from agentkit.session import ChatResult, ChatRunner
 class AgentApp:
     settings: AgentSettings
     agent: Agent[Any, str]
-    runtime: Runtime
+    runtime: Runtime | None = None
     mcp: Any = None
     a2a: Any = None
     model: Any = None
+    _app: App = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.runtime is None:
+            self.runtime = build_runtime(self.settings)
+        app = App(
+            name=self.settings.agent_name,
+            settings=self.settings,
+            discover=False,
+            model=self.model,
+            mcp=self.mcp,
+            a2a=self.a2a,
+        )
+        app.agent(self.agent)
+        app._runtime = self.runtime
+        object.__setattr__(self, "_app", app)
 
     @classmethod
     def build(
@@ -40,6 +63,11 @@ class AgentApp:
         a2a: Any = None,
         model: Any = None,
     ) -> AgentApp:
+        warnings.warn(
+            "AgentApp is deprecated; use agentkit.App instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         settings = settings or get_settings()
         return cls(
             settings=settings,
@@ -50,13 +78,20 @@ class AgentApp:
             model=model,
         )
 
+    @property
+    def app(self) -> App:
+        """The underlying :class:`App` (for facades, providers, channels)."""
+        return self._app
+
     # -- deps -----------------------------------------------------------
     def repositories(self):
         return repositories(self.runtime)
 
     def deps(self, repos: Repositories, *, approve: ApprovalCallback | None = None) -> Deps:
+        runtime = self.runtime
+        assert runtime is not None
         return build_deps(
-            self.runtime,
+            runtime,
             repos,
             model=self.model or build_model(self.settings),
             mcp=self.mcp,

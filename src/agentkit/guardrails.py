@@ -62,6 +62,31 @@ def redact(text: str) -> str:
     return redact_secrets(text)
 
 
+# -- PII -------------------------------------------------------------------
+PII_PATTERNS: dict[str, str] = {
+    "email": r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+    "phone": r"(?<!\w)(?:\+?\d{1,3}[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)\d{3}[\s.-]?\d{4}(?!\w)",
+    "ssn": r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)",
+    "credit_card": r"(?<!\d)(?:\d[ -]?){13,16}(?!\d)",
+    "iban": r"(?<!\w)[A-Z]{2}\d{2}[A-Z0-9]{10,30}(?!\w)",
+}
+_PII_RES = {name: re.compile(pattern) for name, pattern in PII_PATTERNS.items()}
+
+
+def scan_pii(text: str) -> list[str]:
+    """Return the kinds of PII found in ``text`` (e.g. ``["email", "phone"]``)."""
+    text = text or ""
+    return [name for name, pattern in _PII_RES.items() if pattern.search(text)]
+
+
+def redact_pii(text: str, *, replacement: str = "[redacted:{kind}]") -> str:
+    """Replace detected PII spans with placeholder tokens."""
+    result = text or ""
+    for name, pattern in _PII_RES.items():
+        result = pattern.sub(replacement.format(kind=name), result)
+    return result
+
+
 def wrap_untrusted(text: str, *, label: str = "untrusted") -> str:
     """Wrap untrusted text so the model treats it as data, never instructions."""
     return (

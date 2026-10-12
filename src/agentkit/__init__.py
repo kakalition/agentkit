@@ -12,6 +12,9 @@ client registry (:mod:`agentkit.mcp`), A2A client + task-based server
 from agentkit import durability, scheduler, workspace
 from agentkit.app import AgentApp
 from agentkit.approvals import approval_capability, approval_handler, auto_approver
+from agentkit.audio import synthesize, transcribe
+from agentkit.cache import cached_tool
+from agentkit.compaction import Compactor, summarize_older, transcript, truncating_processor
 from agentkit.config import (
     AgentSettings,
     build_model,
@@ -31,6 +34,37 @@ from agentkit.errors import (
     RateLimited,
     UpstreamError,
 )
+from agentkit.evals import Case, CaseResult, EvalSuite, Report
+from agentkit.foundation import (
+    DB,
+    Agent,
+    App,
+    ChannelSpec,
+    Command,
+    Container,
+    Dispatcher,
+    Event,
+    Events,
+    Facade,
+    Feedback,
+    Log,
+    Memory,
+    Middleware,
+    Model,
+    Pipeline,
+    Provider,
+    Query,
+    Schedule,
+    Section,
+    Turn,
+    current_app,
+    discover_providers,
+    emit,
+    load_bootstrap,
+    run_pipeline,
+    using,
+)
+from agentkit.graph import END, GraphError, StateGraph
 from agentkit.guardrails import (
     check_egress,
     is_loopback,
@@ -41,14 +75,38 @@ from agentkit.guardrails import (
     wrap_untrusted,
 )
 from agentkit.health import Check, db_check, health_routes, install_signal_handlers
+from agentkit.hitl import Clarification, clarification_tool
+from agentkit.knowledge import KnowledgeBase, chunk_text
+from agentkit.limits import Budget
 from agentkit.logging import get_logger, request_context, setup_logging
 from agentkit.logging import redact as redact_text
 from agentkit.memory import attach_memory, memory_digest
+from agentkit.moderation import (
+    ModerationPolicy,
+    ModerationResult,
+    check_output,
+    moderation_hooks,
+    moderation_middleware,
+)
+from agentkit.multimodal import audio, content, document, image, text
 from agentkit.observability import setup_logfire, setup_observability, start_phoenix
 from agentkit.orchestrator import Orchestrator, delegate, make_delegate
+from agentkit.planning import Plan, Planner, PlanStep
 from agentkit.policy import ALLOW, APPROVE, DENY, ToolPolicy
+from agentkit.pricing import (
+    ModelPrice,
+    Pricing,
+    default_pricing,
+    estimate_cost,
+    set_default_pricing,
+    usage_cost,
+)
+from agentkit.prompts import Prompt, PromptRegistry
+from agentkit.routing import ModelRouter, Route
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
-from agentkit.session import ChatResult, ChatRunner, load_history, save_new_messages
+from agentkit.sandbox import CommandResult, Sandbox, SandboxError
+from agentkit.session import ChatResult, ChatRunner, StreamEvent, load_history, save_new_messages
+from agentkit.skills import Skill, SkillRegistry, load_skill_file, parse_front_matter
 from agentkit.soul import (
     DEFAULT_SOUL,
     SOUL_FILENAME,
@@ -58,6 +116,7 @@ from agentkit.soul import (
     soul_path,
 )
 from agentkit.supervise import Service, run_all
+from agentkit.teams import Supervisor, spawn_tool, team_tools
 from agentkit.webui import build_webui_app, serve_webui, webui_service
 from agentkit.workspace import (
     default_workspace_root,
@@ -72,6 +131,34 @@ __all__ = [
     "__version__",
     # app facade + durable scheduling
     "AgentApp",
+    # framework foundation (Laravel-style front door)
+    "Agent",
+    "App",
+    "Provider",
+    "Facade",
+    "Event",
+    "ChannelSpec",
+    "Container",
+    "Command",
+    "Dispatcher",
+    "Pipeline",
+    "Middleware",
+    "Section",
+    "Memory",
+    "Schedule",
+    "DB",
+    "Events",
+    "Log",
+    "Feedback",
+    "Model",
+    "Query",
+    "Turn",
+    "current_app",
+    "using",
+    "run_pipeline",
+    "discover_providers",
+    "load_bootstrap",
+    "emit",
     "durability",
     "scheduler",
     # workspace layout + legacy migration
@@ -114,11 +201,67 @@ __all__ = [
     "build_deps",
     "ChatRunner",
     "ChatResult",
+    "StreamEvent",
     "load_history",
     "save_new_messages",
     # memory
     "attach_memory",
     "memory_digest",
+    # history compaction
+    "Compactor",
+    "summarize_older",
+    "transcript",
+    "truncating_processor",
+    # retrieval-augmented generation
+    "KnowledgeBase",
+    "chunk_text",
+    # evaluations
+    "EvalSuite",
+    "Case",
+    "CaseResult",
+    "Report",
+    # human-in-the-loop
+    "Clarification",
+    "clarification_tool",
+    # planning / graphs / teams
+    "Planner",
+    "Plan",
+    "PlanStep",
+    "StateGraph",
+    "END",
+    "GraphError",
+    "Supervisor",
+    "spawn_tool",
+    "team_tools",
+    # tooling
+    "cached_tool",
+    # safety
+    "ModerationPolicy",
+    "ModerationResult",
+    "moderation_middleware",
+    "moderation_hooks",
+    "check_output",
+    # ops
+    "Budget",
+    "PromptRegistry",
+    "Prompt",
+    # multimodal + audio
+    "image",
+    "audio",
+    "document",
+    "content",
+    "text",
+    "transcribe",
+    "synthesize",
+    # sandboxed workspace
+    "Sandbox",
+    "CommandResult",
+    "SandboxError",
+    # skills (discoverable SKILL.md folders)
+    "Skill",
+    "SkillRegistry",
+    "load_skill_file",
+    "parse_front_matter",
     # cross-cutting: observability, logging, guardrails, policy, errors, health
     "setup_observability",
     "setup_logfire",
@@ -140,6 +283,15 @@ __all__ = [
     "ALLOW",
     "APPROVE",
     "DENY",
+    # model routing + pricing
+    "ModelRouter",
+    "Route",
+    "Pricing",
+    "ModelPrice",
+    "default_pricing",
+    "set_default_pricing",
+    "estimate_cost",
+    "usage_cost",
     "AgentKitError",
     "ConfigurationError",
     "InvalidInput",

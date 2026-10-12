@@ -32,6 +32,15 @@ async def approval_handler(
     ]
     if not pending:
         return None
+    from agentkit.foundation.facade import emit
+
+    await emit(
+        "approval.asked",
+        requests=[
+            {"tool_call_id": request.tool_call_id, "tool_name": request.tool_name}
+            for request in pending
+        ],
+    )
     if ctx.deps.approve is None:
         decided: dict[str, bool] = {request.tool_call_id: False for request in pending}
     else:

@@ -5,7 +5,13 @@ def test_usage_repo_totals(repos: Repositories):
     repos.usage.add(conversation_id="cli:1", requests=1, input_tokens=10, output_tokens=5, total_tokens=15)
     repos.usage.add(conversation_id="cli:1", requests=2, input_tokens=20, output_tokens=8, total_tokens=28)
     totals = repos.usage.totals()
-    assert totals == {"requests": 3, "input_tokens": 30, "output_tokens": 13, "total_tokens": 43}
+    assert totals == {
+        "requests": 3,
+        "input_tokens": 30,
+        "output_tokens": 13,
+        "total_tokens": 43,
+        "cost_usd": 0.0,
+    }
 
 
 def test_audit_chain_verifies(repos: Repositories):

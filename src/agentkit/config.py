@@ -60,6 +60,15 @@ class AgentSettings(BaseSettings):
     memory_embedding_query_prompt: str = ""
     memory_embedding_document_prompt: str = ""
 
+    # skills — discoverable ``SKILL.md`` folders the agent can load on demand.
+    # ``skills_dir`` overrides the default roots (project ``./skills`` and
+    # ``<agent_home>/skills``).
+    skills_enabled: bool = True
+    skills_dir: str | None = None
+
+    # prompts — a file-backed prompt registry (``prompts/<name>.md``).
+    prompts_dir: str | None = None
+
     # storage — agents live under ``workspace_root``; ``agent_home`` defaults to
     # ``workspace_root/<agent_name>`` and can be overridden with ``AGENT_HOME``.
     workspace_root: Path = Field(

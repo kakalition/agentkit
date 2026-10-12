@@ -1,28 +1,46 @@
-"""agentkit console entry point: workspace management + standalone web UI."""
+"""agentkit console entry point: workspace management, web UI, and an
+Artisan-style CLI (``make:*`` generators, ``serve``/``tinker``/``inspect``)."""
 
 from __future__ import annotations
 
+import contextlib
+import json
 from pathlib import Path
 
 import typer
 
 from agentkit import __version__
 from agentkit.config import get_settings
+from agentkit.foundation.commands import load_bootstrap
+from agentkit.foundation.generators import generate
 from agentkit.workspace import default_workspace_root, detect_legacy, migrate, workspace_dir
 
 app = typer.Typer(
     add_completion=False,
-    help="agentkit — workspace management and the operator web UI.",
+    help="agentkit — workspace management, the operator web UI, and app scaffolding.",
     no_args_is_help=True,
 )
 workspace_app = typer.Typer(no_args_is_help=True, help="Inspect and migrate agent workspaces.")
 app.add_typer(workspace_app, name="workspace")
+skills_app = typer.Typer(no_args_is_help=True, help="Inspect discovered skills.")
+app.add_typer(skills_app, name="skills")
+knowledge_app = typer.Typer(no_args_is_help=True, help="Index and search knowledge (RAG).")
+app.add_typer(knowledge_app, name="knowledge")
 
 
 @app.command()
 def version() -> None:
     """Print the agentkit version."""
     typer.echo(f"agentkit {__version__}")
+
+
+@app.command()
+def about() -> None:
+    """Show the agentkit version and the resolved agent home/model."""
+    settings = get_settings()
+    typer.echo(f"agentkit {__version__}")
+    typer.echo(f"agent home: {settings.home}")
+    typer.echo(f"model: {settings.model_name}")
 
 
 @app.command()
@@ -45,6 +63,324 @@ def api(
 ) -> None:
     """Alias for ``webui`` (serve the API + SPA)."""
     webui(host=host, port=port)
+
+
+# ---------------------------------------------------------------------------
+# Runtime commands
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def serve(
+    bootstrap: str | None = typer.Option(
+        None, "--bootstrap", help="module:attr (default: $AGENTKIT_BOOTSTRAP or bootstrap:app)."
+    ),
+    scheduler: bool = typer.Option(
+        True, "--scheduler/--no-scheduler", help="Also run the durable scheduler worker."
+    ),
+    webui: bool = typer.Option(True, "--webui/--no-webui", help="Also serve the operator web UI."),
+) -> None:
+    """Boot the app and run its channels (plus the web UI)."""
+    try:
+        booted = load_bootstrap(bootstrap)
+    except (ImportError, AttributeError, TypeError) as exc:
+        typer.echo(
+            f"could not load app ({exc}); set AGENTKIT_BOOTSTRAP or create a "
+            "'bootstrap.py' exposing `app`.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    booted.boot()
+    with contextlib.suppress(Exception):  # observability is optional
+        from agentkit.observability import setup_observability
+
+        setup_observability(booted.settings)
+    if scheduler:
+        from agentkit import scheduler as sched
+
+        sched.init_scheduler(booted.settings, repos_factory=booted.repos_factory)
+    booted.serve(webui=webui)
+
+
+@app.command()
+def up(
+    bootstrap: str | None = typer.Option(None, "--bootstrap", help="Boot target (default: bootstrap:app)."),
+) -> None:
+    """Alias for ``serve``."""
+    serve(bootstrap=bootstrap)
+
+
+@app.command()
+def tinker(
+    bootstrap: str | None = typer.Option(None, "--bootstrap"),
+    conversation_id: str = typer.Option("cli:tinker", help="Conversation id to keep history under."),
+) -> None:
+    """Interactive REPL: chat with the booted app."""
+    import asyncio
+
+    booted = load_bootstrap(bootstrap)
+    booted.boot()
+    typer.echo("agentkit tinker — type 'exit' to quit.")
+    while True:
+        try:
+            line = input("agentkit> ")
+        except (EOFError, KeyboardInterrupt):
+            typer.echo("")
+            break
+        if not line.strip():
+            continue
+        if line.strip().lower() in {"exit", "quit", ":q"}:
+            break
+        result = asyncio.run(booted.run(line, conversation_id=conversation_id))
+        typer.echo(result.output)
+
+
+@app.command()
+def inspect(
+    bootstrap: str | None = typer.Option(None, "--bootstrap"),
+    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
+) -> None:
+    """Show the booted app's agent, tools, channels, commands and config."""
+    booted = load_bootstrap(bootstrap)
+    booted.boot()
+    agent = booted.agent()
+    toolset = getattr(agent, "_function_toolset", None)
+    data = {
+        "name": booted.name,
+        "agent": getattr(agent, "name", None),
+        "tools": sorted(getattr(toolset, "tools", {}).keys()),
+        "channels": sorted(booted.channels()),
+        "commands": sorted(booted._commands),
+        "config": sorted(booted._config_schemas),
+    }
+    if as_json:
+        typer.echo(json.dumps(data, indent=2))
+        return
+    typer.echo(f"app: {data['name']}")
+    typer.echo(f"agent: {data['agent']}")
+    typer.echo(f"tools: {', '.join(data['tools']) or '(none)'}")
+    typer.echo(f"channels: {', '.join(data['channels']) or '(none)'}")
+    typer.echo(f"commands: {', '.join(data['commands']) or '(none)'}")
+    typer.echo(f"config: {', '.join(data['config']) or '(none)'}")
+
+
+@app.command("schedule:list")
+def schedule_list(
+    bootstrap: str | None = typer.Option(None, "--bootstrap"),
+) -> None:
+    """List the booted app's durable scheduled jobs."""
+    from agentkit import Schedule
+
+    booted = load_bootstrap(bootstrap)
+    booted.boot()
+    jobs = Schedule.list()
+    if not jobs:
+        typer.echo("(no scheduled jobs)")
+        return
+    for job in jobs:
+        state = "on" if job["enabled"] else "off"
+        typer.echo(f"  {job['name']:<20} {job['schedule']:<16} -> {job['task']} [{state}]")
+
+
+# ---------------------------------------------------------------------------
+# Generators
+# ---------------------------------------------------------------------------
+
+
+def _run_generate(kind: str, name: str, path: Path, force: bool) -> None:
+    try:
+        written = generate(kind, name, directory=path, force=force)
+    except FileExistsError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"created {written}")
+
+
+@app.command("make:agent")
+def make_agent(
+    name: str = typer.Argument(..., help="Agent name, e.g. notes."),
+    path: Path = typer.Option(Path("."), "--path", help="Project directory to write into."),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing file."),
+) -> None:
+    """Scaffold an agent builder module."""
+    _run_generate("agent", name, path, force)
+
+
+@app.command("make:provider")
+def make_provider(
+    name: str = typer.Argument(..., help="Provider name, e.g. notes."),
+    path: Path = typer.Option(Path("."), "--path"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Scaffold a service provider."""
+    _run_generate("provider", name, path, force)
+
+
+@app.command("make:tool")
+def make_tool(
+    name: str = typer.Argument(..., help="Tool name, e.g. add_note."),
+    path: Path = typer.Option(Path("."), "--path"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Scaffold a tool function."""
+    _run_generate("tool", name, path, force)
+
+
+@app.command("make:channel")
+def make_channel(
+    name: str = typer.Argument(..., help="Channel name, e.g. slack."),
+    path: Path = typer.Option(Path("."), "--path"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Scaffold a channel factory."""
+    _run_generate("channel", name, path, force)
+
+
+@app.command("make:command")
+def make_command(
+    name: str = typer.Argument(..., help="Command name, e.g. sync."),
+    path: Path = typer.Option(Path("."), "--path"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Scaffold a provider command."""
+    _run_generate("command", name, path, force)
+
+
+@app.command("make:model")
+def make_model(
+    name: str = typer.Argument(..., help="Model name, e.g. note."),
+    path: Path = typer.Option(Path("."), "--path"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Scaffold a ``Model`` table."""
+    _run_generate("model", name, path, force)
+
+
+# ---------------------------------------------------------------------------
+# Skills
+# ---------------------------------------------------------------------------
+
+
+@skills_app.command("list")
+def skills_list(
+    path: list[Path] | None = typer.Option(
+        None, "--path", help="Skill root (repeatable; default: settings roots)."
+    ),
+) -> None:
+    """List the skills discovered under the configured roots."""
+    from agentkit.skills import SkillRegistry
+
+    registry = (
+        SkillRegistry.from_paths(path) if path else SkillRegistry.from_settings()
+    ).discover()
+    if len(registry) == 0:
+        typer.echo("(no skills found)")
+        return
+    for skill in registry.all():
+        typer.echo(f"  {skill.name:<24} {skill.description}  ({skill.path})")
+
+
+@skills_app.command("show")
+def skills_show(
+    name: str = typer.Argument(..., help="Skill name."),
+    path: list[Path] | None = typer.Option(None, "--path", help="Skill root (repeatable)."),
+) -> None:
+    """Show one skill's full instructions (and bundled files)."""
+    from agentkit.skills import SkillRegistry
+
+    registry = (
+        SkillRegistry.from_paths(path) if path else SkillRegistry.from_settings()
+    ).discover()
+    skill = registry.get(name)
+    if skill is None:
+        typer.echo(f"no skill named {name!r}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(skill.render())
+
+
+# ---------------------------------------------------------------------------
+# Knowledge (RAG)
+# ---------------------------------------------------------------------------
+
+
+@knowledge_app.command("add")
+def knowledge_add(
+    path: Path = typer.Argument(..., help="File or directory to index."),
+    pattern: str = typer.Option("**/*.md", help="Glob when indexing a directory."),
+) -> None:
+    """Index a file or directory into the knowledge base."""
+    from agentkit import KnowledgeBase
+
+    kb = KnowledgeBase.from_settings()
+    added = kb.add_directory(path, pattern=pattern) if path.is_dir() else kb.add_file(path)
+    typer.echo(f"indexed {added} chunk(s)")
+
+
+@knowledge_app.command("add-text")
+def knowledge_add_text(
+    text: str = typer.Argument(..., help="Text to index."),
+    source: str = typer.Option("", "--source", help="Label for this text."),
+) -> None:
+    """Index a literal string."""
+    from agentkit import KnowledgeBase
+
+    added = KnowledgeBase.from_settings().add(text, source=source)
+    typer.echo(f"indexed {added} chunk(s)")
+
+
+@knowledge_app.command("search")
+def knowledge_search(
+    query: str = typer.Argument(..., help="Query text."),
+    limit: int = typer.Option(5, help="Maximum passages."),
+) -> None:
+    """Search indexed knowledge."""
+    from agentkit import KnowledgeBase
+
+    kb = KnowledgeBase.from_settings()
+    typer.echo(kb.format_hits(kb.search(query, limit=limit)))
+
+
+@knowledge_app.command("list")
+def knowledge_list() -> None:
+    """List indexed sources."""
+    from agentkit import KnowledgeBase
+
+    kb = KnowledgeBase.from_settings()
+    sources = kb.sources()
+    if not sources:
+        typer.echo("(nothing indexed)")
+        return
+    for source in sources:
+        typer.echo(f"  {source} ({kb.count(source)} chunks)")
+
+
+# ---------------------------------------------------------------------------
+# Evaluations
+# ---------------------------------------------------------------------------
+
+
+@app.command("eval")
+def eval_command(
+    path: Path = typer.Argument(..., help="Eval suite file (.json/.yaml)."),
+    bootstrap: str | None = typer.Option(None, "--bootstrap", help="module:attr of the app."),
+) -> None:
+    """Run an evaluation suite against the booted app."""
+    import asyncio
+
+    from agentkit import EvalSuite
+
+    suite = EvalSuite.from_file(path)
+    booted = load_bootstrap(bootstrap)
+    booted.boot()
+    report = asyncio.run(suite.run(booted))
+    typer.echo(report.summary())
+    if not report.passed:
+        raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# Workspace
+# ---------------------------------------------------------------------------
 
 
 @workspace_app.command("list")

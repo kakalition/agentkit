@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from typer.testing import CliRunner
+
+from agentkit.cli import app as cli_app
+from agentkit.foundation.commands import load_bootstrap
+from agentkit.foundation.generators import KINDS, generate, target_path
+
+
+def test_generators_write_valid_python(tmp_path: Path):
+    for kind in KINDS:
+        written = generate(kind, "My-Thing", directory=tmp_path)
+        assert written.exists()
+        compile(written.read_text(), str(written), "exec")
+        assert target_path(kind, "My-Thing", tmp_path) == written
+
+
+def test_generator_overwrite_guard(tmp_path: Path):
+    generate("tool", "add_note", directory=tmp_path)
+    try:
+        generate("tool", "add_note", directory=tmp_path)
+    except FileExistsError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("expected FileExistsError")
+    generate("tool", "add_note", directory=tmp_path, force=True)
+
+
+def test_generated_provider_names_classes(tmp_path: Path):
+    path = generate("provider", "notes", directory=tmp_path)
+    namespace: dict = {}
+    exec(compile(path.read_text(), str(path), "exec"), namespace)
+    assert "NotesProvider" in namespace
+    compiled_model = generate("model", "note", directory=tmp_path)
+    exec(compile(compiled_model.read_text(), str(compiled_model), "exec"), {})
+
+
+def test_unknown_generator_raises():
+    try:
+        generate("nope", "x")
+    except KeyError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("expected KeyError")
+
+
+def test_cli_make_tool(tmp_path: Path):
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["make:tool", "add_note", "--path", str(tmp_path)])
+    assert result.exit_code == 0, result.stdout
+    assert (tmp_path / "tools" / "add_note.py").exists()
+
+    again = runner.invoke(cli_app, ["make:tool", "add_note", "--path", str(tmp_path)])
+    assert again.exit_code == 1
+
+
+def test_cli_about():
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["about"])
+    assert result.exit_code == 0
+    assert "agentkit" in result.stdout
+
+
+def test_load_bootstrap_from_env(tmp_path: Path, monkeypatch):
+    module = tmp_path / "my_bootstrap_mod.py"
+    module.write_text("from agentkit import App\napp = App('booted', discover=False)\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setenv("AGENTKIT_BOOTSTRAP", "my_bootstrap_mod:app")
+    loaded = load_bootstrap()
+    assert loaded.name == "booted"
+
+
+def test_cli_inspect_against_bootstrap(tmp_path: Path, monkeypatch):
+    module = tmp_path / "inspect_bootstrap_mod.py"
+    module.write_text(
+        "from agentkit import App, Agent\n"
+        "app = App('inspected', discover=False)\n"
+        "app.agent(Agent.make('inspected').instructions('x').output(str))\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["inspect", "--bootstrap", "inspect_bootstrap_mod:app"])
+    assert result.exit_code == 0, result.stdout
+    assert "inspected" in result.stdout
