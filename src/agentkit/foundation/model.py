@@ -23,6 +23,7 @@ from typing import Any
 from sqlalchemy import func
 from sqlmodel import SQLModel, select
 
+from agentkit.errors import NotFound
 from agentkit.foundation.db import active_repos, session_scope
 
 
@@ -153,6 +154,42 @@ class Model(SQLModel):
         return rows[0] if rows else None
 
     @classmethod
+    def first_or_fail(cls, **filters: Any) -> Any:
+        row = cls.first(**filters)
+        if row is None:
+            raise NotFound(f"{cls.__name__} not found for {filters!r}")
+        return row
+
+    @classmethod
+    def find_or_fail(cls, ident: Any) -> Any:
+        row = cls.get(ident)
+        if row is None:
+            raise NotFound(f"{cls.__name__} {ident!r} not found")
+        return row
+
+    @classmethod
+    def first_or_create(cls, *, defaults: dict[str, Any] | None = None, **filters: Any) -> Any:
+        row = cls.first(**filters)
+        if row is not None:
+            return row
+        return cls.create(**{**filters, **(defaults or {})})
+
+    @classmethod
+    def update_or_create(
+        cls, *, defaults: dict[str, Any] | None = None, **filters: Any
+    ) -> Any:
+        row = cls.first(**filters)
+        if row is None:
+            return cls.create(**{**filters, **(defaults or {})})
+        for field, value in (defaults or {}).items():
+            setattr(row, field, value)
+        with _scope() as repos:
+            repos.session.add(row)
+            repos.session.flush()
+            repos.session.refresh(row)
+        return row
+
+    @classmethod
     def get(cls, ident: Any) -> Any:
         with _scope() as repos:
             return repos.session.get(cls, ident)
@@ -163,6 +200,11 @@ class Model(SQLModel):
 
     @classmethod
     def create(cls, **values: Any) -> Any:
+        if "owner_id" not in values and hasattr(cls, "owner_id"):
+            from agentkit.foundation.facade import get_current_app
+
+            app = get_current_app()
+            values["owner_id"] = getattr(getattr(app, "settings", None), "owner_id", "owner")
         with _scope() as repos:
             instance = cls(**values)
             repos.session.add(instance)

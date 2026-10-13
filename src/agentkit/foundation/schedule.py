@@ -50,6 +50,30 @@ class ScheduleBuilder:
     def disabled(self) -> ScheduleBuilder:
         return self.enabled(False)
 
+    def timezone(self, value: str) -> ScheduleBuilder:
+        self._spec["timezone"] = value
+        return self
+
+    def description(self, value: str) -> ScheduleBuilder:
+        self._spec["description"] = value
+        return self
+
+    def when(self, predicate: Any) -> ScheduleBuilder:
+        self._spec["when_predicate"] = predicate
+        return self
+
+    def without_overlapping(self) -> ScheduleBuilder:
+        self._spec["without_overlapping"] = True
+        return self
+
+    def on_one_server(self) -> ScheduleBuilder:
+        self._spec["on_one_server"] = True
+        return self
+
+    def run_in_background(self) -> ScheduleBuilder:
+        self._spec["run_in_background"] = True
+        return self
+
     # -- cron frequencies ----------------------------------------------
     def cron(self, expression: str) -> ScheduleBuilder:
         self._spec.pop("when", None)

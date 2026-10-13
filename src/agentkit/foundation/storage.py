@@ -32,6 +32,10 @@ class Filesystem:
             raise InvalidInput(f"path {relative!r} escapes storage")
         return target
 
+    def disk(self, name: str) -> Filesystem:
+        """A named disk (a subdirectory), like Laravel's ``Storage::disk``."""
+        return Filesystem(self.root / name)
+
     def _rel(self, path: Path) -> str:
         try:
             return path.relative_to(self.root).as_posix()

@@ -254,3 +254,69 @@ async def test_middleware_base(runtime: Runtime):
     app.boot()
     await app.run("hi")
     assert calls == ["hi"]
+
+
+# -- Queue ------------------------------------------------------------------
+_ran: list[str] = []
+
+
+class _WriteJob(Job):
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+    def handle(self, app) -> None:  # noqa: ANN001
+        _ran.append(self.value)
+
+
+class _BoomJob(Job):
+    max_retries = 3
+
+    def handle(self, app) -> None:  # noqa: ANN001
+        raise RuntimeError("boom")
+
+
+def test_job_serialize_roundtrip():
+    from agentkit.foundation.queue import deserialize_job, serialize_job
+
+    payload = serialize_job(_WriteJob("a"))
+    assert payload["kwargs"] == {"value": "a"}
+    assert payload["job"].endswith(":_WriteJob")
+    assert deserialize_job(payload).value == "a"
+
+
+async def test_queue_push_and_run_once(runtime: Runtime):
+    app = _app(runtime)
+    app.boot()
+    _ran.clear()
+    app.queue.push(_WriteJob("q"))
+    assert app.queue.size() >= 1
+    assert await app.queue.run_once() is True
+    assert _ran == ["q"]
+    assert await app.queue.run_once() is False  # queue drained
+
+
+async def test_app_dispatch_honours_queue_enabled(runtime: Runtime):
+    runtime.settings.queue_enabled = True
+    try:
+        app = _app(runtime)
+        app.boot()
+        _ran.clear()
+        job_id = await app.dispatch(_WriteJob("d"))
+        assert isinstance(job_id, int)
+        assert _ran == []                 # not run inline; it was queued
+        assert await app.queue.run_once() is True
+        assert _ran == ["d"]
+    finally:
+        runtime.settings.queue_enabled = False
+
+
+async def test_queue_marks_failed_after_retries(runtime: Runtime):
+    app = _app(runtime)
+    app.boot()
+    app.queue.push(_BoomJob())
+    # Each run retries the failing job until max_retries is reached.
+    for _ in range(_BoomJob.max_retries):
+        assert await app.queue.run_once() is True
+    assert await app.queue.run_once() is False   # failed jobs are not eligible
+    failed = app.queue.failed()
+    assert failed and failed[0].error

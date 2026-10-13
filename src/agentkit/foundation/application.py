@@ -33,12 +33,14 @@ from agentkit.foundation.facades import (
     FeedbackService,
     LogService,
     MemoryService,
+    QueueService,
     ScheduleService,
     StorageService,
 )
 from agentkit.foundation.jobs import CacheStore
 from agentkit.foundation.notifications import Notifier
 from agentkit.foundation.provider import Provider
+from agentkit.foundation.queue import Job, Queue
 from agentkit.foundation.schedule import ScheduleBuilder
 from agentkit.foundation.storage import Filesystem
 from agentkit.logging import get_logger
@@ -86,6 +88,7 @@ class App:
         self.events = Dispatcher(self)
         self._providers: list[Any] = []
         self._provider_instances: list[Provider] = []
+        self._deferred: dict[Any, Provider] = {}
         self._middlewares: list[Any] = []
         self._booted = False
         self._agent_builder: AgentBuilder | None = None
@@ -108,6 +111,7 @@ class App:
         self._cache = CacheStore()
         self._notifier = Notifier(self)
         self._storage: Filesystem | None = None
+        self._queue: Queue | None = None
 
         self.container.instance("app", self)
         self._bind_facades()
@@ -143,6 +147,11 @@ class App:
         self._provider_instances = instances
 
         for provider in instances:
+            if provider.provides():
+                for service in provider.provides():
+                    self._deferred[service] = provider
+                continue  # deferred: registered on first use
+            self._apply_bindings(provider)
             provider.register(self)
             for command in provider.commands():
                 self.command(command)
@@ -151,6 +160,8 @@ class App:
                 self.schedules(contributed)
 
         for provider in instances:
+            if provider.provides():
+                continue
             provider.boot(self)
 
         self._apply_schedules()
@@ -394,8 +405,23 @@ class App:
         self.container.bind(name, factory, singleton=singleton)
         return self
 
-    def make(self, name: str) -> Any:
+    def make(self, name: Any) -> Any:
+        provider = self._deferred.get(name)
+        if provider is not None and not getattr(provider, "_ak_registered", False):
+            self._apply_bindings(provider)
+            provider.register(self)
+            provider._ak_registered = True  # type: ignore[attr-defined]
         return self.container.make(name)
+
+    def resolve(self, name: Any) -> Any:
+        """Resolve a binding (alias for :meth:`make`, Laravel's ``resolve``)."""
+        return self.make(name)
+
+    def _apply_bindings(self, provider: Provider) -> None:
+        for abstract, concrete in provider.bindings.items():
+            self.container.bind(abstract, _binding_factory(concrete))
+        for abstract, concrete in provider.singletons.items():
+            self.container.singleton(abstract, _binding_factory(concrete))
 
     @property
     def db(self) -> Any:
@@ -419,20 +445,28 @@ class App:
         """The notifier; register channels with ``app.notifier.channel(name, sender)``."""
         return self._notifier
 
+    @property
+    def queue(self) -> Queue:
+        """The database-backed job queue (see the ``Queue`` facade)."""
+        if self._queue is None:
+            self._queue = Queue(self)
+        return self._queue
+
     def notify(self, notification: Any, *, to: Any = None, conversation_id: str | None = None) -> Any:
         """Send a :class:`~agentkit.foundation.notifications.Notification`."""
         return self._notifier.send(notification, to=to, conversation_id=conversation_id)
 
     async def dispatch(self, job: Any, *, queue: str | None = None) -> Any:
-        """Run a :class:`~agentkit.foundation.jobs.Job`.
+        """Run a :class:`~agentkit.foundation.queue.Job`.
 
-        When durability is initialised the job runs as a durable, retryable
-        workflow; otherwise it runs inline.
+        When ``queue_enabled`` is set the job is pushed onto the queue and returns
+        its id (a worker processes it, e.g. ``agentkit queue:work``); otherwise it
+        runs inline. With durability initialised, inline work is a durable workflow.
         """
-        from agentkit.foundation.jobs import Job
-
         if not isinstance(job, Job):
             raise TypeError("dispatch() expects a Job instance")
+        if getattr(self.settings, "queue_enabled", False):
+            return self.queue.push(job, queue=queue)
         return await job.dispatch(self)
 
     # -- runtime / deps -------------------------------------------------
@@ -589,6 +623,7 @@ class App:
         self.container.instance("feedback", FeedbackService(self))
         self.container.instance("cache", CacheService(self))
         self.container.instance("storage", StorageService(self))
+        self.container.instance("queue", QueueService(self))
 
 
 class ChannelSpec:
@@ -612,6 +647,13 @@ class Turn:
     approve: Any = None
     result: Any = None
     extras: dict[str, Any] = field(default_factory=dict)
+
+
+def _binding_factory(concrete: Any) -> Any:
+    """A container factory for a provider binding (a class is built/autowired)."""
+    if isinstance(concrete, type):
+        return lambda container, cls=concrete: container.build(cls)
+    return concrete
 
 
 def _spec_fields(spec: Any) -> dict[str, Any]:

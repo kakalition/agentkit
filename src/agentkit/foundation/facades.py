@@ -165,6 +165,29 @@ class FeedbackService:
         with session_scope(self.app) as repos:
             return repos.feedback.average(conversation_id=conversation_id)
 
+class QueueService:
+    """Backs the ``Queue`` facade."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    @property
+    def queue(self) -> Any:
+        return self.app.queue
+
+    def push(self, job: Any, **kwargs: Any) -> int:
+        return self.queue.push(job, **kwargs)
+
+    async def run_once(self, queue: str | None = None) -> bool:
+        return await self.queue.run_once(queue)
+
+    def size(self, queue: str | None = None) -> int:
+        return self.queue.size(queue)
+
+    def failed(self, *, limit: int = 50) -> list[Any]:
+        return self.queue.failed(limit=limit)
+
+
 class LogService:
     """Backs the ``Log`` facade (structured logging with redaction)."""
 
@@ -296,6 +319,12 @@ class Storage(Facade):
         return "storage"
 
 
+class Queue(Facade):
+    @classmethod
+    def binding(cls) -> str:
+        return "queue"
+
+
 __all__ = [
     "Cache",
     "CacheService",
@@ -309,6 +338,8 @@ __all__ = [
     "LogService",
     "Memory",
     "MemoryService",
+    "Queue",
+    "QueueService",
     "Schedule",
     "ScheduleService",
     "Storage",

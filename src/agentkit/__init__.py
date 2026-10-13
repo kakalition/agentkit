@@ -44,6 +44,7 @@ from agentkit.foundation import (
     ChannelSpec,
     Command,
     Container,
+    DeferrableProvider,
     Dispatcher,
     Event,
     Events,
@@ -61,6 +62,7 @@ from agentkit.foundation import (
     Pipeline,
     Provider,
     Query,
+    Queue,
     Repository,
     RepositoryQuery,
     Rule,
@@ -92,6 +94,20 @@ from agentkit.guardrails import (
     wrap_untrusted,
 )
 from agentkit.health import Check, db_check, health_routes, install_signal_handlers
+from agentkit.helpers import (
+    app,
+    cache,
+    config,
+    dispatch,
+    env,
+    event,
+    logger,
+    notify,
+    queue,
+    report,
+    resolve,
+    storage,
+)
 from agentkit.hitl import Clarification, clarification_tool
 from agentkit.knowledge import KnowledgeBase, chunk_text
 from agentkit.limits import Budget
@@ -152,6 +168,7 @@ __all__ = [
     "Agent",
     "App",
     "Provider",
+    "DeferrableProvider",
     "Facade",
     "Event",
     "ChannelSpec",
@@ -177,6 +194,7 @@ __all__ = [
     "Notifier",
     "SentNotification",
     "Job",
+    "Queue",
     "Cache",
     "CacheStore",
     "Storage",
@@ -185,6 +203,19 @@ __all__ = [
     "Rule",
     "ValidationError",
     "validate",
+    # global helpers (Laravel-style)
+    "app",
+    "config",
+    "env",
+    "resolve",
+    "dispatch",
+    "event",
+    "notify",
+    "cache",
+    "storage",
+    "queue",
+    "logger",
+    "report",
     "current_app",
     "using",
     "run_pipeline",

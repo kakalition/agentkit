@@ -27,10 +27,11 @@ from agentkit.foundation.facades import (
     Feedback,
     Log,
     Memory,
+    Queue,
     Schedule,
     Storage,
 )
-from agentkit.foundation.jobs import CacheStore, Job
+from agentkit.foundation.jobs import CacheStore
 from agentkit.foundation.middleware import (
     guardrails_hooks,
     lifecycle_hooks,
@@ -40,7 +41,8 @@ from agentkit.foundation.middleware import (
 from agentkit.foundation.model import Model, Query
 from agentkit.foundation.notifications import Notification, Notifier, SentNotification
 from agentkit.foundation.pipeline import Middleware, Pipeline, run_pipeline
-from agentkit.foundation.provider import Provider
+from agentkit.foundation.provider import DeferrableProvider, Provider
+from agentkit.foundation.queue import Job
 from agentkit.foundation.repository import Repository, RepositoryQuery
 from agentkit.foundation.scaffold import package_name, scaffold_project
 from agentkit.foundation.schedule import ScheduleBuilder
@@ -72,8 +74,10 @@ __all__ = [
     "Notification",
     "Notifier",
     "Pipeline",
+    "DeferrableProvider",
     "Provider",
     "Query",
+    "Queue",
     "Repository",
     "RepositoryQuery",
     "Rule",

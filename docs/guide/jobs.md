@@ -5,29 +5,51 @@ storage, validation, and base classes for services and listeners.
 
 ## Jobs
 
-A **job** is a unit of work you can dispatch. When durability is initialised
-(`durability.init(...)`) it runs as a durable, retryable workflow; otherwise it
-runs inline.
+A **job** is a unit of work you can dispatch — inline or onto the durable queue.
 
 ```python
 from agentkit import Job
 
 class SyncKnowledge(Job):
     queue = "default"
-    max_retries = 2
+    max_retries = 3
 
     def __init__(self, source: str) -> None:
         self.source = source
 
     def handle(self, app) -> None:
-        kb = app.make("knowledge")
-        kb.add_directory(self.source)
+        app.make("knowledge").add_directory(self.source)
 
 await app.dispatch(SyncKnowledge("./docs"))
 ```
 
-`handle` may be sync or async. Use jobs for work that shouldn't run inline in a
-turn — imports, exports, embeds, long tool calls.
+`handle` may be sync or async. Jobs store their constructor arguments on `self` so
+they can be serialized when queued.
+
+### Inline vs. queued
+
+By default (`QUEUE_ENABLED=false`) `app.dispatch(job)` runs the job **inline** (a
+durable workflow when durability is initialised). Set `QUEUE_ENABLED=true` and the
+job is persisted to the `queued_jobs` table and processed by a worker:
+
+```bash
+QUEUE_ENABLED=true agentkit queue:work            # long-running worker
+agentkit queue:work --once                        # process what's available, exit
+agentkit queue:work --queue=default --max-jobs 10
+agentkit queue:failed                             # list failed jobs
+```
+
+```python
+from agentkit import Queue
+
+Queue.push(SyncKnowledge("./docs"), delay=60)     # enqueue with a delay
+Queue.size()                                      # pending count
+await Queue.run_once()                            # process one (in-process)
+```
+
+Failed jobs retry up to `max_retries`, then are marked failed with their error and
+listed by `queue:failed`. Jobs are identified by their import path, so keep job
+classes at module scope.
 
 ## Cache
 

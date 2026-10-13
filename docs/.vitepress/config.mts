@@ -69,6 +69,7 @@ export default defineConfig({
             { text: "Tools", link: "/guide/tools" },
             { text: "Configuration", link: "/guide/configuration" },
             { text: "Facades", link: "/guide/facades" },
+            { text: "Helpers", link: "/guide/helpers" },
           ],
         },
         {

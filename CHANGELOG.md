@@ -42,6 +42,19 @@ All notable changes to this project are documented here. The format follows
   `Rule`/`validate`; and `Listener`/`Middleware` base classes. `agentkit new`
   now generates a Laravel-style flat `app/` package (models, repositories,
   providers, tools) instead of a nested project package.
+- **Laravel parity, round two**: a durable, database-backed **queue**
+  (`QUEUE_ENABLED`, `app.dispatch` queues when enabled, `agentkit queue:work` /
+  `queue:failed` / `queue:retry` / `queue:flush`, retries + failures); provider
+  `bindings`/`singletons` maps and **deferred providers** (`DeferrableProvider`);
+  container **autowiring** (`make`/`build`/`resolve`); **global helpers**
+  (`app`, `config`, `env`, `dispatch`, `event`, `notify`, `cache`, `storage`,
+  `queue`, `logger`, `report`, `resolve`); Eloquent-style `Model.first_or_create`
+  / `update_or_create` / `find_or_fail` (with automatic `owner_id`); fluent
+  schedule extras (`timezone`, `description`, `without_overlapping`,
+  `on_one_server`, `run_in_background`); `agentkit schedule:run`; and a full,
+  explorable Laravel-style project template (`app/Providers`, `Console/Kernel`,
+  `Jobs`, `Events`, `Listeners`, `Notifications`, `Policies`, `Rules`, `Services`,
+  `Repositories`, `Models`, `Middleware`, `Tools`, `Agents`).
 - **Skills** (`agentkit.skills`): discoverable `SKILL.md` folders with YAML front
   matter (`Skill`, `SkillRegistry`, `load_skill_file`, `parse_front_matter`).
   `Agent.make(...).skills()` adds a compact index to the instructions and the

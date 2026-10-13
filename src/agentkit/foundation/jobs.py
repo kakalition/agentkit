@@ -1,46 +1,18 @@
-"""Jobs and the in-process cache — Laravel's ``Job``/``Cache`` for agents.
+"""The in-process cache — Laravel's ``Cache`` for agents.
 
-A **job** is a unit of work you can dispatch. When durability is initialised
-(``durability.init(...)``) the job runs as a durable, retryable workflow;
-otherwise it runs inline::
-
-    from agentkit import Job
-
-    class SyncKnowledge(Job):
-        max_retries = 2
-        def handle(self, app) -> None:
-            ...
-
-    await app.dispatch(SyncKnowledge())
+``Job``/``Queue`` now live in :mod:`agentkit.foundation.queue`; ``Job`` is
+re-exported here for convenience.
 """
 
 from __future__ import annotations
 
-import inspect
 import time
 from collections import OrderedDict
-from typing import Any, ClassVar
+from typing import Any
+
+from agentkit.foundation.queue import Job
 
 __all__ = ["CacheStore", "Job"]
-
-
-class Job:
-    """Base class for dispatchable work."""
-
-    queue: ClassVar[str] = "default"
-    max_retries: ClassVar[int] = 3
-
-    def handle(self, app: Any) -> Any:
-        raise NotImplementedError
-
-    async def dispatch(self, app: Any) -> Any:
-        result = self.handle(app)
-        if inspect.isawaitable(result):
-            return await result
-        return result
-
-    def __call__(self, app: Any) -> Any:
-        return self.handle(app)
 
 
 class CacheStore:

@@ -64,6 +64,40 @@ class NotesProvider(Provider):
 
 `App.boot()` collects these automatically.
 
+## Declaring bindings and singletons
+
+For simple container bindings, declare them as maps on the provider (Laravel's
+`$bindings` / `$singletons`):
+
+```python
+class NotesProvider(Provider):
+    bindings = {Notifier: PingdomNotifier}       # abstract -> concrete
+    singletons = {ServerProvider: ServerTools}
+```
+
+When the provider loads, the framework registers these automatically. Binding to a
+*class* means the container **builds** it (autowiring its typed dependencies);
+binding to a *factory* calls the factory with the container.
+
+## Deferred providers
+
+If a provider only registers bindings, defer its loading until one of them is
+first resolved (Laravel's deferred providers):
+
+```python
+from agentkit import DeferrableProvider
+
+class RiakProvider(DeferrableProvider):
+    def provides(self):
+        return [Connection]                      # names this provider binds
+
+    def register(self, app):
+        app.singleton(Connection, lambda c: Connection(c.make("config").riak))
+```
+
+`register`/`boot` are skipped at boot; the provider is loaded the first time
+`app.make(Connection)` (or a facade resolving it) runs.
+
 ## Providing binds into the container
 
 ```python

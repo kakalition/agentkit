@@ -211,10 +211,11 @@ inside channels.
 
 | Laravel | agentkit |
 | --- | --- |
-| Service container | `App` (`bind`/`singleton`/`make`) |
-| Service provider | `Provider` (`register`/`boot`) |
-| Facade | `Memory`, `Schedule`, `DB`, `Events`, `Log`, `Cache`, `Storage`, `Feedback` |
-| Artisan | `agentkit` CLI (`new`, `make:*`, `serve`, `tinker`, `inspect`) |
+| Service container | `App` (`bind`/`singleton`/`make`/`build`) + autowiring |
+| Service provider | `Provider` (`register`/`boot`; `bindings`/`singletons`; `DeferrableProvider`) |
+| Facade | `Memory`, `Schedule`, `DB`, `Events`, `Log`, `Cache`, `Storage`, `Queue`, `Feedback` |
+| Global helpers | `app()`, `config()`, `env()`, `dispatch()`, `event()`, `storage()`, `cache()`, `queue()` |
+| Artisan | `agentkit` CLI (`new`, `make:*`, `serve`, `tinker`, `inspect`, `schedule:run`, `queue:work`) |
 | Events & listeners | `app.on("turn.end", ...)` + `Listener` |
 | Middleware | `app.middleware(...)` + `Middleware` over the turn |
 | `config/*.php` | `config/<name>.py` + `Section` (`defaults < file < env`) |

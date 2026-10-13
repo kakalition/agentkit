@@ -43,25 +43,44 @@ agentkit new my-agent
 cd my-agent
 ```
 
-You get a runnable project in one command:
+You get a full, runnable, **explorable** project in one command:
 
 ```
 my-agent/
-├── bootstrap.py              # App(...) — the boot target
-├── SOUL.md                   # the persona
+├── bootstrap.py                # App(...) — the boot target
+├── SOUL.md                     # the persona
 ├── pyproject.toml
 ├── .env.example
 ├── conftest.py
-├── my_agent/
-│   ├── config.py             # Settings + a layered config Section
-│   ├── providers.py          # the service provider (agent, tools, listeners)
-│   └── tools.py              # tool functions
-├── skills/hello/SKILL.md     # a discoverable skill
-├── prompts/system.md         # a versioned prompt
-├── config/app.py             # config/<section>.py overrides
-├── evals/smoke.yaml          # an evaluation suite
-└── tests/test_smoke.py       # a first test
+├── app/
+│   ├── config.py               # Settings + a layered config Section
+│   ├── Agents/assistant.py     # the agent builder (persona, tools, policy)
+│   ├── Console/Kernel.py       # schedule() + commands()
+│   ├── Console/Commands/       # CLI commands
+│   ├── Events/                 # event payloads
+│   ├── Listeners/              # event listeners
+│   ├── Jobs/                   # queued / durable jobs
+│   ├── Middleware/             # turn middleware
+│   ├── Models/                 # models (tables)
+│   ├── Notifications/          # notifications
+│   ├── Policies/               # tool policies
+│   ├── Providers/              # AppServiceProvider (mandatory), EventServiceProvider
+│   ├── Repositories/           # Repository classes + AppRepositories
+│   ├── Rules/                  # validation rules
+│   ├── Services/               # domain services
+│   └── Tools/                  # tool functions
+├── config/app.py               # config/<section>.py overrides
+├── database/README.md          # schema/migration notes
+├── skills/hello/SKILL.md       # a discoverable skill
+├── prompts/system.md           # a versioned prompt
+├── evals/smoke.yaml            # an evaluation suite
+├── storage/                    # local artifacts (Storage facade)
+└── tests/
 ```
+
+The tree mirrors Laravel: `app/Providers/AppServiceProvider.py` is where everything
+is wired, `app/Console/Kernel.py` holds the schedule and commands, and each layer has
+a working example you can read, extend, or delete.
 
 Useful flags:
 

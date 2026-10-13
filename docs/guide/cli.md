@@ -25,6 +25,11 @@ agentkit up               # alias for serve
 agentkit tinker           # an interactive REPL against the booted app
 agentkit inspect          # agents, tools, channels, commands, config
 agentkit schedule:list    # durable jobs
+agentkit schedule:run     # run due jobs now (catch-up)
+agentkit queue:work       # process queued jobs (requires QUEUE_ENABLED=true)
+agentkit queue:failed     # list failed jobs
+agentkit queue:retry ID   # requeue a failed job
+agentkit queue:flush      # delete failed jobs
 agentkit about            # version, agent home, model
 ```
 

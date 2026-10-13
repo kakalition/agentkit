@@ -756,3 +756,6 @@ class Repositories:
         self.feedback = FeedbackRepo(self.session, self.owner_id)
         for attribute, repo_class in type(self).repositories.items():
             setattr(self, attribute, repo_class(self.session, self.owner_id))
+        from agentkit.foundation.queue import QueueRepo
+
+        self.queue = QueueRepo(self.session, self.owner_id)

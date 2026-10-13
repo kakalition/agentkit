@@ -69,6 +69,11 @@ class AgentSettings(BaseSettings):
     # prompts — a file-backed prompt registry (``prompts/<name>.md``).
     prompts_dir: str | None = None
 
+    # queue — when enabled, ``app.dispatch(job)`` pushes to the DB queue and a
+    # worker (``agentkit queue:work``) processes it; otherwise jobs run inline.
+    queue_enabled: bool = False
+    queue_default: str = "default"
+
     # storage — agents live under ``workspace_root``; ``agent_home`` defaults to
     # ``workspace_root/<agent_name>`` and can be overridden with ``AGENT_HOME``.
     workspace_root: Path = Field(
