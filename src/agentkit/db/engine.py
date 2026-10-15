@@ -40,6 +40,12 @@ def async_database_url(url: str) -> str:
         return "sqlite+aiosqlite:///" + url[len("sqlite+libsql:///") :]
     if url.startswith("sqlite://"):
         return "sqlite+aiosqlite://" + url[len("sqlite://") :]
+    if url.startswith("postgresql+asyncpg://"):
+        return url
+    if url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + url[len("postgresql://") :]
+    if url.startswith("postgres://"):
+        return "postgresql+asyncpg://" + url[len("postgres://") :]
     return url
 
 

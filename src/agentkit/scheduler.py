@@ -50,12 +50,19 @@ def task(name: str):
 
 
 async def invoke_task(task_name: str, args_json: str = "{}") -> Any:
+    from agentkit import metrics
+
     function = TASKS.get(task_name)
     if function is None:
         raise ValueError(f"no task registered as {task_name!r}")
-    result = function(**json.loads(args_json or "{}"))
-    if inspect.isawaitable(result):
-        return await result
+    try:
+        result = function(**json.loads(args_json or "{}"))
+        if inspect.isawaitable(result):
+            result = await result
+    except Exception:
+        metrics.record_scheduler_run(task_name, "error")
+        raise
+    metrics.record_scheduler_run(task_name, "ok")
     return result
 
 

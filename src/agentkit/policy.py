@@ -8,6 +8,7 @@ declarative instead of baked into a callback.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from agentkit.errors import PermissionDenied
 
@@ -28,6 +29,7 @@ class ToolPolicy:
     allow: set[str] | None = None
     deny: set[str] = field(default_factory=set)
     require_approval: set[str] = field(default_factory=set)
+    require_roles: dict[str, set[str]] = field(default_factory=dict)
 
     def decision(self, tool: str) -> str:
         if tool in self.deny:
@@ -41,10 +43,19 @@ class ToolPolicy:
     def is_allowed(self, tool: str) -> bool:
         return self.decision(tool) != DENY
 
-    def check(self, tool: str) -> None:
-        """Raise :class:`PermissionDenied` if the tool is not allowed."""
+    def roles_for(self, tool: str) -> set[str]:
+        return set(self.require_roles.get(tool, ()))
+
+    def check(self, tool: str, actor: Any = None) -> None:
+        """Raise :class:`PermissionDenied` if the tool is not allowed for ``actor``."""
         if self.decision(tool) == DENY:
             raise PermissionDenied(f"tool not permitted: {tool}", detail={"tool": tool})
+        required = self.roles_for(tool)
+        if required and (actor is None or not actor.has_role(*required)):
+            raise PermissionDenied(
+                f"tool requires role: {tool}",
+                detail={"tool": tool, "roles": sorted(required)},
+            )
 
     def approvals_required(self, tool: str) -> bool:
         return self.decision(tool) == APPROVE

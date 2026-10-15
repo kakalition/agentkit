@@ -1,77 +1,90 @@
 from __future__ import annotations
 
-from pathlib import Path
+import asyncio
 
-import pytest
-from pydantic_ai.messages import ModelResponse, TextPart
-from pydantic_ai.models.function import FunctionModel
+from cryptography.fernet import Fernet
+from fastapi.testclient import TestClient
+from typer.testing import CliRunner
 
-from agentkit import Agent, App, Budget, Prompt, PromptRegistry
-from agentkit.errors import BudgetExceeded
-from agentkit.limits import check_budget
-from agentkit.runtime import Runtime
-
-
-def _app(runtime: Runtime, model) -> App:  # noqa: ANN001
-    app = App(name="ops", settings=runtime.settings, discover=False, model=model)
-    app._runtime = runtime
-    app.agent(Agent.make("ops").instructions("x").output(str))
-    return app
+from agentkit import metrics
+from agentkit.cli import app as cli_app
+from agentkit.config import AgentSettings, get_settings
+from agentkit.db.engine import async_database_url, create_async_db_engine
+from agentkit.health import db_check, readiness_checks, run_checks
+from agentkit.runtime import build_runtime
+from agentkit.webui.app import build_webui_app
 
 
-def test_prompt_registry_discovers_versions(tmp_path: Path):
-    prompts = tmp_path / "prompts"
-    prompts.mkdir()
-    (prompts / "greeting.md").write_text(
-        "---\nname: greeting\nversion: 1\n---\nHi {name}, welcome.", encoding="utf-8"
+def test_metrics_render_and_gate(tmp_path):
+    settings = AgentSettings(owner_id="o", agent_home=tmp_path, memory_embedding_backend="hash")
+    runtime = build_runtime(settings)
+    client = TestClient(build_webui_app(runtime=runtime, settings=settings))
+    # disabled by default: the SPA fallback serves HTML, not Prometheus text
+    assert "agentkit_turns_total" not in client.get("/metrics").text
+
+    settings.metrics_enabled = True
+    metrics.enable(settings)
+    metrics.record_turn("ok", 0.01)
+    metrics.record_tool_error("db_find")
+    metrics.record_queue_depth("default", 2)
+    metrics.record_scheduler_run("x", "ok")
+    metrics.record_cost(0.25)
+
+    client = TestClient(build_webui_app(runtime=runtime, settings=settings))
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert "agentkit_turns_total" in response.text
+    assert "agentkit_cost_usd_total" in response.text
+
+
+def test_postgres_url_mapping():
+    assert async_database_url("postgresql://u:p@h/db") == "postgresql+asyncpg://u:p@h/db"
+    assert async_database_url("postgres://u@h/db") == "postgresql+asyncpg://u@h/db"
+    assert async_database_url("sqlite:///x.db") == "sqlite+aiosqlite:///x.db"
+
+
+def test_create_postgres_engine_without_connecting():
+    engine = create_async_db_engine("postgresql://u:p@localhost:5432/db")
+    assert engine.dialect.name == "postgresql"
+    asyncio.run(engine.dispose())
+
+
+async def test_readiness_checks_are_dependency_aware(tmp_path):
+    key = Fernet.generate_key().decode()
+    settings = AgentSettings(
+        owner_id="o",
+        agent_home=tmp_path,
+        memory_embedding_backend="hash",
+        queue_enabled=True,
+        credentials_enabled=True,
+        credentials_key=key,
     )
-    (prompts / "greeting_v2.md").write_text(
-        "---\nname: greeting\nversion: 2\n---\nHello {name}!", encoding="utf-8"
-    )
-    registry = PromptRegistry([prompts]).discover()
-    assert registry.get("greeting").version == 2
-    assert registry.render("greeting", name="Ada") == "Hello Ada!"
+    runtime = build_runtime(settings)
+    names = {check.name for check in readiness_checks(runtime, settings)}
+    assert {"db", "queue", "vault"} <= names
+
+    ok, results = await run_checks([db_check(runtime)])
+    assert ok is True and results["db"] is True
 
 
-def test_builder_prompt_from_file(tmp_path: Path):
-    prompt_file = tmp_path / "system.md"
-    prompt_file.write_text("---\nversion: 1\n---\nBe {style}.", encoding="utf-8")
-    agent = Agent.make("p").instructions("base").prompt(prompt_file, style="concise").output(str).build()
-    assert agent is not None
+def test_cli_migrate_backup_health(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MEMORY_EMBEDDING_BACKEND", "hash")
+    get_settings.cache_clear()
+    runner = CliRunner()
 
+    migrated = runner.invoke(cli_app, ["migrate"])
+    assert migrated.exit_code == 0, migrated.output
+    assert (tmp_path / "home" / "agent.db").is_file()
 
-def test_prompt_dataclass_render():
-    assert Prompt("x", "Hello {who}").render(who="world") == "Hello world"
+    backup = runner.invoke(cli_app, ["db:backup"])
+    assert backup.exit_code == 0, backup.output
+    assert (tmp_path / "home" / "agent.db.bak").is_file()
 
+    restored = runner.invoke(cli_app, ["db:restore", str(tmp_path / "home" / "agent.db.bak"), "--yes"])
+    assert restored.exit_code == 0, restored.output
 
-async def test_budget_violations_and_check(runtime: Runtime):
-    app = _app(runtime, None)
-    app.boot()
-    async with app.repositories() as repos:
-        await repos.usage.add(conversation_id="cli:1", requests=3, total_tokens=100, cost_usd=0.5)
-        with pytest.raises(BudgetExceeded):
-            await check_budget(repos, Budget(max_requests=1))
-        totals = await check_budget(repos, Budget(max_requests=10, max_tokens=1000, max_cost=5.0))
-        assert totals["requests"] == 3
-
-
-async def test_app_budget_blocks_run(runtime: Runtime):
-    app = _app(runtime, FunctionModel(lambda m, i: ModelResponse(parts=[TextPart("ok")])))
-    app.budget(Budget(max_requests=0))
-    app.boot()
-    with pytest.raises(BudgetExceeded):
-        await app.run("hi")
-
-
-async def test_fork_and_replay(runtime: Runtime):
-    model = FunctionModel(lambda m, i: ModelResponse(parts=[TextPart("reply")]))
-    app = _app(runtime, model)
-    app.boot()
-    await app.run("first question", conversation_id="cli:main")
-    copied = await app.fork("cli:main", "cli:branch")
-    assert copied >= 2
-
-    replayed = await app.replay("cli:main", target="cli:replay")
-    assert replayed.output == "reply"
-    async with app.repositories() as repos:
-        assert await repos.messages.list("cli:replay")
+    health = runner.invoke(cli_app, ["health"])
+    assert health.exit_code == 0, health.output
+    assert "db: ok" in health.output
+    get_settings.cache_clear()

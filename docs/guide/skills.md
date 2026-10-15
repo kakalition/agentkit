@@ -102,6 +102,31 @@ registry.read_file("pdf-tools", "../secret")  # → error message, never the fil
 agentkit make:tool pdf_extract
 ```
 
+## Authoring skills
+
+The agent can write skills itself. `.skill_authoring()` adds two approval-gated
+tools that render valid front matter and re-discover the registry:
+
+```python
+agent.skill_authoring()   # save_skill / update_skill
+```
+
+```python
+# the model calls these (both require approval):
+save_skill("Pdf Tables", "Extract tables from PDFs", "Call read_skill_file …")
+update_skill("pdf-tables", "new instructions")
+```
+
+Under the hood, `write_skill_file` (from `agentkit.skills`) writes into the first
+registry root and `slugify_skill` normalizes names.
+
+## Distillation
+
+The [self-learning](/guide/self-learning) loop can turn a **recurring lesson** into
+a skill: once the same procedural lesson is seen `LEARNING_SKILL_THRESHOLD` times,
+reflection reports a skill candidate and — with `LEARNING_AUTO_SKILLS=true` —
+writes the `SKILL.md` for you.
+
 ## Inspecting from the CLI
 
 ```bash

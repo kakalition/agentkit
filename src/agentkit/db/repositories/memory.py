@@ -23,6 +23,7 @@ from agentkit.embeddings import (
 )
 
 MEMORY_KINDS = ("fact", "preference", "person", "date", "episodic", "procedural")
+MEMORY_STATUSES = ("active", "proposed", "rejected")
 
 
 def _recency(memory: Memory, now: datetime, half_life_days: float) -> float:
@@ -102,6 +103,7 @@ class MemoryRepo:
         importance: float = 0.5,
         source_conversation_id: str | None = None,
         expires_at: datetime | None = None,
+        status: str = "active",
     ) -> Memory:
         content = content.strip()
         self._check_kind(kind)
@@ -110,6 +112,7 @@ class MemoryRepo:
             owner_id=self.owner_id,
             content=content,
             kind=kind,
+            status=status,
             importance=float(importance),
             source_conversation_id=source_conversation_id,
             expires_at=expires_at,
@@ -174,14 +177,37 @@ class MemoryRepo:
             return None
         return memory
 
-    async def list(self, limit: int | None = None, *, kind: str | None = None) -> list[Memory]:
+    async def list(
+        self, limit: int | None = None, *, kind: str | None = None, status: str | None = "active"
+    ) -> list[Memory]:
         stmt = select(Memory).where(Memory.owner_id == self.owner_id)
         if kind is not None:
             stmt = stmt.where(Memory.kind == kind)
+        if status is not None:
+            stmt = stmt.where(Memory.status == status)
         stmt = stmt.order_by(Memory.updated_at.desc(), Memory.id.desc())
         rows = list((await self.session.exec(stmt)).all())
         if limit is not None and len(rows) > limit:
             rows = rows[:limit]
+        return rows
+
+    async def set_status(self, memory_id: int, status: str) -> bool:
+        """Change a memory's review status (``active`` | ``proposed`` | ``rejected``)."""
+        if status not in MEMORY_STATUSES:
+            raise ValueError(f"unknown memory status {status!r}")
+        memory = await self.get(memory_id)
+        if memory is None:
+            return False
+        memory.status = status
+        memory.updated_at = datetime.now(UTC)
+        self.session.add(memory)
+        await self.session.flush()
+        return True
+
+    async def proposed(self, *, kind: str | None = None) -> list[Memory]:
+        """Memories awaiting review (oldest first)."""
+        rows = await self.list(kind=kind, status="proposed")
+        rows.sort(key=lambda row: (row.id or 0))
         return rows
 
     def _weights(self) -> tuple[float, float, float, float]:
@@ -199,16 +225,18 @@ class MemoryRepo:
             float(getattr(settings, "memory_recall_half_life_days", 30.0)),
         )
 
-    async def search(self, query: str, *, kind: str | None = None, limit: int = 5) -> list[Memory]:
+    async def search(
+        self, query: str, *, kind: str | None = None, limit: int = 5, status: str | None = "active"
+    ) -> list[Memory]:
         query = query.strip()
         if not query:
             return []
         rows: dict[int, Memory] = {}
         similarity: dict[int, float] = {}
-        for memory, score in await self._semantic_scores(query, kind):
+        for memory, score in await self._semantic_scores(query, kind, status):
             rows[memory.id] = memory
             similarity[memory.id] = score
-        for memory in await self._keyword_search(query, limit, kind):
+        for memory in await self._keyword_search(query, limit, kind, status):
             rows.setdefault(memory.id, memory)
             similarity[memory.id] = max(similarity.get(memory.id, 0.0), 1.0)
 
@@ -226,7 +254,9 @@ class MemoryRepo:
         ranked.sort(key=lambda pair: pair[0], reverse=True)
         return [memory for _, memory in ranked[:limit]]
 
-    async def _keyword_search(self, query: str, limit: int, kind: str | None = None) -> list[Memory]:
+    async def _keyword_search(
+        self, query: str, limit: int, kind: str | None = None, status: str | None = "active"
+    ) -> list[Memory]:
         text = f"%{query}%"
         stmt = select(Memory).where(
             Memory.owner_id == self.owner_id,
@@ -234,10 +264,14 @@ class MemoryRepo:
         )
         if kind is not None:
             stmt = stmt.where(Memory.kind == kind)
+        if status is not None:
+            stmt = stmt.where(Memory.status == status)
         stmt = stmt.order_by(Memory.updated_at.desc(), Memory.id.desc()).limit(limit)
         return list((await self.session.exec(stmt)).all())
 
-    async def _semantic_scores(self, query: str, kind: str | None = None) -> list[tuple[Memory, float]]:
+    async def _semantic_scores(
+        self, query: str, kind: str | None = None, status: str | None = "active"
+    ) -> list[tuple[Memory, float]]:
         query_vector = await self._embed_query(query)
         if query_vector is None:
             return []
@@ -246,6 +280,8 @@ class MemoryRepo:
         )
         if kind is not None:
             stmt = stmt.where(Memory.kind == kind)
+        if status is not None:
+            stmt = stmt.where(Memory.status == status)
         dimension = len(query_vector)
         candidates: list[Memory] = []
         vectors: list[list[float]] = []
@@ -279,7 +315,7 @@ class MemoryRepo:
         return len(rows)
 
     async def near_duplicates(
-        self, threshold: float = 0.92, *, kind: str | None = None
+        self, threshold: float = 0.92, *, kind: str | None = None, status: str | None = "active"
     ) -> list[list[Memory]]:
         """Groups of memories whose embeddings are within ``threshold`` cosine."""
         stmt = select(Memory).where(
@@ -287,6 +323,8 @@ class MemoryRepo:
         )
         if kind is not None:
             stmt = stmt.where(Memory.kind == kind)
+        if status is not None:
+            stmt = stmt.where(Memory.status == status)
         rows = [row for row in (await self.session.exec(stmt)).all() if row.embedding]
         groups: list[list[Memory]] = []
         assigned: set[int] = set()

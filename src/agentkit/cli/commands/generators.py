@@ -23,13 +23,19 @@ def new_project(
     full: bool = typer.Option(
         True, "--full/--minimal", help="Full-stack project (default) or the minimal skeleton."
     ),
+    preset: str | None = typer.Option(
+        None, "--preset", help="Blueprint overlay: support | research | ops."
+    ),
 ) -> None:
     """Create a new agentkit project from the default skeleton."""
     from agentkit.foundation.scaffold import scaffold_project
 
+    if preset is not None and not full:
+        typer.echo("--preset requires the full-stack project (drop --minimal)", err=True)
+        raise typer.Exit(code=2)
     try:
-        target = scaffold_project(name, path, force=force, full=full)
-    except FileExistsError as exc:
+        target = scaffold_project(name, path, force=force, full=full, preset=preset)
+    except (FileExistsError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 

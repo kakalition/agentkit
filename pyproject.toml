@@ -33,6 +33,12 @@ dependencies = [
     "cachetools>=7.2.1",
     "pyyaml>=6.0.3",
     "sse-starlette>=3.5.0",
+    "pyjwt>=2.8",
+    "pypdf>=5.0",
+    "python-docx>=1.1",
+    "beautifulsoup4>=4.12",
+    "prometheus-client>=0.20",
+    "asyncpg>=0.29",
 ]
 
 [project.optional-dependencies]

@@ -75,6 +75,29 @@ await Feedback.average(conversation_id="cli:1")
 await Feedback.list(limit=20)
 ```
 
+### Learning & native tools
+
+Native toolkits and self-learning are **agent-callable tools**, not facades, so they
+are attached on the builder rather than resolved from the container. The library
+exports the underlying functions when you need them directly:
+
+```python
+from agentkit import (
+    attach_learning, reflect, lessons_digest, register_reflect_task, LearningSignals,
+    attach_toolkits, enabled_toolkits, TOOLKITS,
+)
+```
+
+```python
+async with app.repositories() as repos:
+    await reflect(repos)                 # distil lessons now
+    print(await lessons_digest(repos))   # the instructions digest
+
+enabled_toolkits(app.settings)           # the settings-enabled toolkit names
+```
+
+See [Native Tools](/guide/native-tools) and [Self-Learning](/guide/self-learning).
+
 ## How resolution works
 
 A facade resolves `current_app().make("<binding>")` at call time. The current app

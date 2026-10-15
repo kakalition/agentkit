@@ -94,6 +94,18 @@ scheduler.init_scheduler(app.settings, repos_factory=app.repos_factory)
 app.serve()
 ```
 
+## Built-in durable tasks
+
+`FullStackProvider` registers two built-in tasks and schedules them daily:
+
+| Task | Scheduled by | Purpose |
+| --- | --- | --- |
+| `memory:consolidate` | `MEMORY_ENABLED` | dedupe / summarize / prune memory |
+| `learning:reflect` | `LEARNING_ENABLED` | the [self-learning](/guide/self-learning) reflect loop |
+
+Both are idempotent (`register_consolidate_task` / `register_reflect_task`) and
+never raise when unconfigured.
+
 ## Workflows
 
 For multi-step processes with retries and compensation, use DBOS workflows:

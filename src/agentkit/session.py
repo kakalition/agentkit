@@ -155,16 +155,22 @@ class ChatRunner:
         self.deps.extras["conversation_id"] = conversation_id
 
     async def send(self, text: Any) -> ChatResult:
+        from agentkit import metrics
+
         repos, channel, history = await self._begin(text)
         self.deps.artifacts.clear()
-        result = await self.agent.run(
-            text,
-            deps=self.deps,
-            message_history=history,
-            model=self.deps.model,
-            model_settings=model_settings(self.deps.settings),
-            usage_limits=usage_limits(self.deps.settings),
-        )
+        try:
+            result = await self.agent.run(
+                text,
+                deps=self.deps,
+                message_history=history,
+                model=self.deps.model,
+                model_settings=model_settings(self.deps.settings),
+                usage_limits=usage_limits(self.deps.settings),
+            )
+        except Exception:
+            metrics.record_turn("error")
+            raise
         return await self._finish(
             repos, channel, history, result.all_messages(), result.output, self._usage_of(result)
         )
@@ -257,8 +263,10 @@ class ChatRunner:
             usage=usage,
             tool_calls=_tool_calls(all_messages),
         )
+        from agentkit import metrics
         from agentkit.foundation.facade import emit
 
+        metrics.record_turn("ok")
         await emit(
             "turn.end",
             conversation_id=self.conversation_id,
@@ -292,6 +300,9 @@ class ChatRunner:
         }
         cost = usage_cost(run_usage, model_name)
         totals["cost_usd"] = cost
+        from agentkit import metrics
+
+        metrics.record_cost(cost)
         await store.add(
             conversation_id=self.conversation_id,
             kind="turn",

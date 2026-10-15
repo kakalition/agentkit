@@ -96,11 +96,20 @@ class KnowledgeBase:
             return await repos.knowledge.add(source, chunks)
 
     async def add_file(self, path: str | Path, *, source: str | None = None) -> int:
+        from agentkit.ingest import extract_text
+
         path = Path(path).expanduser()
-        text = await asyncio.to_thread(
-            path.read_text, encoding="utf-8", errors="ignore"
-        )
+        settings = self._settings or get_settings()
+        text = await asyncio.to_thread(extract_text, path, settings=settings)
         return await self.add(text, source=source or str(path))
+
+    async def add_url(self, url: str, *, source: str | None = None) -> int:
+        """Fetch a URL and index its text (guarded by ingest settings)."""
+        from agentkit.ingest import fetch_url
+
+        settings = self._settings or get_settings()
+        text = await fetch_url(url, settings=settings)
+        return await self.add(text, source=source or url)
 
     async def add_directory(
         self, directory: str | Path, *, pattern: str = "**/*.md"

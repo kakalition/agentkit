@@ -16,7 +16,7 @@ from croniter import croniter
 from pydantic_ai import RunContext
 
 from agentkit.deps import Deps
-from agentkit.toolkits._common import emit_event, repos_of, resolve_list
+from agentkit.toolkits._common import actor_label, emit_event, repos_of, resolve_list
 
 __all__ = ["attach_scheduler"]
 
@@ -87,7 +87,10 @@ def attach_scheduler(
             )
         with contextlib.suppress(Exception):  # audit must not break a tool
             await repos.audit.append(
-                "schedule.upsert", target=name, detail={"task": task}, actor=repos.owner_id
+                "schedule.upsert",
+                target=name,
+                detail={"task": task},
+                actor=actor_label(ctx) or repos.owner_id,
             )
         await emit_event("schedule.upsert", name=name, task=task)
         return f"scheduled {name!r} -> {task}"

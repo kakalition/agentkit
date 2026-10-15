@@ -102,4 +102,24 @@ app.on("turn.end", lambda event: broker.reply(chat_id, event.output))
 - **Clarification is not a failure.** When no human is reachable, the agent asks in
   its reply rather than erroring.
 
+## Approval UI
+
+Set `APPROVAL_UI_ENABLED=true` to route deferred approvals through an in-process
+`ApprovalQueue` (`App.approvals`) instead of auto-denying. A UI (or the built-in
+web console) can then list and decide them:
+
+- `GET /api/approvals` — pending `{tool_call_id, tool_name, args}`.
+- `POST /api/approvals/{tool_call_id}` — `{"approved": true|false}`.
+
+```python
+from agentkit.approvals import ApprovalQueue
+
+queue = ApprovalQueue()
+queue.pending()                    # list[ApprovalRequest]
+queue.decide(tool_call_id, True)   # resolve one
+```
+
+The run suspends until every pending call is decided, so a decision from the web
+console resumes the same turn.
+
 Continue to [Planning & Graphs →](/guide/planning)

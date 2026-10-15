@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from agentkit.security import Actor
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -38,6 +40,8 @@ class Deps:
     mcp: Any = None
     a2a: Any = None
     approve: ApprovalCallback | None = None
+    actor: Actor | None = None
+    credentials: Any = None
     clock: Any = field(default=_now)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     extras: dict[str, Any] = field(default_factory=dict)
@@ -50,6 +54,8 @@ class Deps:
 
     @property
     def owner_id(self) -> str:
+        if self.actor is not None:
+            return self.actor.owner_id
         return getattr(self.settings, "owner_id", "owner")
 
     @property

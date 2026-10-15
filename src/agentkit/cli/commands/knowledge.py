@@ -27,6 +27,40 @@ def knowledge_add(
     typer.echo(f"indexed {added} chunk(s)")
 
 
+@knowledge_app.command("add-file")
+def knowledge_add_file(
+    path: Path = typer.Argument(..., help="File to index (pdf/docx/html/txt/md/…)."),
+    source: str | None = typer.Option(None, "--source", help="Label (default: the path)."),
+) -> None:
+    """Extract text from a document and index it."""
+    from agentkit import KnowledgeBase
+    from agentkit.ingest import IngestError
+
+    try:
+        added = asyncio.run(KnowledgeBase.from_settings().add_file(path, source=source))
+    except (IngestError, OSError) as exc:
+        typer.echo(f"could not ingest {path}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"indexed {added} chunk(s)")
+
+
+@knowledge_app.command("add-url")
+def knowledge_add_url(
+    url: str = typer.Argument(..., help="URL to fetch and index."),
+    source: str | None = typer.Option(None, "--source", help="Label (default: the url)."),
+) -> None:
+    """Fetch a URL and index its text."""
+    from agentkit import KnowledgeBase
+    from agentkit.ingest import IngestError
+
+    try:
+        added = asyncio.run(KnowledgeBase.from_settings().add_url(url, source=source))
+    except (IngestError, OSError) as exc:
+        typer.echo(f"could not ingest {url}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"indexed {added} chunk(s)")
+
+
 @knowledge_app.command("add-text")
 def knowledge_add_text(
     text: str = typer.Argument(..., help="Text to index."),

@@ -7,13 +7,18 @@ from typing import ClassVar
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from agentkit.db.repositories.api_keys import APIKeyRepo
 from agentkit.db.repositories.conversations import A2ATaskRepo, ConversationRepo, MessageRepo
+from agentkit.db.repositories.credentials import CredentialRepo
+from agentkit.db.repositories.evals import EvalCaptureRepo
 from agentkit.db.repositories.feedback import FeedbackRepo
 from agentkit.db.repositories.knowledge import KnowledgeRepo
 from agentkit.db.repositories.learning import LearningRunRepo
 from agentkit.db.repositories.memory import MemoryRepo, OwnerProfileRepo
+from agentkit.db.repositories.ratelimit import RateWindowRepo
 from agentkit.db.repositories.scheduling import ScheduledJobRepo
 from agentkit.db.repositories.usage import AuditRepo, UsageRepo
+from agentkit.db.repositories.webhooks import WebhookDeliveryRepo, WebhookRepo
 
 
 @dataclass
@@ -44,6 +49,12 @@ class Repositories:
         self.knowledge = KnowledgeRepo(self.session, self.owner_id)
         self.feedback = FeedbackRepo(self.session, self.owner_id)
         self.learning_runs = LearningRunRepo(self.session, self.owner_id)
+        self.api_keys = APIKeyRepo(self.session, self.owner_id)
+        self.credentials = CredentialRepo(self.session, self.owner_id)
+        self.rate_windows = RateWindowRepo(self.session, self.owner_id)
+        self.evals_capture = EvalCaptureRepo(self.session, self.owner_id)
+        self.webhooks = WebhookRepo(self.session, self.owner_id)
+        self.webhook_deliveries = WebhookDeliveryRepo(self.session, self.owner_id)
         for attribute, repo_class in type(self).repositories.items():
             setattr(self, attribute, repo_class(self.session, self.owner_id))
         from agentkit.foundation.queue import QueueRepo

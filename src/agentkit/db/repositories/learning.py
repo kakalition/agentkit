@@ -27,6 +27,17 @@ class LearningRunRepo:
         )
         return (await self.session.exec(stmt)).first()
 
+    async def list(self, limit: int | None = None) -> list[LearningRun]:
+        stmt = (
+            select(LearningRun)
+            .where(LearningRun.owner_id == self.owner_id)
+            .order_by(LearningRun.id)  # type: ignore[arg-type]
+        )
+        rows = list((await self.session.exec(stmt)).all())
+        if limit is not None and len(rows) > limit:
+            rows = rows[:limit]
+        return rows
+
     async def seen(self, conversation_id: str, signature: str) -> bool:
         stmt = (
             select(LearningRun)

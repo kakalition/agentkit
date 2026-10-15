@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -97,9 +98,63 @@ class AgentSettings(BaseSettings):
     learning_skill_threshold: int = 3
     learning_auto_skills: bool = False
     learning_max_lessons: int = 50
+    # when true, lessons are stored ``proposed`` until approved (review inbox).
+    learning_require_review: bool = False
+    # optional: gate learning on captured evals passing (see ``agentkit.evals``).
+    learning_eval_gate: bool = False
+
+    # auth — opt-in. ``auth_enabled=False`` (default) keeps the local single-operator
+    # behavior: every request runs as the settings owner with no roles. When enabled
+    # requests must present an API key or a JWT (fail-closed).
+    auth_enabled: bool = False
+    auth_api_keys: Any = None  # JSON object or "name:key:owner:role|role;..." CSV
+    auth_jwks_url: str | None = None
+    auth_issuer: str | None = None
+    auth_audience: str | None = None
+    auth_algorithms: str = "RS256"
+    auth_owner_claim: str = "sub"
+    auth_roles_claim: str = "roles"
+    auth_default_owner: str = ""
+    auth_required_roles: list[str] = Field(default_factory=list)
+    auth_jwks_cache_ttl: float = 300.0
+    auth_jwks_timeout: float = 10.0
+
+    # metrics — Prometheus exposition at ``metrics_path`` (opt-in).
+    metrics_enabled: bool = False
+    metrics_path: str = "/metrics"
+
+    # interfaces — OpenAI-compatible API and outbound webhooks (opt-in).
+    openai_api_enabled: bool = False
+    webhooks_enabled: bool = False
+
+    # data lifecycle — export is safe; forget is destructive and opt-in.
+    data_export_enabled: bool = True
+    data_forget_enabled: bool = False
+
+    # ingestion — guards for file/URL ingestion into the knowledge base.
+    ingest_max_bytes: int = 5_000_000
+    ingest_allowed_schemes: list[str] = Field(default_factory=lambda: ["http", "https"])
+
+    # rate limiting — opt-in fixed-window limiter at the HTTP boundary (+ per-tool).
+    rate_limit_enabled: bool = False
+    rate_limit_per_minute: int = 60
+    rate_limit_tool_per_minute: int = 0  # 0 = no per-tool limit
+    rate_limit_burst: int = 0
+
+    # credentials vault — encrypt channel/provider secrets at rest (Fernet).
+    credentials_enabled: bool = False
+    credentials_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("AGENTKIT_CREDENTIALS_KEY", "CREDENTIALS_KEY"),
+    )
+
+    # guardrails — wrap tool results from untrusted sources (web/MCP/A2A) as data
+    guardrails_wrap_untrusted: bool = False
 
     # human-in-the-loop approvals
     approvals_enabled: bool = True
+    # route approvals through the in-process queue so a UI can decide them.
+    approval_ui_enabled: bool = False
     # multi-agent: peer tools (send_to/ask_agent/broadcast/handoff_to)
     subagents_enabled: bool = False
     mailbox_durable: bool = False
@@ -177,7 +232,13 @@ class AgentSettings(BaseSettings):
             return [int(part) for part in value.replace(",", " ").split() if part]
         return value
 
-    @field_validator("slack_allowed_channel_ids", "email_allowed_senders", mode="before")
+    @field_validator(
+        "slack_allowed_channel_ids",
+        "email_allowed_senders",
+        "auth_required_roles",
+        "ingest_allowed_schemes",
+        mode="before",
+    )
     @classmethod
     def _split_string_ids(cls, value: object) -> object:
         if value is None or value == "":

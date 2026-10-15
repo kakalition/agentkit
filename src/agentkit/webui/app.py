@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -22,17 +22,23 @@ from sse_starlette.sse import EventSourceResponse
 
 from agentkit import scheduler
 from agentkit.config import AgentSettings
-from agentkit.health import db_check, run_checks
+from agentkit.health import readiness_checks, run_checks
 from agentkit.runtime import Runtime, repositories
+from agentkit.security import system_actor
+from agentkit.security.authenticator import AuthError, ForbiddenError
 from agentkit.webui import (
     artifacts_api,
     config_api,
+    data_api,
     introspect,
+    learning_api,
+    openai_api,
     scheduler_api,
     soul_api,
     workflows_api,
 )
-from agentkit.webui.context import Answer, WebUIContext, get_context
+from agentkit.webui.auth import install_auth, install_rate_limit
+from agentkit.webui.context import Answer, WebUIContext, get_actor, get_context
 
 FALLBACK_HTML = """<!doctype html>
 <html lang="en">
@@ -64,6 +70,10 @@ class ChatBody(BaseModel):
     text: str
 
 
+class CancelBody(BaseModel):
+    conversation_id: str = "webui:default"
+
+
 def _static_candidates() -> list[Path]:
     here = Path(__file__).resolve()
     repo_dist = here.parents[3] / "web" / "dist"
@@ -89,7 +99,9 @@ def build_webui_app(
     runtime: Runtime,
     settings: AgentSettings | None = None,
     answer: Answer | None = None,
+    app: Any = None,
 ) -> FastAPI:
+    agent_app = app
     settings = settings or runtime.settings
     # The scheduler only touches the shared ``scheduled_jobs`` table, so it uses
     # agentkit's base repositories — an app's domain factory need not provide it.
@@ -101,7 +113,23 @@ def build_webui_app(
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )
-    app.state.webui = WebUIContext(runtime=runtime, settings=settings, answer=answer)
+    app.state.webui = WebUIContext(
+        runtime=runtime,
+        settings=settings,
+        answer=answer,
+        actor=system_actor(settings),
+        app=agent_app,
+    )
+    install_rate_limit(app, runtime=runtime, settings=settings)
+    install_auth(app, runtime=runtime, settings=settings)
+
+    @app.exception_handler(AuthError)
+    async def _unauthorized(_request: Request, exc: AuthError) -> JSONResponse:
+        return JSONResponse({"detail": exc.message}, status_code=exc.http_status)
+
+    @app.exception_handler(ForbiddenError)
+    async def _forbidden(_request: Request, exc: ForbiddenError) -> JSONResponse:
+        return JSONResponse({"detail": exc.message}, status_code=exc.http_status)
 
     @app.exception_handler(Exception)
     async def _unhandled(_request: Request, exc: Exception) -> JSONResponse:
@@ -117,19 +145,47 @@ def build_webui_app(
         workflows_api,
         soul_api,
         artifacts_api,
+        learning_api,
+        data_api,
     ):
         app.include_router(module.router, prefix="/api")
+    app.include_router(openai_api.router)
+
+    if getattr(settings, "metrics_enabled", False):
+        from agentkit import metrics
+
+        metrics.enable(settings)
+        metrics_path = getattr(settings, "metrics_path", "/metrics") or "/metrics"
+
+        @app.get(metrics_path, include_in_schema=False)
+        async def _metrics() -> Response:
+            return Response(metrics.render(), media_type=metrics.content_type())
 
     @app.get("/api/health", tags=["core"])
     async def health(ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
-        ok, results = await run_checks([db_check(ctx.runtime)])
+        ok, results = await run_checks(readiness_checks(ctx.runtime, ctx.settings))
         return {"ok": ok, "checks": results}
 
+    @app.get("/api/whoami", tags=["core"])
+    async def whoami(request: Request) -> dict[str, Any]:
+        actor = getattr(request.state, "actor", None) or system_actor(settings)
+        return {
+            "owner_id": actor.owner_id,
+            "subject": actor.subject,
+            "roles": sorted(actor.roles),
+            "method": actor.method,
+            "authenticated": actor.authenticated,
+        }
+
     @app.post("/api/chat", tags=["core"])
-    async def chat(body: ChatBody, ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
+    async def chat(
+        body: ChatBody,
+        ctx: WebUIContext = Depends(get_context),
+        actor: Any = Depends(get_actor),
+    ) -> dict[str, Any]:
         if ctx.answer is None:
             raise HTTPException(status_code=501, detail="chat is not enabled for this agent")
-        result = await ctx.answer(body.conversation_id, body.text)
+        result = await ctx.answer(body.conversation_id, body.text, actor=actor)
         return {
             "conversation_id": body.conversation_id,
             "output": result.output,
@@ -137,6 +193,65 @@ def build_webui_app(
             "usage": result.usage,
             "history_length": result.history_length,
         }
+
+    @app.post("/api/chat/stream", tags=["core"])
+    async def chat_stream(
+        body: ChatBody,
+        ctx: WebUIContext = Depends(get_context),
+        actor: Any = Depends(get_actor),
+    ) -> Any:
+        if ctx.app is None or not hasattr(ctx.app, "stream"):
+            raise HTTPException(status_code=501, detail="streaming is not enabled for this agent")
+
+        async def _stream() -> Any:
+            yield {"event": "hello", "data": "{}"}
+            async for event in ctx.app.stream(
+                body.text, conversation_id=body.conversation_id, actor=actor
+            ):
+                kind = getattr(event, "kind", "text")
+                payload = getattr(event, "text", None)
+                if kind == "final":
+                    result = getattr(event, "result", None)
+                    payload = json.dumps(
+                        {
+                            "output": getattr(result, "output", ""),
+                            "history_length": getattr(result, "history_length", 0),
+                            "usage": getattr(result, "usage", None),
+                        }
+                    )
+                yield {"event": kind, "data": payload or ""}
+            yield {"event": "done", "data": "{}"}
+
+        return EventSourceResponse(_stream())
+
+    @app.post("/api/chat/cancel", tags=["core"])
+    async def chat_cancel(body: CancelBody, ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
+        if ctx.app is None or not hasattr(ctx.app, "cancel"):
+            raise HTTPException(status_code=501, detail="cancellation is not enabled")
+        return {"cancelled": bool(ctx.app.cancel(body.conversation_id))}
+
+    @app.get("/api/approvals", tags=["core"])
+    async def list_approvals(ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
+        if ctx.app is None or not hasattr(ctx.app, "approvals"):
+            return {"approvals": []}
+        pending = ctx.app.approvals.pending()
+        return {
+            "approvals": [
+                {"tool_call_id": r.tool_call_id, "tool_name": r.tool_name, "args": r.args}
+                for r in pending
+            ]
+        }
+
+    @app.post("/api/approvals/{tool_call_id}", tags=["core"])
+    async def decide_approval(
+        tool_call_id: str, body: dict[str, Any], ctx: WebUIContext = Depends(get_context)
+    ) -> dict[str, Any]:
+        if ctx.app is None or not hasattr(ctx.app, "approvals"):
+            raise HTTPException(status_code=501, detail="approvals are not enabled")
+        decided = ctx.app.approvals.decide(tool_call_id, bool(body.get("approved", False)))
+        if not decided:
+            raise HTTPException(status_code=404, detail="no such pending approval")
+        return {"tool_call_id": tool_call_id, "approved": bool(body.get("approved", False))}
 
     @app.get("/api/events", tags=["core"])
     async def events(ctx: WebUIContext = Depends(get_context)) -> EventSourceResponse:

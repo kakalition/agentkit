@@ -57,6 +57,23 @@ def stack_view(settings: Any, app: Any = None) -> dict[str, Any]:
             "skill_threshold": getattr(settings, "learning_skill_threshold", 3),
             "auto_skills": getattr(settings, "learning_auto_skills", False),
             "max_lessons": getattr(settings, "learning_max_lessons", 50),
+            "require_review": getattr(settings, "learning_require_review", False),
+            "eval_gate": getattr(settings, "learning_eval_gate", False),
+        },
+        "auth": {
+            "enabled": bool(getattr(settings, "auth_enabled", False)),
+            "jwks": bool(getattr(settings, "auth_jwks_url", None)),
+            "required_roles": list(getattr(settings, "auth_required_roles", []) or []),
+        },
+        "credentials": {"enabled": bool(getattr(settings, "credentials_enabled", False))},
+        "rate_limit": {
+            "enabled": bool(getattr(settings, "rate_limit_enabled", False)),
+            "per_minute": getattr(settings, "rate_limit_per_minute", 60),
+            "tool_per_minute": getattr(settings, "rate_limit_tool_per_minute", 0),
+        },
+        "interfaces": {
+            "openai_api": bool(getattr(settings, "openai_api_enabled", False)),
+            "webhooks": bool(getattr(settings, "webhooks_enabled", False)),
         },
     }
 

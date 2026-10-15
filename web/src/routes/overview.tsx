@@ -1,11 +1,15 @@
 import { useQuery } from "@tanstack/react-query"
 import { Activity, BarChart3, CalendarClock, MessagesSquare, Workflow } from "lucide-react"
+import { useState } from "react"
 
 import { ErrorAlert, Page } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
-import { api } from "@/lib/api"
+import { api, getToken, setToken } from "@/lib/api"
 
 function StatCard({
   title,
@@ -45,6 +49,8 @@ export default function Overview() {
   const schedules = useQuery({ queryKey: ["schedules"], queryFn: api.schedules })
   const workflows = useQuery({ queryKey: ["workflows"], queryFn: () => api.workflows() })
   const usage = useQuery({ queryKey: ["usage"], queryFn: api.usage })
+  const whoami = useQuery({ queryKey: ["whoami"], queryFn: api.whoami, retry: false })
+  const [token, setTokenValue] = useState(getToken() ?? "")
 
   const enabledSchedules = schedules.data?.jobs.filter((job) => job.enabled).length ?? 0
   const activeWorkflows =
@@ -109,6 +115,50 @@ export default function Overview() {
               label="MCP"
               value={info.data ? `${info.data.channels.mcp.host}:${info.data.channels.mcp.port}` : "—"}
             />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Access</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Row
+              label="Identity"
+              value={
+                whoami.data
+                  ? `${whoami.data.owner_id} (${whoami.data.method})`
+                  : whoami.error
+                    ? "unauthenticated"
+                    : "—"
+              }
+            />
+            <Row label="Roles" value={whoami.data?.roles.join(", ") || "—"} />
+            <div className="space-y-2 pt-2">
+              <Label htmlFor="api-token">API token</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="api-token"
+                  type="password"
+                  autoComplete="off"
+                  value={token}
+                  onChange={(event) => setTokenValue(event.target.value)}
+                  placeholder="Bearer token"
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setToken(token || null)
+                    void whoami.refetch()
+                  }}
+                >
+                  Save
+                </Button>
+              </div>
+              <p className="text-muted-foreground text-xs">
+                Stored in your browser only and sent as an Authorization header.
+              </p>
+            </div>
           </CardContent>
         </Card>
       </div>

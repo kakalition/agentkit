@@ -15,7 +15,7 @@ from pydantic_ai import RunContext
 
 from agentkit.deps import Deps
 from agentkit.foundation.repository import Repository
-from agentkit.toolkits._common import emit_event, repos_of, resolve_allow_list
+from agentkit.toolkits._common import actor_label, emit_event, repos_of, resolve_allow_list
 
 __all__ = ["attach_database"]
 
@@ -75,11 +75,15 @@ def _row_view(row: Any) -> dict[str, Any]:
     return data
 
 
-async def _audit(repos: Any, action: str, target: str, detail: dict[str, Any]) -> None:
+async def _audit(
+    repos: Any, action: str, target: str, detail: dict[str, Any], *, actor: str = ""
+) -> None:
     try:
         audit = getattr(repos, "audit", None)
         if audit is not None:
-            await audit.append(action, target=target, detail=detail, actor=repos.owner_id)
+            await audit.append(
+                action, target=target, detail=detail, actor=actor or repos.owner_id
+            )
     except Exception:  # pragma: no cover - audit must not break a tool
         pass
 
@@ -200,7 +204,13 @@ def attach_database(
         except ValueError as exc:
             return f"ERROR: {exc}"
         row = await _repo(target, repos).create(**clean)
-        await _audit(repos, "db.create", f"{model}:{getattr(row, 'id', '')}", {"values": clean})
+        await _audit(
+            repos,
+            "db.create",
+            f"{model}:{getattr(row, 'id', '')}",
+            {"values": clean},
+            actor=actor_label(ctx),
+        )
         await emit_event("db.create", model=model, id=getattr(row, "id", None))
         return f"created {model} #{getattr(row, 'id', '?')}"
 
@@ -224,7 +234,9 @@ def attach_database(
         row = await _repo(target, repos).update(id, **clean)
         if row is None:
             return "(not found)"
-        await _audit(repos, "db.update", f"{model}:{id}", {"values": clean})
+        await _audit(
+            repos, "db.update", f"{model}:{id}", {"values": clean}, actor=actor_label(ctx)
+        )
         await emit_event("db.update", model=model, id=id)
         return f"updated {model} #{id}"
 
@@ -246,7 +258,7 @@ def attach_database(
         deleted = await _repo(target, repos).delete(id)
         if not deleted:
             return "(not found)"
-        await _audit(repos, "db.delete", f"{model}:{id}", {})
+        await _audit(repos, "db.delete", f"{model}:{id}", {}, actor=actor_label(ctx))
         await emit_event("db.delete", model=model, id=id)
         return f"deleted {model} #{id}"
 

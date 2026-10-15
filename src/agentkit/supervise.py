@@ -59,7 +59,7 @@ def run_all(
 
         services = [
             *services,
-            webui_service(runtime=runtime, settings=settings, answer=webui_answer),
+            webui_service(runtime=runtime, settings=settings, answer=webui_answer, app=app),
         ]
     stop = stop_event or threading.Event()
     threads: list[threading.Thread] = []

@@ -7,7 +7,12 @@ the minimal skeleton otherwise. The templates live in :mod:`minimal` and
 
 from __future__ import annotations
 
-from agentkit.foundation.scaffold.full import FULL_FILES, scaffold_project
+from agentkit.foundation.scaffold.full import (
+    FULL_FILES,
+    PRESETS,
+    preset_files,
+    scaffold_project,
+)
 from agentkit.foundation.scaffold.minimal import (
     MINIMAL_FILES,
     PROJECT_FILES,
@@ -18,8 +23,10 @@ from agentkit.foundation.scaffold.minimal import (
 __all__ = [
     "FULL_FILES",
     "MINIMAL_FILES",
+    "PRESETS",
     "PROJECT_FILES",
     "package_name",
     "pascal",
+    "preset_files",
     "scaffold_project",
 ]

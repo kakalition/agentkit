@@ -14,7 +14,7 @@ def _render_default(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, bool):
-        return "1" if value else "0"
+        return "TRUE" if value else "FALSE"  # valid in both SQLite and Postgres
     if isinstance(value, (int, float)):
         return str(value)
     text_value = str(value)

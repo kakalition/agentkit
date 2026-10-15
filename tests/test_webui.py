@@ -22,7 +22,7 @@ def _reset_scheduler():
     scheduler._runtime = old
 
 
-async def _stub_answer(conversation_id: str, text: str) -> ChatResult:
+async def _stub_answer(conversation_id: str, text: str, *, actor=None) -> ChatResult:
     return ChatResult(
         output=f"echo:{text}", artifacts=[{"kind": "note", "path": "x"}],
         history_length=2, usage={"total_tokens": 7},

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 __all__ = [
+    "actor_label",
     "app_of",
     "emit_event",
     "repos_of",
@@ -17,6 +18,15 @@ __all__ = [
     "resolve_list",
     "settings_of",
 ]
+
+
+def actor_label(ctx: Any) -> str:
+    """A human-readable actor label for audit entries (``owner:subject``)."""
+    deps = getattr(ctx, "deps", None)
+    actor = getattr(deps, "actor", None)
+    if actor is None:
+        return getattr(deps, "owner_id", "") or ""
+    return f"{actor.owner_id}:{actor.subject}" if actor.subject else actor.owner_id
 
 
 def app_of(ctx: Any) -> Any | None:

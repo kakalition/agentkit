@@ -20,7 +20,12 @@ from agentkit.agents import (
     mailbox_tools,
 )
 from agentkit.app import AgentApp
-from agentkit.approvals import approval_capability, approval_handler, auto_approver
+from agentkit.approvals import (
+    ApprovalQueue,
+    approval_capability,
+    approval_handler,
+    auto_approver,
+)
 from agentkit.audio import synthesize, transcribe
 from agentkit.cache import cached_tool
 from agentkit.compaction import Compactor, summarize_older, transcript, truncating_processor
@@ -32,6 +37,7 @@ from agentkit.config import (
     usage_limits,
 )
 from agentkit.consolidation import consolidate_memories
+from agentkit.data import export_owner, forget_owner
 from agentkit.deps import ApprovalCallback, ApprovalRequest, Deps
 from agentkit.errors import (
     AgentKitError,
@@ -44,7 +50,7 @@ from agentkit.errors import (
     RateLimited,
     UpstreamError,
 )
-from agentkit.evals import Case, CaseResult, EvalSuite, Report
+from agentkit.evals import Case, CaseResult, EvalSuite, Report, capture_turns, load_captured
 from agentkit.foundation import (
     DB,
     Agent,
@@ -104,7 +110,13 @@ from agentkit.guardrails import (
     warn_if_exposed,
     wrap_untrusted,
 )
-from agentkit.health import Check, db_check, health_routes, install_signal_handlers
+from agentkit.health import (
+    Check,
+    db_check,
+    health_routes,
+    install_signal_handlers,
+    readiness_checks,
+)
 from agentkit.helpers import (
     app,
     cache,
@@ -120,14 +132,18 @@ from agentkit.helpers import (
     storage,
 )
 from agentkit.hitl import Clarification, clarification_tool
+from agentkit.ingest import IngestError, extract_text, fetch_url
 from agentkit.knowledge import KnowledgeBase, chunk_text
 from agentkit.learning import (
     LESSON_TASK,
     LearningSignals,
+    approve_lesson,
     attach_learning,
     lessons_digest,
+    proposed_lessons,
     reflect,
     register_reflect_task,
+    reject_lesson,
 )
 from agentkit.limits import Budget
 from agentkit.logging import get_logger, request_context, setup_logging
@@ -167,9 +183,13 @@ from agentkit.pricing import (
     usage_cost,
 )
 from agentkit.prompts import Prompt, PromptRegistry
+from agentkit.ratelimit import RateDecision, RateLimiter, build_limiter
 from agentkit.routing import ModelRouter, Route
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.sandbox import CommandResult, Sandbox, SandboxError
+from agentkit.security import Actor, system_actor
+from agentkit.security.authenticator import Authenticator, AuthError, require_roles
+from agentkit.security.credentials import Credentials, VaultError, hydrate_credentials
 from agentkit.session import ChatResult, ChatRunner, StreamEvent, load_history, save_new_messages
 from agentkit.skills import (
     Skill,
@@ -191,6 +211,13 @@ from agentkit.soul import (
 from agentkit.supervise import Service, run_all
 from agentkit.teams import Supervisor, spawn_tool, team_tools
 from agentkit.toolkits import TOOLKITS, attach_toolkits, enabled_toolkits
+from agentkit.tools_from_openapi import (
+    OpenAPIToolkit,
+    register_openapi_tools,
+    tools_from_openapi,
+)
+from agentkit.webhooks import WebhookDispatcher
+from agentkit.webhooks import sign as sign_webhook
 from agentkit.webui import build_webui_app, serve_webui, webui_service
 from agentkit.workspace import (
     default_workspace_root,
@@ -291,6 +318,19 @@ __all__ = [
     "build_model",
     "model_settings",
     "usage_limits",
+    # identity (opt-in auth / RBAC)
+    "Actor",
+    "system_actor",
+    "Authenticator",
+    "AuthError",
+    "require_roles",
+    "Credentials",
+    "VaultError",
+    "hydrate_credentials",
+    # rate limiting
+    "RateLimiter",
+    "RateDecision",
+    "build_limiter",
     # agent framework
     "Deps",
     "ApprovalRequest",
@@ -309,6 +349,7 @@ __all__ = [
     "approval_capability",
     "approval_handler",
     "auto_approver",
+    "ApprovalQueue",
     # persistence / runtime
     "Runtime",
     "build_runtime",
@@ -330,10 +371,19 @@ __all__ = [
     "register_reflect_task",
     "LearningSignals",
     "LESSON_TASK",
+    "approve_lesson",
+    "reject_lesson",
+    "proposed_lessons",
     # native toolkits (first-class agent-callable capabilities)
     "attach_toolkits",
     "enabled_toolkits",
     "TOOLKITS",
+    # interfaces & ecosystem
+    "OpenAPIToolkit",
+    "tools_from_openapi",
+    "register_openapi_tools",
+    "WebhookDispatcher",
+    "sign_webhook",
     # history compaction
     "Compactor",
     "summarize_older",
@@ -347,6 +397,15 @@ __all__ = [
     "Case",
     "CaseResult",
     "Report",
+    "capture_turns",
+    "load_captured",
+    # data lifecycle
+    "export_owner",
+    "forget_owner",
+    # ingestion
+    "extract_text",
+    "fetch_url",
+    "IngestError",
     # human-in-the-loop
     "Clarification",
     "clarification_tool",
@@ -441,4 +500,5 @@ __all__ = [
     "db_check",
     "health_routes",
     "install_signal_handlers",
+    "readiness_checks",
 ]

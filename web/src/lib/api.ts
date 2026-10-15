@@ -132,6 +132,49 @@ export interface Soul {
 
 export type ConfigView = Record<string, unknown>
 
+export interface Whoami {
+  owner_id: string
+  subject: string
+  roles: string[]
+  method: string
+  authenticated: boolean
+}
+
+export interface Lesson {
+  id: number
+  content: string
+  status: string
+  kind: string
+  importance: number
+  source_conversation_id: string | null
+  created_at: string | null
+}
+
+export interface PendingApproval {
+  tool_call_id: string
+  tool_name: string
+  args: Record<string, unknown>
+}
+
+const TOKEN_KEY = "agentkit_token"
+
+export function getToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setToken(token: string | null): void {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // storage unavailable (private mode); requests simply go unauthenticated
+  }
+}
+
 export class ApiError extends Error {
   status: number
   constructor(status: number, message: string) {
@@ -141,10 +184,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: init?.body ? { "Content-Type": "application/json" } : undefined,
-  })
+  const headers: Record<string, string> = {}
+  if (init?.body) headers["Content-Type"] = "application/json"
+  const token = getToken()
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  const response = await fetch(`${BASE}${path}`, { ...init, headers })
   if (!response.ok) {
     let message = response.statusText
     try {
@@ -166,9 +210,26 @@ const json = (method: string, body: unknown): RequestInit => ({
 
 export const api = {
   info: () => request<Info>("/info"),
+  whoami: () => request<Whoami>("/whoami"),
   health: () => request<Health>("/health"),
   chat: (conversation_id: string, text: string) =>
     request<ChatReply>("/chat", json("POST", { conversation_id, text })),
+  cancelChat: (conversation_id: string) =>
+    request<{ cancelled: boolean }>("/chat/cancel", json("POST", { conversation_id })),
+
+  lessons: (status = "proposed") =>
+    request<{ lessons: Lesson[] }>(`/lessons?status=${encodeURIComponent(status)}`),
+  approveLesson: (id: number) =>
+    request<{ id: number; status: string }>(`/lessons/${id}/approve`, { method: "POST" }),
+  rejectLesson: (id: number) =>
+    request<{ id: number; status: string }>(`/lessons/${id}/reject`, { method: "POST" }),
+
+  approvals: () => request<{ approvals: PendingApproval[] }>("/approvals"),
+  decideApproval: (toolCallId: string, approved: boolean) =>
+    request<{ tool_call_id: string; approved: boolean }>(
+      `/approvals/${encodeURIComponent(toolCallId)}`,
+      json("POST", { approved }),
+    ),
 
   conversations: () => request<{ conversations: Conversation[] }>("/conversations"),
   messages: (id: string) =>

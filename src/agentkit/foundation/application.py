@@ -46,6 +46,7 @@ from agentkit.foundation.schedule import ScheduleBuilder
 from agentkit.foundation.storage import Filesystem
 from agentkit.logging import get_logger
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
+from agentkit.security import Actor
 from agentkit.session import ChatResult, ChatRunner
 
 log = get_logger("agentkit.app")
@@ -116,6 +117,9 @@ class App:
         self._agent_models: dict[str, Any] = {}
         self._agent_tasks: list[str] = []
         self._agent_jobs: dict[str, Any] = {}
+        self._credential_service: Any = None
+        self._running: dict[str, Any] = {}
+        self._approval_queue: Any = None
 
         self.container.instance("app", self)
         self._bind_facades()
@@ -405,6 +409,40 @@ class App:
         self._budget = budget
         return self
 
+    # -- running turns / approvals -------------------------------------
+    @property
+    def approvals(self) -> Any:
+        """The in-process approval queue (for a web approval UI)."""
+        if self._approval_queue is None:
+            from agentkit.approvals import ApprovalQueue
+
+            self._approval_queue = ApprovalQueue()
+        return self._approval_queue
+
+    def running(self) -> list[str]:
+        """Conversation ids with a turn currently in flight."""
+        return [cid for cid, task in self._running.items() if not task.done()]
+
+    def cancel(self, conversation_id: str) -> bool:
+        """Cancel the in-flight turn for ``conversation_id`` (if any)."""
+        task = self._running.get(conversation_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        return True
+
+    def _track(self, conversation_id: str) -> Any:
+        import asyncio
+
+        task = asyncio.current_task()
+        if task is not None:
+            self._running[conversation_id] = task
+        return task
+
+    def _untrack(self, conversation_id: str, task: Any) -> None:
+        if task is not None and self._running.get(conversation_id) is task:
+            self._running.pop(conversation_id, None)
+
     async def fork(self, source: str, target: str, *, upto: int | None = None) -> int:
         """Copy a conversation's messages into ``target`` (branching)."""
         async with self.repositories() as repos:
@@ -479,6 +517,17 @@ class App:
         return self._notifier
 
     @property
+    def credentials(self) -> Any:
+        """The encrypted credential vault (or ``None`` when disabled)."""
+        if not getattr(self.settings, "credentials_enabled", False):
+            return None
+        if self._credential_service is None:
+            from agentkit.security.credentials import Credentials
+
+            self._credential_service = Credentials(self.runtime)
+        return self._credential_service
+
+    @property
     def queue(self) -> Queue:
         """The database-backed job queue (see the ``Queue`` facade)."""
         if self._queue is None:
@@ -509,15 +558,22 @@ class App:
             self._runtime = build_runtime(self.settings, repos_factory=self.repos_factory)
         return self._runtime
 
-    def repositories(self):
-        return repositories(self.runtime)
+    def repositories(self, owner_id: str | None = None):
+        return repositories(self.runtime, owner_id)
 
     def deps(
-        self, repos: Any, *, approve: ApprovalCallback | None = None, context: Any = None
+        self,
+        repos: Any,
+        *,
+        approve: ApprovalCallback | None = None,
+        context: Any = None,
+        actor: Actor | None = None,
     ) -> Any:
         model = self._model
         if self._model_resolver is not None:
             model = self._model_resolver(context)
+        if approve is None and getattr(self.settings, "approval_ui_enabled", False):
+            approve = self.approvals.request
         deps = build_deps(
             self.runtime,
             repos,
@@ -525,7 +581,10 @@ class App:
             mcp=self._mcp,
             a2a=self._a2a,
             approve=approve,
+            actor=actor,
         )
+        if self._credential_service is not None:
+            deps.credentials = self._credential_service
         if self._clarify_handler is not None:
             deps.extras["clarify"] = self._clarify_handler
         deps.extras["app"] = self
@@ -544,19 +603,21 @@ class App:
         *,
         conversation_id: str = "cli:default",
         approve: ApprovalCallback | None = None,
+        actor: Actor | None = None,
     ) -> ChatResult:
         from agentkit.foundation.pipeline import Pipeline
 
         turn = Turn(conversation_id=conversation_id, text=text, approve=approve)
+        owner_id = actor.owner_id if actor is not None else None
 
         async def destination(current: Turn) -> Turn:
-            async with self.repositories() as repos:
+            async with self.repositories(owner_id) as repos:
                 if self._budget is not None:
                     from agentkit.limits import check_budget
 
                     await check_budget(repos, self._budget, conversation_id=current.conversation_id)
                 runner = ChatRunner(
-                    self.deps(repos, approve=current.approve, context=current),
+                    self.deps(repos, approve=current.approve, context=current, actor=actor),
                     agent=self._require_agent(),
                     conversation_id=current.conversation_id,
                     history_processor=self._history_processor,
@@ -564,7 +625,11 @@ class App:
                 current.result = await runner.send(current.text)
             return current
 
-        await Pipeline(self._middlewares).send(turn).then(destination)
+        task = self._track(conversation_id)
+        try:
+            await Pipeline(self._middlewares).send(turn).then(destination)
+        finally:
+            self._untrack(conversation_id, task)
         assert turn.result is not None
         return turn.result
 
@@ -574,21 +639,27 @@ class App:
         *,
         conversation_id: str = "cli:default",
         approve: ApprovalCallback | None = None,
+        actor: Actor | None = None,
     ) -> Any:
         """Stream one turn as :class:`~agentkit.session.StreamEvent` increments."""
-        async with self.repositories() as repos:
-            if self._budget is not None:
-                from agentkit.limits import check_budget
+        owner_id = actor.owner_id if actor is not None else None
+        task = self._track(conversation_id)
+        try:
+            async with self.repositories(owner_id) as repos:
+                if self._budget is not None:
+                    from agentkit.limits import check_budget
 
-                await check_budget(repos, self._budget, conversation_id=conversation_id)
-            runner = ChatRunner(
-                self.deps(repos, approve=approve),
-                agent=self._require_agent(),
-                conversation_id=conversation_id,
-                history_processor=self._history_processor,
-            )
-            async for event in runner.stream(text):
-                yield event
+                    await check_budget(repos, self._budget, conversation_id=conversation_id)
+                runner = ChatRunner(
+                    self.deps(repos, approve=approve, actor=actor),
+                    agent=self._require_agent(),
+                    conversation_id=conversation_id,
+                    history_processor=self._history_processor,
+                )
+                async for event in runner.stream(text):
+                    yield event
+        finally:
+            self._untrack(conversation_id, task)
 
     async def resume(
         self,
@@ -596,23 +667,31 @@ class App:
         *,
         conversation_id: str = "cli:default",
         approve: ApprovalCallback | None = None,
+        actor: Actor | None = None,
     ) -> ChatResult:
         """Resume a turn that deferred tool calls (approvals / clarification)."""
-        async with self.repositories() as repos:
-            runner = ChatRunner(
-                self.deps(repos, approve=approve),
-                agent=self._require_agent(),
-                conversation_id=conversation_id,
-                history_processor=self._history_processor,
-            )
-            return await runner.resume(deferred_tool_results)
+        owner_id = actor.owner_id if actor is not None else None
+        task = self._track(conversation_id)
+        try:
+            async with self.repositories(owner_id) as repos:
+                runner = ChatRunner(
+                    self.deps(repos, approve=approve, actor=actor),
+                    agent=self._require_agent(),
+                    conversation_id=conversation_id,
+                    history_processor=self._history_processor,
+                )
+                return await runner.resume(deferred_tool_results)
+        finally:
+            self._untrack(conversation_id, task)
 
     @property
     def answer(self) -> Any:
-        """``(conversation_id, text) -> ChatResult`` for webui/a2a/mcp."""
+        """``(conversation_id, text, *, actor=None) -> ChatResult`` for webui/a2a/mcp."""
 
-        async def run_answer(conversation_id: str, text: str) -> ChatResult:
-            return await self.run(text, conversation_id=conversation_id)
+        async def run_answer(
+            conversation_id: str, text: str, *, actor: Actor | None = None
+        ) -> ChatResult:
+            return await self.run(text, conversation_id=conversation_id, actor=actor)
 
         return run_answer
 

@@ -118,6 +118,21 @@ async with app.repositories() as repos:
     profile = await repos.profile.get()
 ```
 
+## Lessons (procedural memory)
+
+Memory also holds **procedural** lessons ("when X, do Y") learned by the agent. The
+[self-learning](/guide/self-learning) loop stores them as `kind="procedural"` rows
+and injects an importance-ranked digest into the instructions, so learned behaviour
+changes future turns:
+
+```python
+await Memory.remember("When a deadline is mentioned, add a reminder", kind="procedural")
+await Memory.all(kind="procedural")
+```
+
+Procedural lessons are deduped with `near_duplicates`/`merge` and can be distilled
+into a `SKILL.md` once the same lesson recurs (see [Skills](/guide/skills)).
+
 ## Consolidation
 
 Over time memory accumulates near-duplicates and stale entries. The durable

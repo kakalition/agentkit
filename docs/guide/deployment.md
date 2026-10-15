@@ -100,4 +100,56 @@ workflows are checkpointed by DBOS, so nothing is lost on restart.
 - Health probe wired to the orchestrator
 :::
 
+## Containers
+
+A single-node `Dockerfile` and `docker-compose.yml` ship at the repo root. The
+compose file runs one `agent` process (with the scheduler) and one `queue:work`
+worker sharing a volume; set `AGENTKIT_BOOTSTRAP` (e.g. `app:app`) and secrets in
+a `.env`:
+
+```bash
+docker compose up -d
+```
+
+Keep exactly **one scheduler leader** (the `agent` service); workers can be
+scaled with `--scale worker=N` because the queue is DB-backed.
+
+## Metrics
+
+Set `METRICS_ENABLED=true` to expose Prometheus metrics at `METRICS_PATH`
+(default `/metrics`): turns (by outcome) and their latency, tool errors, queue
+depth, scheduler runs, and estimated cost. Point Prometheus at `:8787/metrics`.
+
+## Migrations & backups
+
+```bash
+agentkit migrate                 # create missing tables + reconcile drift
+agentkit db:backup --out agent.db.bak   # WAL-safe (VACUUM INTO)
+agentkit db:restore agent.db.bak --yes  # overwrite the current DB
+agentkit health                  # per-dependency readiness
+```
+
+`GET /api/health` returns the same readiness checks (`db`, and `queue`/`vault`
+when those layers are enabled). `/healthz` (liveness) and `/readyz` (readiness)
+are also served on the A2A/standalone Starlette app.
+
+## Postgres
+
+SQLite/libSQL is the default and only required backend. Set
+`DATABASE_URL=postgresql://…` (driver `asyncpg`, installed) for Postgres. Schema
+creation and drift reconciliation work through the same `init_db` path. Keep the
+single-writer assumption: run one scheduler/worker leader, not many.
+
+## Ops runbook
+
+1. **Degraded health** — `/api/health` lists the failing dependency; `agentkit
+   health` shows the same locally. A failing `vault` check means
+   `AGENTKIT_CREDENTIALS_KEY` is unset (the vault refuses to run without it).
+2. **Stuck queue** — check depth via metrics (`agentkit_queue_depth`) or
+   `agentkit queue:work --once`; requeue failed jobs from the web UI.
+3. **Before an upgrade** — `agentkit db:backup`, then deploy; `agentkit migrate`
+   runs non-destructively.
+4. **Cost spike** — `agentkit_cost_usd_total` and the usage page; set a
+   [budget](/guide/budgets).
+
 Continue to [Artisan-style CLI →](/guide/cli)

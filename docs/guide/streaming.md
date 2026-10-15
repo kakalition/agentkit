@@ -68,4 +68,23 @@ must apply to streamed turns, run it around the whole generator or move the logi
 into a capability.
 :::
 
+## Streaming in the web UI
+
+When the web UI is built with an `App`, it exposes:
+
+- `POST /api/chat/stream` — Server-Sent Events over `App.stream`
+  (`text` / `final` / `done` events).
+- `POST /api/chat/cancel` — `{"conversation_id": "…"}` cancels the in-flight turn.
+
+```python
+app.run(...)                 # synchronous
+async for event in app.stream("hi"):   # StreamEvent increments
+    ...
+app.running()                # conversation ids with a turn in flight
+app.cancel("webui:default")  # cancel it (True if one was cancelled)
+```
+
+`App.cancel` cancels the asyncio task driving the turn; the persisted history is
+unchanged, so a cancelled turn can be replayed with `App.replay`.
+
 Continue to [Human-in-the-Loop →](/guide/hitl)

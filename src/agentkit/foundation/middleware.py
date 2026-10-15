@@ -70,28 +70,35 @@ def lifecycle_hooks(dispatcher: Any = None) -> Hooks:
 
 
 def policy_hooks(policy: Any) -> Hooks:
-    """A capability enforcing a :class:`~agentkit.policy.ToolPolicy` (deny only).
+    """A capability enforcing a :class:`~agentkit.policy.ToolPolicy`.
 
     Tools requiring approval are expected to be marked ``requires_approval=True``
     and wired through :data:`agentkit.approvals.approval_capability`; this hook
-    enforces ``deny`` decisions.
+    enforces ``deny`` decisions and role requirements (RBAC) against the run's
+    :class:`~agentkit.security.Actor`.
     """
     hooks = Hooks()
 
     @hooks.on.before_tool_execute
     async def _enforce(ctx: Any, *, call: Any, tool_def: Any, args: Any) -> Any:
-        policy.check(tool_def.name)
+        deps = getattr(ctx, "deps", None)
+        policy.check(tool_def.name, actor=getattr(deps, "actor", None))
         return args
 
     return hooks
 
 
-def guardrails_hooks(on_injection: Any = None) -> Hooks:
+def guardrails_hooks(
+    on_injection: Any = None, *, wrap_untrusted: bool = False, label: str = "untrusted"
+) -> Hooks:
     """A capability scanning tool results for prompt-injection signals.
 
     Emits ``guardrails.injection`` (via ``on_injection`` or the current app's
-    dispatcher) and logs a warning; the result is returned unchanged.
+    dispatcher) and logs a warning. When ``wrap_untrusted`` is set, string results
+    are wrapped so the model treats them as data, never instructions.
     """
+    from agentkit.guardrails import wrap_untrusted as _wrap
+
     hooks = Hooks()
 
     @hooks.on.after_tool_execute
@@ -101,6 +108,8 @@ def guardrails_hooks(on_injection: Any = None) -> Hooks:
             log.warning("possible prompt injection from tool %s: %s", tool_def.name, signals)
             handler = on_injection or _resolve_dispatcher(None)
             await _dispatch(handler, "guardrails.injection", tool=tool_def.name, signals=signals)
+        if wrap_untrusted and isinstance(result, str):
+            return _wrap(result, label=label)
         return result
 
     return hooks

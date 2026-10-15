@@ -3,6 +3,7 @@ import {
   BarChart3,
   CalendarClock,
   FolderOpen,
+  GraduationCap,
   Inbox,
   LayoutDashboard,
   MessageCircle,
@@ -25,6 +26,7 @@ import Audit from "@/routes/audit"
 import Chat from "@/routes/chat"
 import Config from "@/routes/config"
 import Conversations from "@/routes/conversations"
+import Lessons from "@/routes/lessons"
 import Overview from "@/routes/overview"
 import Persona from "@/routes/persona"
 import Scheduler from "@/routes/scheduler"
@@ -34,6 +36,7 @@ import Workflows from "@/routes/workflows"
 const baseItems: NavItem[] = [
   { title: "Overview", url: "/", icon: LayoutDashboard },
   { title: "Conversations", url: "/conversations", icon: Inbox },
+  { title: "Lessons", url: "/lessons", icon: GraduationCap },
   { title: "Scheduler", url: "/scheduler", icon: CalendarClock },
   { title: "Workflows", url: "/workflows", icon: Workflow },
   { title: "Usage", url: "/usage", icon: BarChart3 },
@@ -76,6 +79,7 @@ export default function App() {
             <Route path="/" element={<Overview />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/conversations" element={<Conversations />} />
+            <Route path="/lessons" element={<Lessons />} />
             <Route path="/scheduler" element={<Scheduler />} />
             <Route path="/workflows" element={<Workflows />} />
             <Route path="/usage" element={<Usage />} />

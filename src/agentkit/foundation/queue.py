@@ -175,7 +175,11 @@ class Queue:
 
     async def size(self, queue: str | None = None) -> int:
         async with self.app.repositories() as repos:
-            return await repos.queue.size(queue)
+            size = await repos.queue.size(queue)
+        from agentkit import metrics
+
+        metrics.record_queue_depth(queue or self.default, size)
+        return size
 
     async def failed(self, *, limit: int = 50) -> list[QueuedJob]:
         async with self.app.repositories() as repos:

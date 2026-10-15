@@ -34,7 +34,7 @@ from pydantic_evals.reporting import EvaluationReport
 
 from agentkit.session import ChatResult
 
-__all__ = ["Case", "CaseResult", "EvalSuite", "Report"]
+__all__ = ["Case", "CaseResult", "EvalSuite", "Report", "capture_turns", "load_captured"]
 
 
 def _as_list(value: Any) -> list[str]:
@@ -173,6 +173,73 @@ class Report:
     def raise_for_failures(self) -> None:
         if not self.passed:
             raise AssertionError(self.summary())
+
+
+def _message_text(message: Any, part_types: tuple[type, ...]) -> str:
+    chunks: list[str] = []
+    for part in getattr(message, "parts", []) or []:
+        content = getattr(part, "content", None)
+        if isinstance(part, part_types) and isinstance(content, str):
+            chunks.append(content)
+    return " ".join(chunk.strip() for chunk in chunks if chunk.strip()).strip()
+
+
+async def capture_turns(
+    repos: Any,
+    *,
+    conversation_id: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Turn recent conversation turns into stored eval cases (input → expected).
+
+    Each user prompt paired with the following assistant reply becomes a
+    regression case, persisted in the ``evals_capture`` table. Returns the cases.
+    """
+    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+    from agentkit.session import deserialize_messages
+
+    if conversation_id is None:
+        conversations = await repos.conversations.list(limit=1)
+        conversation_id = conversations[0].id if conversations else None
+    if conversation_id is None:
+        return []
+    payloads = await repos.messages.list(conversation_id, limit=max(2, limit * 2))
+    messages = deserialize_messages(payloads)
+
+    captured: list[dict[str, Any]] = []
+    pending: str | None = None
+    for message in messages:
+        if isinstance(message, ModelRequest):
+            prompt = _message_text(message, (UserPromptPart,))
+            if prompt:
+                pending = prompt
+        elif isinstance(message, ModelResponse) and pending:
+            output = _message_text(message, (TextPart,))
+            if output:
+                case = {
+                    "name": f"capture:{conversation_id}:{len(captured)}",
+                    "input": pending,
+                    "expect": output,
+                    "conversation_id": conversation_id,
+                }
+                captured.append(case)
+                pending = None
+    store = getattr(repos, "evals_capture", None)
+    if store is not None:
+        for case in captured:
+            await store.add(conversation_id, json.dumps(case))
+    return captured
+
+
+async def load_captured(
+    repos: Any, *, conversation_id: str | None = None, name: str = "captured"
+) -> EvalSuite:
+    """Build an :class:`EvalSuite` from previously captured cases."""
+    store = getattr(repos, "evals_capture", None)
+    rows = await store.list(conversation_id=conversation_id) if store is not None else []
+    cases = [Case.from_dict(json.loads(row.case)) for row in rows]
+    return EvalSuite(cases, name=name)
 
 
 class EvalSuite:

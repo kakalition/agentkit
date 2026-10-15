@@ -25,6 +25,8 @@ SECRET_FIELDS = (
     "discord_bot_token",
     "email_imap_password",
     "libsql_url",
+    "auth_api_keys",
+    "credentials_key",
 )
 _MASK = "***"
 

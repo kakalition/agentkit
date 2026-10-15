@@ -53,6 +53,21 @@ Failed jobs retry up to `max_retries`, then are marked failed with their error a
 listed by `queue:failed`. Jobs are identified by their import path, so keep job
 classes at module scope.
 
+### Enqueuing from the agent
+
+The native [queue toolkit](/guide/native-tools#queue) lets the model enqueue work
+directly. `enqueue_job` dispatches an allow-listed `Job` class; `enqueue_task` wraps
+a registered scheduler task in a `RunRegisteredTask` job, so one allow-list covers
+both the scheduler and the queue:
+
+```python
+from agentkit.toolkits import RunRegisteredTask
+
+agent.queue({"sync": SyncKnowledge}).scheduler(["sync_notes"])
+```
+
+Both tools are approval-gated and respect `QUEUE_ENABLED`.
+
 ## Cache
 
 ```python

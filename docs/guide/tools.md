@@ -162,4 +162,21 @@ class FakeCtx:
 assert await add_note(FakeCtx(), "hello") == "saved: hello"
 ```
 
+## Tools from an OpenAPI spec
+
+Turn any OpenAPI document into tools with `tools_from_openapi` (or attach them
+directly to a built agent):
+
+```python
+from agentkit import Agent, register_openapi_tools, tools_from_openapi
+
+tools = tools_from_openapi("openapi.json", base_url="https://api.example.com")
+agent = Agent.make("api").instructions("…").output(str).build()
+register_openapi_tools(agent, "openapi.json", base_url="https://api.example.com")
+```
+
+Each operation becomes a tool taking a single `params` mapping; path parameters
+are substituted and the rest go to the query string (GET/DELETE) or JSON body.
+Pass an `httpx.AsyncClient` via `client=` to reuse a pool or to test.
+
 Continue to [Configuration →](/guide/configuration)

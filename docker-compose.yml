@@ -1,0 +1,41 @@
+# Single-node agentkit: one app process + one queue worker.
+#
+#   docker compose up -d
+#
+# Set AGENTKIT_BOOTSTRAP (e.g. "app:app" for a scaffolded project) and any
+# secrets in a .env file next to this compose file.
+services:
+  agent:
+    build: .
+    image: agentkit
+    env_file:
+      - .env
+    environment:
+      AGENTKIT_HOME: /data
+      AGENTKIT_BOOTSTRAP: ${AGENTKIT_BOOTSTRAP:-app:app}
+      AGENTKIT_WEBUI_HOST: 0.0.0.0
+    ports:
+      - "8787:8787"
+    volumes:
+      - agent-data:/data
+    restart: unless-stopped
+
+  # Worker: processes the DB-backed queue. Scale with `--scale worker=N`, but keep
+  # exactly ONE scheduler leader (the `agent` service runs the scheduler).
+  worker:
+    image: agentkit
+    command: ["agentkit", "queue:work"]
+    env_file:
+      - .env
+    environment:
+      AGENTKIT_HOME: /data
+      AGENTKIT_BOOTSTRAP: ${AGENTKIT_BOOTSTRAP:-app:app}
+      AGENTKIT_WEBUI_ENABLED: "false"
+    volumes:
+      - agent-data:/data
+    depends_on:
+      - agent
+    restart: unless-stopped
+
+volumes:
+  agent-data:

@@ -51,6 +51,13 @@ console for exploring and operating the running agent.
   memory + skills + HITL + safety; `App(...).fullstack()` boots config sections,
   schedules and any configured **channels** (Telegram, Slack, Email, Discord) —
   unconfigured layers stay idle.
+- **Everything is agent-callable.** Native **toolkits** expose database CRUD,
+  scheduling, the queue, notifications, history, usage/audit, knowledge writes and
+  skill authoring as tools — deny-by-default allow-lists, approval-gated writes,
+  owner-scoped and audited.
+- **Agents that learn.** A closed **reflect → learn → apply** loop distils durable
+  lessons/preferences/facts from conversation history, injects them into future
+  turns, and can distil recurring lessons into `SKILL.md` skills.
 - **Safe by construction.** Approvals default-deny; loopback binds; secrets and
   amounts are redacted from logs; every material action is audited.
 - **Interop, both ways.** Consume and serve MCP servers and A2A agents.
@@ -65,6 +72,7 @@ console for exploring and operating the running agent.
 - [Advanced primitives](#advanced-primitives)
 - [Orchestrator + specialists](#orchestrator--specialists)
 - [The full stack, in one call](#the-full-stack-in-one-call)
+- [Native tools & self-learning](#native-tools--self-learning)
 - [Async by default](#async-by-default)
 - [Durable scheduling](#durable-scheduling-cron--one-off)
 - [Durability](#durability)
@@ -583,13 +591,44 @@ app = App(name="assistant").fullstack()   # FullStackProvider
 app.boot()                                # schedules + any configured channels
 ```
 
-`FullStackProvider` declares the `memory`/`channels`/`interop`/`queue` config
-sections, registers the daily durable `memory:consolidate` task, and wires a
-gateway channel (Telegram/Slack/Email/Discord) for each token you provide —
-nothing raises when a layer is unconfigured. `agentkit new` scaffolds this full
-stack by default (`--minimal` for the older skeleton), and `agentkit inspect` /
-`GET /api/info` show which layers are active. See
-[The Full Stack](/guide/fullstack) and [Multiple Model Providers](/guide/multi-provider).
+`FullStackProvider` declares the `memory`/`learning`/`channels`/`interop`/`queue`
+config sections, registers the daily durable `memory:consolidate` and
+`learning:reflect` tasks, and wires a gateway channel (Telegram/Slack/Email/Discord)
+for each token you provide — nothing raises when a layer is unconfigured.
+`agentkit new` scaffolds this full stack by default (`--minimal` for the older
+skeleton), and `agentkit inspect` / `GET /api/info` show which layers are active.
+See [The Full Stack](/guide/fullstack) and [Multiple Model Providers](/guide/multi-provider).
+
+## Native tools & self-learning
+
+Every capability is agent-callable and safe by default — allow-lists decide what is
+reachable and writes require approval:
+
+```python
+from agentkit import Agent
+
+agent = (
+    Agent.make("assistant")
+    .instructions("Be helpful.")
+    .database({"note": Note})        # CRUD over an allow-listed model
+    .scheduler(["sync_notes"])       # manage schedules over allow-listed tasks
+    .queue({"sync": SyncNotes})      # enqueue allow-listed jobs
+    .notifications().history().usage().knowledge_admin().skill_authoring()
+    .learning()                      # reflect -> learn -> apply
+    .output(str)
+    .build()
+)
+```
+
+Reflection is idempotent, redacts PII/secrets before storage, and is injected into
+future turns via a lessons digest:
+
+```bash
+agentkit learning:reflect --dry-run
+agentkit learning:lessons
+```
+
+See [Native Tools](/guide/native-tools) and [Self-Learning](/guide/self-learning).
 
 ## Async by default
 

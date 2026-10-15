@@ -52,15 +52,18 @@ def learning_reflect(
 @app.command("learning:lessons")
 def learning_lessons(
     limit: int = typer.Option(50, "--limit", help="Maximum lessons to show."),
+    status: str = typer.Option("active", "--status", help="active | proposed | rejected | all."),
 ) -> None:
     """List the lessons the agent has learned."""
     import asyncio
 
+    wanted = None if status == "all" else status
+
     async def _run() -> list[str]:
         async with _learning_scope() as repos:
-            rows = await repos.memories.list(limit=limit, kind="procedural")
+            rows = await repos.memories.list(limit=limit, kind="procedural", status=wanted)
             rows.sort(key=lambda row: float(row.importance or 0.0), reverse=True)
-            return [f"#{row.id} {row.content}" for row in rows]
+            return [f"#{row.id} [{row.status}] {row.content}" for row in rows]
 
     lines = asyncio.run(_run())
     if not lines:
@@ -68,6 +71,34 @@ def learning_lessons(
         return
     for line in lines:
         typer.echo(line)
+
+
+@app.command("learning:review")
+def learning_review(
+    action: str = typer.Argument(..., help="approve | reject."),
+    lesson_id: int = typer.Argument(..., help="The proposed lesson id."),
+) -> None:
+    """Approve or reject a proposed lesson (see ``learning:lessons --status proposed``)."""
+    import asyncio
+
+    from agentkit.learning import approve_lesson, reject_lesson
+
+    normalised = action.strip().lower()
+    if normalised not in {"approve", "reject"}:
+        typer.echo("action must be 'approve' or 'reject'", err=True)
+        raise typer.Exit(code=2)
+
+    async def _run() -> bool:
+        async with _learning_scope() as repos:
+            if normalised == "approve":
+                return await approve_lesson(repos, lesson_id)
+            return await reject_lesson(repos, lesson_id)
+
+    if asyncio.run(_run()):
+        typer.echo(f"{normalised}d #{lesson_id}")
+    else:
+        typer.echo(f"no lesson #{lesson_id}", err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command("learning:forget")

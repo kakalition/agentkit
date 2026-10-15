@@ -7,16 +7,120 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased] — full-stack agent
 
 ### Added
+- **Opt-in authentication & RBAC** (`agentkit.security`): a framework-neutral
+  `Actor` (owner + subject + roles + method) that becomes the tenant key for every
+  repository and `Deps`. Auth is off by default and byte-for-byte compatible with
+  the local single-operator behavior; when enabled it is fail-closed. A single
+  `Authenticator` composes static/env API keys, DB-backed hashed keys, and
+  JWT/OIDC (JWKS with cached keys + rotation refetch). Wired into the web UI
+  middleware (`/api/*` gated, `/api/whoami`, `?access_token=` for SSE), the A2A
+  Starlette app (JSON-RPC gated, agent card public), and FastMCP HTTP transports.
+  `ToolPolicy.require_roles` + `policy_hooks` enforce per-tool roles (fail-closed);
+  audit writes carry the actor label. New: `agentkit auth:key create|list|revoke`,
+  `agentkit auth:whoami`, the `api_keys` table/`APIKeyRepo`, `AUTH_*` settings, and
+  `/guide/authentication`. `App.repositories(owner_id=...)`, `App.deps(actor=...)`,
+  `App.run/stream/resume(actor=...)` and `repositories(runtime, owner_id=...)`
+  thread the actor explicitly.
+- **Product UX**: `App.stream` over SSE (`POST /api/chat/stream`) and cancellation
+  (`App.cancel`/`App.running`, `POST /api/chat/cancel`); an in-process
+  `ApprovalQueue` (`APPROVAL_UI_ENABLED`, `/api/approvals`) so a UI can decide
+  deferred approvals; a lesson-review inbox in the web console (`/lessons`,
+  `/api/lessons`); and token entry / actor display. Streaming/cancel/approval docs.
+- **Ops & scale** (`agentkit.metrics`, `agentkit.cli`): Prometheus metrics
+  (turns/latency, tool errors, queue depth, scheduler runs, cost) exposed at
+  `METRICS_PATH` when `METRICS_ENABLED`; turn/queue/scheduler instrumentation.
+  `agentkit migrate` (non-destructive `init_db`), `db:backup`/`db:restore`
+  (SQLite `VACUUM INTO`), and `health`. Per-dependency readiness
+  (`readiness_checks`: db + optional queue/vault) behind `/api/health` and
+  `/readyz`. An optional Postgres engine path (`DATABASE_URL=postgresql://…`,
+  `asyncpg`). Dockerfile + docker-compose (app + worker, one scheduler leader)
+  and a deployment/runbook doc.
+- **OpenAI-compatible API**: `GET /v1/models` and `POST /v1/chat/completions`
+  (streaming SSE + JSON) mapped to `App.answer`, gated by `OPENAI_API_ENABLED`,
+  authenticated via the Phase 1 `Authenticator`, with usage recorded. Web UI gains
+  `webui/openai_api.py`; docs `/guide/openai-api`.
+- **Outbound webhooks** (`agentkit.webhooks`): opt-in `Webhook`/`WebhookDelivery`
+  tables and a `WebhookDispatcher` that subscribes to the event bus, POSTs
+  HMAC-SHA256-signed JSON, retries with bounded backoff, and logs every attempt.
+  `FullStackProvider` wires it when `WEBHOOKS_ENABLED`; CLI `webhook add|list|delete`.
+- **OpenAPI→tools loader** (`agentkit.tools_from_openapi`): compile an OpenAPI
+  document into agent tools (`tools_from_openapi`, `register_openapi_tools`).
+- **Presets/blueprints**: `agentkit new --preset support|research|ops` overlays the
+  full-stack scaffold with a composed blueprint (instructions + knowledge + eval
+  suite).
+- **Learning review & eval-driven learning**: `Memory.status`
+  (`active`/`proposed`/`rejected`, existing rows default `active`) plus
+  `LEARNING_REQUIRE_REVIEW` to hold lessons as `proposed` until approved. Only
+  `active` rows appear in listings/search/digest/distillation; the review inbox
+  is available in the CLI (`learning:review approve|reject`, `learning:lessons
+  --status`) and the API (`/api/lessons`, approve/reject). `agentkit.evals.
+  capture_turns` / `load_captured` distil real turns into stored regression cases
+  (`evals_capture` table) with `eval:capture`/`eval:gate`; `LEARNING_EVAL_GATE`
+  reports the post-reflect gate intent.
+- **Data lifecycle** (`agentkit.data`): `export_owner` produces a JSON bundle and
+  `forget_owner` erases an owner's data (dry-run by default), keeping audit
+  entries and appending a `data.forget` tombstone so the hash chain stays
+  verifiable. CLI `data:export`/`data:forget --yes`; API `GET /api/data/export`
+  and `POST /api/data/forget?confirm=true` (gated by `DATA_EXPORT_ENABLED` /
+  `DATA_FORGET_ENABLED`).
+- **Ingestion** (`agentkit.ingest`): `extract_text` (txt/md/csv/json, HTML via
+  `beautifulsoup4`, PDF via `pypdf`, DOCX via `python-docx`) and `fetch_url`
+  (httpx, SSRF/scheme/size guarded). `KnowledgeBase.add_file` now parses document
+  formats and gains `add_url`; CLI `knowledge:add-file` / `knowledge:add-url`.
+  Guards `INGEST_MAX_BYTES` / `INGEST_ALLOWED_SCHEMES`.
+- **Rate limiting** (`agentkit.ratelimit`): an opt-in, database-backed fixed-window
+  limiter (`rate_windows` table, keyed `(owner_id, key, window_start)`, works on
+  SQLite + Postgres) with an in-process cache. Enforced at the web UI's HTTP
+  boundary (429 + `Retry-After`, keyed on the resolved actor); `RateLimiter` is
+  reusable for per-tool caps. Settings `RATE_LIMIT_ENABLED`,
+  `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_BURST`, `RATE_LIMIT_TOOL_PER_MINUTE`; the
+  stack view reports the state.
+- **Credential vault** (`agentkit.security.credentials`): opt-in Fernet
+  encryption of channel/provider secrets at rest in a new `credentials` table
+  (`CredentialRepo`). `Credentials` exposes `set/get/names/delete` and encrypts
+  everything; `hydrate_credentials` loads vault secrets into settings at boot
+  (vault first, environment fallback) so channels pick them up transparently.
+  `Deps.credentials` / `App.credentials` expose the vault to tools. Refuses to
+  operate without `AGENTKIT_CREDENTIALS_KEY`; `credentials:set|list|delete` CLI
+  never echoes values; the key is masked in `/api/config` and only the enabled
+  flag is reported in the stack view.
 - **`Agent.full()`** — expand a builder to the whole agent stack in one call
   (persona + typed memory + skills + HITL approvals + safety policy + optional
   knowledge/workspace/peer tools). Every layer is toggleable and idempotent, and
   respects the `memory_enabled`/`skills_enabled`/`approvals_enabled`/
   `subagents_enabled` settings flags (a disabled layer is skipped silently).
 - **`FullStackProvider`** (`App(...).fullstack()`) — boot the full stack from
-  settings/config: per-concern config sections (`memory`, `channels`, `interop`,
-  `queue`), the daily durable `memory:consolidate` schedule, and gateway channels
-  registered only when their token/env is present. Unconfigured layers stay idle
-  and never raise.
+  settings/config: per-concern config sections (`memory`, `learning`, `channels`,
+  `interop`, `queue`), the daily durable `memory:consolidate` and
+  `learning:reflect` schedules, and gateway channels registered only when their
+  token/env is present. Unconfigured layers stay idle and never raise.
+- **Native agent tools** (`agentkit.toolkits`): every capability as first-class,
+  agent-callable tools — `database` (`db_*` CRUD), `scheduler` (`schedule_*`),
+  `queue` (`enqueue_*`, `RunRegisteredTask`), `notifications` (`notify*`),
+  `history`, `usage`, `knowledge_admin` (`index/replace/forget_document`), and
+  `skills_admin` (`save_skill`/`update_skill`). Attached per capability or via
+  `Agent.native()`/`Agent.full()`; safe by default (deny-by-default allow-lists,
+  owner scoping, audited writes) with every mutating tool registered
+  `requires_approval=True`. Builder methods and `App.models`/`agent_tasks`/
+  `agent_jobs` record the allow-lists; `agentkit inspect` / `/api/info` report the
+  enabled toolkits and exposed models/tasks/jobs. Per-toolkit settings flags
+  (`db_tools_enabled`, `scheduler_tools_enabled`, `queue_tools_enabled`,
+  `notification_tools_enabled`, `history_tools_enabled`, `usage_tools_enabled`,
+  `knowledge_admin_enabled`, `skill_authoring_enabled`) plus
+  `agentkit.policy.NATIVE_TOOLS_POLICY`.
+- **Self-learning** (`agentkit.learning`): a closed **reflect → learn → apply**
+  loop. `reflect(repos, ...)` distils lessons/preferences/facts from a conversation
+  window (model JSON extraction with an offline heuristic fallback), is idempotent
+  per conversation + window via a `learning_runs` table, and redacts PII/secrets
+  before storage. Lessons are `procedural` memories (deduped via
+  `near_duplicates`/`merge`), preferences merge into the owner profile, and
+  `lessons_digest` is injected into the instructions by `.learning()`/`.full()`.
+  Tools `learn`/`reflect`/`list_lessons`/`forget_lesson`; recurring lessons distil
+  into a `SKILL.md` (`learning_skill_threshold`/`learning_auto_skills`);
+  `learning:reflect` is a durable scheduler task registered + scheduled by
+  `FullStackProvider`; CLI `learning:reflect|lessons|forget`; settings
+  `learning_enabled`/`learning_reflect_cron`/`learning_window`/
+  `learning_skill_threshold`/`learning_auto_skills`/`learning_max_lessons`.
 - **Multi-provider model registry** (`agentkit.model_providers`): `MODEL_NAME` is
   `provider:model`; `resolve_model(name, settings)` dispatches to openai,
   openai-compatible, anthropic, google, groq, mistral and ollama (plus

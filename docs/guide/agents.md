@@ -171,6 +171,41 @@ calls). See [Human-in-the-Loop](/guide/hitl).
 Attaches a `ToolPolicy` that denies tools not in its allow-list at execution time.
 See [Safety](/guide/safety).
 
+## Native toolkits and self-learning
+
+Every agentkit capability can be exposed as agent-callable tools. Each is opt-in,
+gated by a settings flag, safe by default (deny-by-default allow-lists,
+approval-gated writes), and idempotent.
+
+```python
+agent.database({"note": Note})       # CRUD over an allow-list of models
+agent.scheduler(["sync_notes"])      # manage schedules over allow-listed tasks
+agent.queue({"sync": SyncNotes})     # enqueue allow-listed jobs
+agent.notifications()                # notify / notify_me
+agent.history()                      # list / search / read conversations
+agent.usage()                        # usage + audit trail
+agent.knowledge_admin()              # index / replace / forget documents
+agent.skill_authoring()              # write SKILL.md files
+agent.native()                       # every settings-enabled toolkit
+agent.learning()                     # reflect -> learn -> apply
+```
+
+`.native(enabled=None, *, models, tasks, jobs)` attaches the whole set; `.full()`
+attaches the settings-enabled toolkits plus self-learning. See
+[Native Tools](/guide/native-tools) and [Self-Learning](/guide/self-learning).
+
+## `full(...)`
+
+`full(...)` expands the builder to the whole agent stack in one idempotent call:
+
+```python
+agent.full(models={"note": Note}, tasks=["sync_notes"], jobs={"sync": SyncNotes})
+```
+
+Each layer is toggleable and skipped when its settings flag disables it
+(`persona`, `memory`, `skills`, `knowledge`, `hitl`, `safety`, `workspace`,
+`subagents`, `native`, `learning`). See [The Full Stack](/guide/fullstack).
+
 ## Models, output, and reliability
 
 ### `.output(type)` and `.output_validator(fn)`

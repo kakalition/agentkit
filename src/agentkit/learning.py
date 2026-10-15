@@ -38,10 +38,13 @@ __all__ = [
     "LESSON_KIND",
     "LESSON_TASK",
     "LearningSignals",
+    "approve_lesson",
     "attach_learning",
     "lessons_digest",
+    "proposed_lessons",
     "reflect",
     "register_reflect_task",
+    "reject_lesson",
 ]
 
 LESSON_TASK = "learning:reflect"
@@ -300,6 +303,8 @@ async def reflect(
     max_lessons = int(
         getattr(settings, "learning_max_lessons", DEFAULT_MAX_LESSONS) or DEFAULT_MAX_LESSONS
     )
+    require_review = bool(getattr(settings, "learning_require_review", False))
+    lesson_status = "proposed" if require_review else "active"
 
     result: dict[str, Any] = {
         "conversation_id": conversation_id,
@@ -349,6 +354,7 @@ async def reflect(
                 kind=LESSON_KIND,
                 importance=_importance(lesson),
                 source_conversation_id=conversation_id,
+                status=lesson_status,
             )
             await _emit("learning.lesson", conversation_id=conversation_id, text=lesson)
         for fact in facts:
@@ -394,7 +400,7 @@ async def lessons_digest(repos: Any, *, limit: int | None = None) -> str | None:
     store = getattr(repos, "memories", None)
     if store is None:
         return None
-    rows = list(await store.list(kind=LESSON_KIND))
+    rows = list(await store.list(kind=LESSON_KIND, status="active"))
     if not rows:
         return None
     rows.sort(key=lambda row: (float(row.importance or 0.0), int(row.access_count or 0)), reverse=True)
@@ -403,6 +409,30 @@ async def lessons_digest(repos: Any, *, limit: int | None = None) -> str | None:
     lines = ["Lessons learned (apply when relevant):"]
     lines.extend(f"- #{row.id} {row.content}" for row in rows)
     return "\n".join(lines)
+
+
+async def proposed_lessons(repos: Any) -> list[Any]:
+    """Lessons awaiting review (only meaningful with ``learning_require_review``)."""
+    store = getattr(repos, "memories", None)
+    if store is None:
+        return []
+    return await store.proposed(kind=LESSON_KIND)
+
+
+async def approve_lesson(repos: Any, lesson_id: int) -> bool:
+    """Promote a proposed lesson to ``active`` so it is applied."""
+    store = getattr(repos, "memories", None)
+    if store is None:
+        return False
+    return await store.set_status(lesson_id, "active")
+
+
+async def reject_lesson(repos: Any, lesson_id: int) -> bool:
+    """Mark a proposed lesson ``rejected`` so it is never applied."""
+    store = getattr(repos, "memories", None)
+    if store is None:
+        return False
+    return await store.set_status(lesson_id, "rejected")
 
 
 async def _emit(event: str, **payload: Any) -> None:
@@ -451,14 +481,18 @@ def attach_learning(agent: Any, *, settings: Any = None) -> Any:
         text = _truncate(redact(redact_pii((insight or "").strip())))
         if not text:
             return "nothing to learn"
+        deps_settings = getattr(ctx.deps, "settings", settings)
+        require_review = bool(getattr(deps_settings, "learning_require_review", False))
+        status = "proposed" if require_review and memory_kind == LESSON_KIND else "active"
         row = await store.add(
             text,
             kind=memory_kind,
             importance=_importance(text),
             source_conversation_id=ctx.deps.conversation_id,
+            status=status,
         )
         await _emit("learning.lesson", conversation_id=ctx.deps.conversation_id, text=text)
-        return f"learned as #{row.id}"
+        return f"learned as #{row.id}" + (" (pending review)" if status == "proposed" else "")
 
     @agent.tool
     async def reflect(ctx: RunContext[Deps]) -> str:
@@ -476,7 +510,7 @@ def attach_learning(agent: Any, *, settings: Any = None) -> Any:
         store = getattr(getattr(ctx.deps, "repos", None), "memories", None)
         if store is None:
             return "(learning unavailable)"
-        rows = await store.list(kind=LESSON_KIND)
+        rows = await store.list(kind=LESSON_KIND, status="active")
         if not rows:
             return "(no lessons yet)"
         rows.sort(key=lambda row: float(row.importance or 0.0), reverse=True)

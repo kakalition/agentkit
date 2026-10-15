@@ -34,6 +34,9 @@ agent = (
 | `safety=True` | `default_policy()` | — |
 | `workspace=<dir>` | file tools | argument omitted |
 | `subagents=<registry\|mapping>` | peer tools + `handoff_to` | argument omitted |
+| `native=True` | native toolkits ([Native Tools](/guide/native-tools)) | each `*_TOOLS_ENABLED` flag |
+| `models`/`tasks`/`jobs` | native allow-lists | argument omitted |
+| `learning=True` | self-learning ([Self-Learning](/guide/self-learning)) | `LEARNING_ENABLED=false` |
 
 Calling `full()` twice is safe: each layer is applied once and tools are never
 double-registered.
@@ -47,11 +50,13 @@ app = App(name="assistant").fullstack()   # or .providers([FullStackProvider])
 app.boot()
 ```
 
-- **`register`** declares the config sections `memory`, `channels`, `interop`
-  and `queue` (`defaults < config/<name>.py < env`).
+- **`register`** declares the config sections `memory`, `learning`, `channels`,
+  `interop` and `queue` (`defaults < config/<name>.py < env`).
 - **`boot`** performs effects **only for configured layers** and logs + skips
   anything unconfigured:
   - registers and schedules the daily durable task `memory:consolidate`;
+  - registers and schedules the daily durable task `learning:reflect`
+    (see [Self-Learning](/guide/self-learning));
   - registers a `Gateway` channel (Telegram/Slack/Email/Discord) for each channel
     whose token/env is present;
   - registers notifier senders for those channels;

@@ -18,6 +18,7 @@ from agentkit.db.migrations import init_db
 from agentkit.db.repositories import Repositories
 from agentkit.deps import ApprovalCallback, Deps
 from agentkit.embeddings import build_embedder, configure
+from agentkit.security import Actor
 
 
 @dataclass
@@ -60,12 +61,19 @@ async def ensure_initialized(runtime: Runtime) -> None:
 
 
 @asynccontextmanager
-async def repositories(runtime: Runtime) -> AsyncIterator[Repositories]:
-    """Open an async repository scope (commits on success, rolls back on error)."""
+async def repositories(
+    runtime: Runtime, owner_id: str | None = None
+) -> AsyncIterator[Repositories]:
+    """Open an async repository scope (commits on success, rolls back on error).
+
+    ``owner_id`` selects the tenant; when omitted it defaults to
+    ``runtime.settings.owner_id`` (today's single-operator behavior).
+    """
     await ensure_initialized(runtime)
     session = runtime.session_factory()
+    resolved_owner = owner_id if owner_id is not None else runtime.settings.owner_id
     try:
-        yield runtime.repos_factory(session, runtime.settings.owner_id)
+        yield runtime.repos_factory(session, resolved_owner)
         await session.commit()
     except Exception:
         await session.rollback()
@@ -103,6 +111,7 @@ def build_deps(
     a2a: Any = None,
     approve: ApprovalCallback | None = None,
     clock: Any = None,
+    actor: Actor | None = None,
 ) -> Deps:
     return Deps(
         settings=runtime.settings,
@@ -111,5 +120,6 @@ def build_deps(
         mcp=mcp,
         a2a=a2a,
         approve=approve,
+        actor=actor,
         clock=clock or (lambda: datetime.now(UTC)),
     )

@@ -81,6 +81,23 @@ agentkit knowledge search "refund policy"
 agentkit knowledge list
 ```
 
+## Ingesting documents and URLs
+
+`KnowledgeBase.add_file` extracts text from the document format (not just plain
+text) and `add_url` fetches and extracts a web page. Both are guarded by
+`INGEST_MAX_BYTES` and `INGEST_ALLOWED_SCHEMES` (and an SSRF egress check).
+
+```bash
+agentkit knowledge add-file report.pdf
+agentkit knowledge add-file brief.docx --source brief
+agentkit knowledge add-url https://example.com/post
+```
+
+Supported formats: plain text/markdown/CSV/JSON, HTML (`beautifulsoup4`), PDF
+(`pypdf`), and DOCX (`python-docx`). Parsers are imported lazily, so a missing
+optional library only affects its own format. `agentkit.ingest.extract_text`
+works on a path; `fetch_url` on a URL.
+
 ::: tip Knowledge vs. memory
 Use **knowledge** for corpora that change rarely and are retrieved by meaning.
 Use [memory](/guide/memory) for a few mutable facts about the owner. Both can be

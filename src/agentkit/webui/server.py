@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from agentkit.config import AgentSettings, get_settings
 from agentkit.guardrails import warn_if_exposed
 from agentkit.runtime import Runtime, build_runtime
@@ -17,13 +19,14 @@ def serve_webui(
     answer: Answer | None = None,
     host: str | None = None,
     port: int | None = None,
+    app: Any = None,
 ) -> None:
     """Run the web UI with uvicorn (blocking)."""
     settings = settings or (runtime.settings if runtime is not None else get_settings())
     runtime = runtime or build_runtime(settings)
     host = host or settings.webui_host
     port = port or settings.webui_port
-    app = build_webui_app(runtime=runtime, settings=settings, answer=answer)
+    app = build_webui_app(runtime=runtime, settings=settings, answer=answer, app=app)
     warn_if_exposed(host, "the webui")
 
     import uvicorn
@@ -36,9 +39,10 @@ def webui_service(
     runtime: Runtime | None = None,
     settings: AgentSettings | None = None,
     answer: Answer | None = None,
+    app: Any = None,
 ) -> Service:
     """A :class:`~agentkit.supervise.Service` factory for ``run_all``."""
     return Service(
         "webui",
-        lambda: serve_webui(runtime=runtime, settings=settings, answer=answer),
+        lambda: serve_webui(runtime=runtime, settings=settings, answer=answer, app=app),
     )

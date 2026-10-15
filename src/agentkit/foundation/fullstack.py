@@ -70,11 +70,26 @@ class FullStackProvider(Provider):
 
     def boot(self, app: Any) -> None:
         settings = app.settings
+        self._hydrate_credentials(app, settings)
         self._register_memory(app, settings)
         self._register_learning(app, settings)
         self._register_channels(app, settings)
         self._register_agents(app, settings)
         self._register_interop(app, settings)
+        self._register_webhooks(app, settings)
+
+    def _hydrate_credentials(self, app: Any, settings: Any) -> None:
+        """Load vault secrets into empty settings fields (vault first)."""
+        if not getattr(settings, "credentials_enabled", False):
+            return
+        try:
+            from agentkit.security.credentials import hydrate_credentials
+
+            hydrated = hydrate_credentials(settings, app.runtime)
+            if hydrated:
+                log.debug("fullstack: hydrated %d credential(s)", len(hydrated))
+        except Exception:  # pragma: no cover - never fatal
+            log.exception("fullstack: could not hydrate credentials")
 
     # -- memory ---------------------------------------------------------
     def _register_memory(self, app: Any, settings: Any) -> None:
@@ -125,6 +140,19 @@ class FullStackProvider(Provider):
                 continue
             app.channel(name, _service_factory(gateway))
             _register_notifier_sender(app, name)
+
+    def _register_webhooks(self, app: Any, settings: Any) -> None:
+        if not getattr(settings, "webhooks_enabled", False):
+            return
+        try:
+            from agentkit.webhooks import WebhookDispatcher
+
+            dispatcher = WebhookDispatcher(app.runtime)
+            dispatcher.subscribe(app.events)
+            app._webhook_dispatcher = dispatcher
+            log.debug("fullstack: outbound webhooks enabled")
+        except Exception:  # pragma: no cover - never fatal
+            log.exception("fullstack: could not wire webhooks")
 
     def _telegram(self, app: Any, settings: Any) -> Any:
         if not getattr(settings, "telegram_bot_token", None):
