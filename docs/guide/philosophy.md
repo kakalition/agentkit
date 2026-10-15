@@ -1,5 +1,7 @@
 # Philosophy
 
+## Introduction
+
 agentkit is opinionated. This page explains the ideas behind the API, so the rest
 of the documentation reads as a consequence of a few principles rather than a pile
 of features.

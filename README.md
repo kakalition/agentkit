@@ -34,8 +34,23 @@ console for exploring and operating the running agent.
 - **An operator console in the box.** Every agent serves a Vite + React +
   shadcn/ui web UI at `http://127.0.0.1:8787`: chat, conversations, usage, audit,
   A2A tasks, durable workflows, schedules, persona, config, and artifacts.
-- **Agents that delegate.** `Orchestrator` gives you an agent that routes to
-  specialist sub-agents as tools.
+- **Agents that delegate.** `Orchestrator`/`Supervisor` route to specialist
+  sub-agents as tools; a registry of local/A2A **handles**, a **mailbox**
+  (`send`/`ask`/`broadcast`) and **handoff** let agents discover and talk to each
+  other, emitting `agent.*` lifecycle events.
+- **Async by default.** The data layer speaks `async`/`await` end to end
+  (`sqlite+aiosqlite`), so concurrent turns, sub-agents and channels share one
+  event loop; the engine/repositories/ORM/web UI/CLI are all async.
+- **Multi-provider models.** `MODEL_NAME=provider:model` builds OpenAI,
+  Anthropic, Google, Groq, Mistral, Ollama or any OpenAI-compatible endpoint
+  (extend with `register_model_provider`).
+- **Typed memory.** Facts/preferences/people/dates with a hybrid
+  similarity+recency+importance recall, an owner **profile**, and a daily durable
+  `memory:consolidate` task (dedupe/summarize/prune).
+- **Full stack in one call.** `Agent.make(...).full()` expands to persona +
+  memory + skills + HITL + safety; `App(...).fullstack()` boots config sections,
+  schedules and any configured **channels** (Telegram, Slack, Email, Discord) —
+  unconfigured layers stay idle.
 - **Safe by construction.** Approvals default-deny; loopback binds; secrets and
   amounts are redacted from logs; every material action is audited.
 - **Interop, both ways.** Consume and serve MCP servers and A2A agents.
@@ -49,6 +64,8 @@ console for exploring and operating the running agent.
 - [Framework front door (Laravel-style)](#framework-front-door-laravel-style)
 - [Advanced primitives](#advanced-primitives)
 - [Orchestrator + specialists](#orchestrator--specialists)
+- [The full stack, in one call](#the-full-stack-in-one-call)
+- [Async by default](#async-by-default)
 - [Durable scheduling](#durable-scheduling-cron--one-off)
 - [Durability](#durability)
 - [MCP](#mcp)
@@ -159,9 +176,9 @@ class NudgeProvider(Provider):
         app.config("memory", MemorySection)
 
     def boot(self, app):
-        def audit(event):
-            with app.repositories() as repos:
-                repos.audit.append("turn.end", target=event.conversation_id)
+        async def audit(event):
+            async with app.repositories() as repos:
+                await repos.audit.append("turn.end", target=event.conversation_id)
         app.on("turn.end", audit)
 ```
 
@@ -170,15 +187,15 @@ class NudgeProvider(Provider):
 from agentkit import DB, Memory, Model, Schedule
 
 await Memory.remember("My name is Ada")
-Schedule.cron("weekly", "0 8 * * 1", "digest")
+await Schedule.cron("weekly", "0 8 * * 1", "digest")
 
 class Reminder(Model, table=True):
     name: str
     cron: str
 
-with DB.transaction():
-    Reminder.create(name="digest", cron="0 8 * * 1")
-Reminder.where(cron="0 8 * * 1").first()
+async with DB.transaction():
+    await Reminder.create(name="digest", cron="0 8 * * 1")
+await Reminder.where(cron="0 8 * * 1").first()
 ```
 
 ```bash
@@ -395,6 +412,32 @@ orchestrator = (
 agent = orchestrator.agent
 ```
 
+Agents can also talk to each other directly. A registry of **handles** (local or
+remote A2A) plus a **mailbox** and **handoff** gives you peer messaging; attach
+the tools with the builder and the model can use them:
+
+```python
+from agentkit import Agent, AgentRegistry, Mailbox, AgentHandle
+
+registry = AgentRegistry()
+registry.register(AgentHandle.local(writer, capabilities=["writing"]))
+mailbox = Mailbox(registry, events=app.events)
+
+agent = (
+    Agent.make("lead")
+    .instructions("Coordinate the team. Use ask_agent/handoff_to when useful.")
+    .agents(registry)
+    .mailbox(mailbox)
+    .full()
+    .build()
+)
+# tools: send_to, ask_agent, broadcast, list_agents, handoff_to
+```
+
+See [Agent Communication](/guide/agent-communication) for registry routing,
+`ask`/`broadcast`, `handoff_to` (full transcript or brief, with `MAX_HANDOFFS`),
+fallbacks and the `agent.*` events.
+
 ## Durable scheduling (cron *and* one-off)
 
 Jobs live in the database and are fired by a DBOS cron tick with a deterministic
@@ -526,6 +569,47 @@ agentkit skills list
 agentkit skills show pdf-tools
 ```
 
+## The full stack, in one call
+
+`Agent.full()` expands a builder to the whole agent stack (each layer toggleable,
+idempotent, and skipped when its settings flag disables it):
+
+```python
+from agentkit import Agent, App, FullStackProvider
+
+agent = Agent.make("assistant").instructions("Be helpful.").full().build()
+
+app = App(name="assistant").fullstack()   # FullStackProvider
+app.boot()                                # schedules + any configured channels
+```
+
+`FullStackProvider` declares the `memory`/`channels`/`interop`/`queue` config
+sections, registers the daily durable `memory:consolidate` task, and wires a
+gateway channel (Telegram/Slack/Email/Discord) for each token you provide —
+nothing raises when a layer is unconfigured. `agentkit new` scaffolds this full
+stack by default (`--minimal` for the older skeleton), and `agentkit inspect` /
+`GET /api/info` show which layers are active. See
+[The Full Stack](/guide/fullstack) and [Multiple Model Providers](/guide/multi-provider).
+
+## Async by default
+
+The data layer is async end to end. `build_runtime` creates an async engine (no
+I/O); the schema is created lazily on the first scope:
+
+```python
+from agentkit import build_runtime, repositories
+
+runtime = build_runtime(settings)
+async with repositories(runtime) as repos:
+    await repos.conversations.get_or_create("cli:default")
+```
+
+Repositories, `Model`/`Repository` terminals, `ChatRunner`, `KnowledgeBase`, the
+`Memory`/`Feedback`/`Queue`/`Schedule` facades, the web UI and the CLI are all
+coroutines. Two seams cannot be async — DBOS workflow/step bodies and build-time
+bootstrapping — and they bridge with `agentkit._sync.run_sync`, which runs the work
+on a private loop rather than the caller's. See [Async Data Layer](/guide/async).
+
 ## Run everything in one process
 
 ```python
@@ -643,8 +727,11 @@ Subclass `AgentSettings` to add app fields.
 ## Design notes
 
 - **Delegation, not `as_tool`.** `Orchestrator` writes the delegation tool.
-- **One writer.** `repositories()` serializes DB access with a process lock;
-  schema bootstrap uses the same lock. WAL + busy-timeout are set.
+- **Async by default.** The data layer is async (`sqlite+aiosqlite`): repositories,
+  `Model`/`Repository` terminals, conversations, memory, knowledge, the web UI and
+  the CLI are coroutines. SQLite is single-writer, so WAL + a busy timeout replace
+  the old global lock; the only sync seams (DBOS steps, build-time bootstrap) drive
+  the async layer on a private loop via `agentkit._sync.run_sync`.
 - **Infra vs domain.** agentkit owns only `conversations`, `messages`,
   `a2a_tasks`, `scheduled_jobs`, `usage_records`, `audit_log`. Domain tables
   belong to your app; subclass `Repositories` and pass `repos_factory`.

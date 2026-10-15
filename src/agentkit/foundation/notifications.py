@@ -60,6 +60,15 @@ class Notification:
     def to_telegram(self) -> str:
         return self.content()
 
+    def to_slack(self) -> str:
+        return self.content()
+
+    def to_email(self) -> str:
+        return self.content()
+
+    def to_discord(self) -> str:
+        return self.content()
+
 
 class Notifier:
     """Resolves channels and sends notifications."""
@@ -109,14 +118,21 @@ class Notifier:
     def _send_conversation(self, notification: Notification, *, conversation_id: str | None) -> str:
         if not conversation_id:
             return ""
+        from agentkit._sync import run_sync
         from agentkit.session import serialize_message
 
         text = notification.to_conversation()
-        with self.app.repositories() as repos:
-            repos.conversations.get_or_create(conversation_id)
-            repos.messages.append(
-                conversation_id, [serialize_message(_assistant_message(text))]
-            )
+
+        async def _write() -> None:
+            async with self.app.repositories() as repos:
+                await repos.conversations.get_or_create(conversation_id)
+                await repos.messages.append(
+                    conversation_id, [serialize_message(_assistant_message(text))]
+                )
+
+        # ``send`` stays sync (listeners are sync), but the write goes through the
+        # async data layer off the caller's loop.
+        run_sync(_write())
         return text
 
     def _send_telegram(self, notification: Notification, *, conversation_id: str | None) -> str:

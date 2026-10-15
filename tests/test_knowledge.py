@@ -28,41 +28,42 @@ def test_chunk_text_splits_with_overlap():
     assert chunk_text("short", chunk_chars=400) == ["short"]
 
 
-def test_knowledge_crud(runtime: Runtime):
+async def test_knowledge_crud(runtime: Runtime):
     app = _app(runtime)
     kb = KnowledgeBase(app)
-    added = kb.add("The capital of France is Paris. " * 60, source="geo.txt")
+    added = await kb.add("The capital of France is Paris. " * 60, source="geo.txt")
     assert added >= 1
-    assert kb.sources() == ["geo.txt"]
-    assert kb.count("geo.txt") == added
+    assert await kb.sources() == ["geo.txt"]
+    assert await kb.count("geo.txt") == added
 
-    hits = kb.search("Paris", limit=3)
+    hits = await kb.search("Paris", limit=3)
     assert hits and "Paris" in hits[0].content
-    assert "geo.txt" in kb.index()
+    assert "geo.txt" in await kb.index()
     assert "geo.txt" in kb.format_hits(hits)
 
-    assert kb.clear("geo.txt") == added
-    assert kb.count() == 0
+    assert await kb.clear("geo.txt") == added
+    assert await kb.count() == 0
 
 
-def test_knowledge_add_many_and_directory(runtime: Runtime, tmp_path):
+async def test_knowledge_add_many_and_directory(runtime: Runtime, tmp_path):
     app = _app(runtime)
     kb = KnowledgeBase(app)
-    total = kb.add_many({"a.md": "alpha " * 50, "b.md": "beta " * 50})
+    total = await kb.add_many({"a.md": "alpha " * 50, "b.md": "beta " * 50})
     assert total >= 2
-    assert set(kb.sources()) == {"a.md", "b.md"}
+    assert set(await kb.sources()) == {"a.md", "b.md"}
 
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "c.md").write_text("gamma " * 40, encoding="utf-8")
-    assert kb.add_directory(docs) >= 1
-    assert "c.md" in kb.sources() or any("c.md" in s for s in kb.sources())
+    assert await kb.add_directory(docs) >= 1
+    sources = await kb.sources()
+    assert "c.md" in sources or any("c.md" in s for s in sources)
 
 
 async def test_builder_knowledge_tool(runtime: Runtime):
     app = _app(runtime)
     kb = KnowledgeBase(app)
-    kb.add("Mochi is a grey cat that lives in Lisbon.", source="pets.md")
+    await kb.add("Mochi is a grey cat that lives in Lisbon.", source="pets.md")
 
     def _tool_return(messages: list[ModelMessage]) -> str | None:
         for message in messages:

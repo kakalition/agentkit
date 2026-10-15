@@ -48,3 +48,42 @@ class ToolPolicy:
 
     def approvals_required(self, tool: str) -> bool:
         return self.decision(tool) == APPROVE
+
+
+# Tools that mutate the world and should be approved by default.
+DEFAULT_APPROVAL_TOOLS = (
+    "run_command",
+    "write_file",
+    "delete_file",
+    "send_email",
+    "send_to",
+)
+
+# Native-tool write tools (see :mod:`agentkit.toolkits`): each mutates durable
+# state or sends egress, so they are approval-gated by :func:`default_policy`.
+NATIVE_APPROVAL_TOOLS = (
+    "db_create",
+    "db_update",
+    "db_delete",
+    "schedule_task",
+    "run_schedule_now",
+    "enqueue_task",
+    "notify",
+    "replace_document",
+    "forget_document",
+    "save_skill",
+    "update_skill",
+)
+
+
+def native_policy() -> ToolPolicy:
+    """Approval policy for the native toolkits (writes only)."""
+    return ToolPolicy(require_approval=set(NATIVE_APPROVAL_TOOLS))
+
+
+NATIVE_TOOLS_POLICY = native_policy()
+
+
+def default_policy() -> ToolPolicy:
+    """The default safety policy: approve destructive/egress tools, allow the rest."""
+    return ToolPolicy(require_approval=set(DEFAULT_APPROVAL_TOOLS) | set(NATIVE_APPROVAL_TOOLS))

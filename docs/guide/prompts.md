@@ -1,5 +1,7 @@
 # Prompt Registry
 
+## Introduction
+
 Prompts are content, not code. The **prompt registry** keeps them in files, tracks
 versions, and renders variables — so you can edit prompts without touching Python.
 

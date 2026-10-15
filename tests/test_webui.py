@@ -31,6 +31,8 @@ async def _stub_answer(conversation_id: str, text: str) -> ChatResult:
 
 @pytest.fixture
 def client(tmp_path):
+    import asyncio
+
     settings = AgentSettings(
         owner_id="owner",
         agent_name="tester",
@@ -39,20 +41,24 @@ def client(tmp_path):
         libsql_auth_token="secret-token",
     )
     runtime = build_runtime(settings)
-    with repositories(runtime) as repos:
-        repos.conversations.get_or_create("webui:default", channel="webui")
-        repos.messages.append(
-            "webui:default",
-            [
-                serialize_message(ModelRequest(parts=[UserPromptPart(content="hi there")])),
-                serialize_message(ModelResponse(parts=[TextPart(content="hello!")])),
-            ],
-        )
-        repos.usage.add(conversation_id="webui:default", requests=1, total_tokens=5)
-        repos.audit.append("test.action", target="thing")
-        repos.a2a.upsert("t1", "owner", "ctx", "working", '{"x": 1}')
-        repos.schedules.upsert("job1", kind="cron", schedule="* * * * *", task="noop")
-        (settings.artifacts_dir / "report.txt").write_text("artifact-body")
+
+    async def _seed() -> None:
+        async with repositories(runtime) as repos:
+            await repos.conversations.get_or_create("webui:default", channel="webui")
+            await repos.messages.append(
+                "webui:default",
+                [
+                    serialize_message(ModelRequest(parts=[UserPromptPart(content="hi there")])),
+                    serialize_message(ModelResponse(parts=[TextPart(content="hello!")])),
+                ],
+            )
+            await repos.usage.add(conversation_id="webui:default", requests=1, total_tokens=5)
+            await repos.audit.append("test.action", target="thing")
+            await repos.a2a.upsert("t1", "owner", "ctx", "working", '{"x": 1}')
+            await repos.schedules.upsert("job1", kind="cron", schedule="* * * * *", task="noop")
+
+    asyncio.run(_seed())
+    (settings.artifacts_dir / "report.txt").write_text("artifact-body")
 
     scheduler.task("noop")(lambda **_: None)
     app = build_webui_app(runtime=runtime, settings=settings, answer=_stub_answer)

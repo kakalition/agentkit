@@ -1,5 +1,7 @@
 # Orchestrator & Sub-Agents
 
+## Introduction
+
 A single agent with twenty tools becomes hard to reason about. The antidote is
 **delegation**: a top-level *orchestrator* that routes a request to a focused
 **specialist** (a sub-agent), then synthesises the answer. agentkit gives you three

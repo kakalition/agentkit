@@ -1,4 +1,9 @@
-from agentkit.db.engine import create_db_engine, make_session_factory, session_scope
+from agentkit.db.engine import (
+    async_database_url,
+    create_async_db_engine,
+    make_async_session_factory,
+    session_scope,
+)
 from agentkit.db.repositories import (
     A2ATaskRepo,
     ConversationRepo,
@@ -8,8 +13,9 @@ from agentkit.db.repositories import (
 )
 
 __all__ = [
-    "create_db_engine",
-    "make_session_factory",
+    "async_database_url",
+    "create_async_db_engine",
+    "make_async_session_factory",
     "session_scope",
     "Repositories",
     "ConversationRepo",

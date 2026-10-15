@@ -1,5 +1,7 @@
 # MCP & A2A
 
+## Introduction
+
 agentkit speaks two agent protocols out of the box: **MCP** to consume external
 tools, and **A2A** to expose and call other agents.
 

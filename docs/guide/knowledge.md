@@ -1,5 +1,7 @@
 # Knowledge (RAG)
 
+## Introduction
+
 The **knowledge base** indexes your documents with embeddings and lets the agent
 retrieve the most relevant passages — retrieval-augmented generation without a
 separate vector service.
@@ -10,26 +12,26 @@ separate vector service.
 from agentkit import KnowledgeBase
 
 kb = KnowledgeBase()                     # uses the app/default runtime
-kb.add_directory("./docs", pattern="**/*.md")
-kb.add_file("handbook.pdf.txt")
-kb.add("Free-form note text", source="note")
-kb.add_many({"faq.md": faq_text, "policy.md": policy_text})
+await kb.add_directory("./docs", pattern="**/*.md")
+await kb.add_file("handbook.pdf.txt")
+await kb.add("Free-form note text", source="note")
+await kb.add_many({"faq.md": faq_text, "policy.md": policy_text})
 ```
 
 Text is chunked with overlap, embedded, and stored in the `knowledge_chunks`
 table. Re-indexing a source replaces its chunks:
 
 ```python
-kb.replace("./docs/guide.md")
-kb.sources()                 # ["…/guide.md", "faq.md", ...]
-kb.count("faq.md")
-kb.clear("faq.md")
+await kb.replace("./docs/guide.md")
+await kb.sources()                 # ["…/guide.md", "faq.md", ...]
+await kb.count("faq.md")
+await kb.clear("faq.md")
 ```
 
 ## Searching
 
 ```python
-hits = kb.search("how do refunds work", limit=5)
+hits = await kb.search("how do refunds work", limit=5)
 for chunk in hits:
     print(chunk.source, chunk.content[:120])
 

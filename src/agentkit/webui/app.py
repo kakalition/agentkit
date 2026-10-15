@@ -15,9 +15,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
 from agentkit import scheduler
 from agentkit.config import AgentSettings
@@ -120,8 +121,8 @@ def build_webui_app(
         app.include_router(module.router, prefix="/api")
 
     @app.get("/api/health", tags=["core"])
-    def health(ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
-        ok, results = run_checks([db_check(ctx.runtime)])
+    async def health(ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
+        ok, results = await run_checks([db_check(ctx.runtime)])
         return {"ok": ok, "checks": results}
 
     @app.post("/api/chat", tags=["core"])
@@ -138,26 +139,26 @@ def build_webui_app(
         }
 
     @app.get("/api/events", tags=["core"])
-    async def events(ctx: WebUIContext = Depends(get_context)) -> StreamingResponse:
+    async def events(ctx: WebUIContext = Depends(get_context)) -> EventSourceResponse:
         async def stream():
-            yield "event: hello\ndata: {}\n\n"
+            yield {"event": "hello", "data": "{}"}
             while True:
-                snapshot = await asyncio.to_thread(_snapshot, ctx)
-                yield f"event: tick\ndata: {json.dumps(snapshot)}\n\n"
+                snapshot = await _snapshot(ctx)
+                yield {"event": "tick", "data": json.dumps(snapshot)}
                 await asyncio.sleep(5)
 
-        return StreamingResponse(stream(), media_type="text/event-stream")
+        return EventSourceResponse(stream())
 
     _install_spa(app)
     return app
 
 
-def _snapshot(ctx: WebUIContext) -> dict[str, Any]:
+async def _snapshot(ctx: WebUIContext) -> dict[str, Any]:
     try:
-        with repositories(ctx.runtime) as repos:
-            conversations = len(repos.conversations.list(limit=1000))
-            totals = repos.usage.totals()
-        schedules = len(scheduler.list_jobs())
+        async with repositories(ctx.runtime) as repos:
+            conversations = len(await repos.conversations.list(limit=1000))
+            totals = await repos.usage.totals()
+        schedules = len(await scheduler.list_jobs())
     except Exception as exc:  # pragma: no cover - defensive
         return {"error": str(exc)}
     return {"conversations": conversations, "schedules": schedules, "usage": totals}

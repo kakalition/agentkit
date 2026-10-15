@@ -1,5 +1,7 @@
 # Budgets & Limits
 
+## Introduction
+
 Unattended agents need guardrails on spend. agentkit enforces token, cost, and
 request budgets by checking recorded usage **before each turn**.
 
@@ -41,7 +43,7 @@ except BudgetExceeded as exc:
 ```python
 from agentkit.limits import check_budget
 
-with app.repositories() as repos:
+async with app.repositories() as repos:
     totals = check_budget(repos, Budget(max_cost=5.0, window_seconds=86_400))
 ```
 

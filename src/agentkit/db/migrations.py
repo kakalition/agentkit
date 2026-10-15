@@ -1,50 +1,86 @@
-"""Schema creation and Alembic plumbing."""
+"""Schema creation and Alembic plumbing (async)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Engine, inspect, text
+from sqlalchemy import Connection, inspect, text
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlmodel import SQLModel
 
 
-def sync_missing_columns(engine: Engine, metadata: Any = None) -> list[str]:
-    """Add columns that exist in the models but not in an existing table.
+def _render_default(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    if isinstance(value, (int, float)):
+        return str(value)
+    text_value = str(value)
+    if not text_value:
+        return "''"
+    return "'" + text_value.replace("'", "''") + "'"
 
-    ``create_all`` never alters existing tables, so a table created by an older
-    release can drift from the model. This only *adds* missing nullable columns
-    (never drops, retypes, or adds NOT NULL) so local upgrades keep working.
-    Returns the ``table.column`` names that were added.
+
+def _column_default_sql(column: Any) -> str | None:
+    """A literal DEFAULT clause for a column, or ``None`` when unavailable."""
+    server_default = getattr(column, "server_default", None)
+    if server_default is not None and getattr(server_default, "arg", None) is not None:
+        return str(server_default.arg)
+    default = getattr(column, "default", None)
+    if default is None:
+        return None
+    arg = getattr(default, "arg", None)
+    if arg is None or callable(arg):
+        return None
+    return _render_default(arg)
+
+
+def apply_missing_columns(connection: Connection, metadata: Any = None) -> list[str]:
+    """Add columns present in the models but missing from existing tables (sync).
+
+    Runs on a sync :class:`~sqlalchemy.Connection` (via ``run_sync`` from the async
+    engine). Only *adds* columns (never drops or retypes): nullable columns are
+    added bare, while NOT NULL columns are added with their default (skipped when
+    they have no scalar/server default). Returns the ``table.column`` names added.
     """
     meta = metadata or SQLModel.metadata
-    inspector = inspect(engine)
+    inspector = inspect(connection)
     existing = set(inspector.get_table_names())
     added: list[str] = []
-    with engine.begin() as conn:
-        for table in meta.sorted_tables:
-            if table.name not in existing:
+    for table in meta.sorted_tables:
+        if table.name not in existing:
+            continue
+        present = {column["name"] for column in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in present:
                 continue
-            present = {column["name"] for column in inspector.get_columns(table.name)}
-            for column in table.columns:
-                if column.name in present or not column.nullable:
-                    continue
-                ddl_type = column.type.compile(engine.dialect)
-                conn.execute(
-                    text(
-                        f'ALTER TABLE "{table.name}" '
-                        f'ADD COLUMN "{column.name}" {ddl_type}'
-                    )
-                )
-                added.append(f"{table.name}.{column.name}")
+            default_sql = _column_default_sql(column)
+            if not column.nullable and default_sql is None:
+                continue
+            ddl_type = column.type.compile(connection.dialect)
+            clause = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {ddl_type}'
+            if default_sql is not None:
+                clause += f" DEFAULT {default_sql}"
+            connection.execute(text(clause))
+            added.append(f"{table.name}.{column.name}")
     return added
 
 
-def init_db(engine: Engine, metadata: Any = None) -> None:
-    """Create all tables (development/first-run convenience), then reconcile drift."""
+async def sync_missing_columns(engine: AsyncEngine, metadata: Any = None) -> list[str]:
+    """Async wrapper around :func:`apply_missing_columns`."""
     meta = metadata or SQLModel.metadata
-    meta.create_all(engine)
-    sync_missing_columns(engine, meta)
+    async with engine.begin() as connection:
+        return await connection.run_sync(apply_missing_columns, meta)
+
+
+async def init_db(engine: AsyncEngine, metadata: Any = None) -> None:
+    """Create all tables (first-run convenience), then reconcile drift."""
+    meta = metadata or SQLModel.metadata
+    async with engine.begin() as connection:
+        await connection.run_sync(meta.create_all)
+        await connection.run_sync(apply_missing_columns, meta)
 
 
 def make_alembic_config(root: str | Path, *, database_url: str | None = None) -> Any:

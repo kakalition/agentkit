@@ -10,15 +10,22 @@
         },
     )
 
-Rules are strings (``"required"``, ``"min:3"``) or callables. Validation raises
-:class:`~agentkit.errors.ValidationError` with a per-field error map.
+Rules are strings (``"required"``, ``"min:3"``) or callables. Each field's rule
+set is compiled to a Pydantic :class:`~pydantic.TypeAdapter` (custom validators
+plus ``EmailStr`` / ``StringConstraints``) and validation raises
+:class:`ValidationError` with a per-field error map.
+
+Blank values (``None`` or ``""``) skip every rule except ``required``.
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import AfterValidator, BeforeValidator, EmailStr, StringConstraints, TypeAdapter
+from pydantic import ValidationError as PydanticValidationError
+from pydantic_core import PydanticCustomError
 
 from agentkit.errors import InvalidInput
 
@@ -29,12 +36,16 @@ class ValidationError(InvalidInput):
     code = "validation_error"
 
 
-def _fail(field: str, message: str) -> None:
-    raise ValidationError(message, detail={"errors": {field: [message]}})
+_EMAIL = TypeAdapter(EmailStr)
+
+
+def _predicate_error(message: str | None) -> None:
+    if message:
+        raise PydanticCustomError("agentkit_rule", message)
 
 
 class Rule:
-    """Built-in validation rules."""
+    """Built-in validation rules (Pydantic-backed predicates)."""
 
     @staticmethod
     def required(value: Any) -> str | None:
@@ -52,7 +63,10 @@ class Rule:
 
     @staticmethod
     def number(value: Any) -> str | None:
-        return None if isinstance(value, (int, float)) and not isinstance(value, bool) else "must be a number"
+        return (
+            None if isinstance(value, (int, float)) and not isinstance(value, bool)
+            else "must be a number"
+        )
 
     @staticmethod
     def boolean(value: Any) -> str | None:
@@ -96,34 +110,39 @@ class Rule:
 
     @staticmethod
     def regex(pattern: str) -> Callable[[Any], str | None]:
-        compiled = re.compile(pattern)
+        adapter: TypeAdapter[str] = TypeAdapter(Annotated[str, StringConstraints(pattern=pattern)])
 
         def rule(value: Any) -> str | None:
-            return None if isinstance(value, str) and compiled.search(value) else f"must match {pattern}"
+            if not isinstance(value, str):
+                return f"must match {pattern}"
+            try:
+                adapter.validate_python(value)
+            except PydanticValidationError:
+                return f"must match {pattern}"
+            return None
 
         return rule
 
     @staticmethod
     def email(value: Any) -> str | None:
-        return None if isinstance(value, str) and re.match(r"[^@\s]+@[^@\s]+\.[^@\s]+$", value) else "must be an email"
-
-
-_BUILTINS: dict[str, Callable[[Any], str | None]] = {
-    "required": Rule.required,
-    "string": Rule.string,
-    "integer": Rule.integer,
-    "number": Rule.number,
-    "boolean": Rule.boolean,
-    "email": Rule.email,
-}
+        if not isinstance(value, str):
+            return "must be an email"
+        try:
+            _EMAIL.validate_python(value)
+        except PydanticValidationError:
+            return "must be an email"
+        return None
 
 
 def _resolve_rule(spec: Any) -> Callable[[Any], str | None]:
+    """Return a ``value -> message-or-None`` predicate for one rule spec."""
     if callable(spec):
         return spec
     name, _, argument = str(spec).partition(":")
-    if name in {"min", "max"}:
-        return Rule.min(int(argument)) if name == "min" else Rule.max(int(argument))
+    if name == "min":
+        return Rule.min(int(argument))
+    if name == "max":
+        return Rule.max(int(argument))
     if name == "between":
         low, high = argument.split(",")
         return Rule.between(int(low), int(high))
@@ -131,28 +150,48 @@ def _resolve_rule(spec: Any) -> Callable[[Any], str | None]:
         return Rule.one_of(*argument.split(","))
     if name == "regex":
         return Rule.regex(argument)
-    if name in _BUILTINS:
-        return _BUILTINS[name]
+    if name in {"string", "integer", "number", "boolean", "email"}:
+        return getattr(Rule, name)
     raise ValueError(f"unknown validation rule: {spec!r}")
+
+
+def _skip_blank(predicate: Callable[[Any], str | None]) -> Callable[[Any], Any]:
+    def validator(value: Any) -> Any:
+        if value is None or value == "":
+            return value
+        _predicate_error(predicate(value))
+        return value
+
+    return validator
+
+
+def _required(value: Any) -> Any:
+    _predicate_error(Rule.required(value))
+    return value
+
+
+def _adapter(specs: list[Any]) -> TypeAdapter[Any]:
+    validators: list[Any] = []
+    for spec in specs:
+        if spec == "required":
+            validators.append(BeforeValidator(_required))
+        else:
+            validators.append(AfterValidator(_skip_blank(_resolve_rule(spec))))
+    annotation = Annotated[(Any, *validators)]
+    adapter: TypeAdapter[Any] = TypeAdapter(annotation)
+    return adapter
 
 
 def validate(data: dict[str, Any], rules: dict[str, list[Any]]) -> dict[str, Any]:
     """Validate ``data`` against ``rules``; return the data or raise."""
     errors: dict[str, list[str]] = {}
     for field, field_rules in rules.items():
-        value = data.get(field)
-        for spec in field_rules:
-            rule = _resolve_rule(spec)
-            if spec == "required":
-                message = rule(value)
-                if message:
-                    errors.setdefault(field, []).append(f"the {field} field {message}")
-                continue
-            if value is None or value == "":
-                continue
-            message = rule(value)
-            if message:
-                errors.setdefault(field, []).append(f"the {field} field {message}")
+        adapter = _adapter(list(field_rules))
+        try:
+            adapter.validate_python(data.get(field))
+        except PydanticValidationError as exc:
+            for error in exc.errors():
+                errors.setdefault(field, []).append(f"the {field} field {error['msg']}")
     if errors:
         raise ValidationError("validation failed", detail={"errors": errors})
     return data

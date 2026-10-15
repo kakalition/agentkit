@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
 import pytest
 
@@ -19,8 +19,8 @@ def runtime(tmp_path) -> Runtime:
 
 
 @pytest.fixture
-def repos(runtime: Runtime) -> Iterator[Repositories]:
-    with repositories(runtime) as opened:
+async def repos(runtime: Runtime) -> AsyncIterator[Repositories]:
+    async with repositories(runtime) as opened:
         yield opened
 
 

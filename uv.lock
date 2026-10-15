@@ -35,19 +35,28 @@ source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
     { name = "aiogram" },
+    { name = "aiosqlite" },
     { name = "alembic" },
     { name = "babel" },
+    { name = "cachetools" },
     { name = "croniter" },
     { name = "dbos" },
     { name = "fastapi" },
     { name = "fastmcp-slim", extra = ["server"] },
+    { name = "genai-prices" },
     { name = "httpx" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pydantic-ai" },
+    { name = "pydantic-graph" },
     { name = "pydantic-settings" },
     { name = "python-dateutil" },
+    { name = "pyyaml" },
+    { name = "semantic-text-splitter" },
     { name = "sqlalchemy" },
     { name = "sqlalchemy-libsql" },
     { name = "sqlmodel" },
+    { name = "sse-starlette" },
     { name = "telegramify-markdown" },
     { name = "typer" },
     { name = "uvicorn" },
@@ -63,6 +72,9 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
+]
+discord = [
+    { name = "discord-py" },
 ]
 memory = [
     { name = "sentence-transformers" },
@@ -80,43 +92,60 @@ observability-phoenix = [
 prices = [
     { name = "yfinance" },
 ]
+slack = [
+    { name = "slack-bolt" },
+]
+vec = [
+    { name = "sqlite-vec" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "a2a-sdk", specifier = ">=1.2.2,<2" },
     { name = "aiogram", specifier = ">=3.15,<4" },
+    { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "alembic", specifier = ">=1.14" },
     { name = "arize-phoenix", marker = "extra == 'observability-phoenix'", specifier = ">=8" },
     { name = "babel", specifier = ">=2.16" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.7" },
+    { name = "cachetools", specifier = ">=7.2.1" },
     { name = "croniter", specifier = ">=6.0" },
     { name = "cyclonedx-bom", marker = "extra == 'dev'", specifier = ">=4.1" },
     { name = "dbos", specifier = ">=3.2.0,<4" },
+    { name = "discord-py", marker = "extra == 'discord'", specifier = ">=2.4,<3" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "fastembed", marker = "extra == 'memory-fastembed'", specifier = ">=0.4" },
     { name = "fastmcp-slim", extras = ["server"], specifier = ">=4.1.0,<5" },
+    { name = "genai-prices", specifier = ">=0.1.10" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
+    { name = "numpy", specifier = ">=2.4.6" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'observability'", specifier = ">=1.27" },
     { name = "opentelemetry-sdk", marker = "extra == 'observability'", specifier = ">=1.27" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.7" },
     { name = "pydantic-ai", specifier = ">=2.55.0,<3" },
+    { name = "pydantic-graph", specifier = ">=2.55.0" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "python-dateutil", specifier = ">=2.9" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
+    { name = "semantic-text-splitter", specifier = ">=0.33.0" },
     { name = "sentence-transformers", marker = "extra == 'memory'", specifier = ">=3.0" },
+    { name = "slack-bolt", marker = "extra == 'slack'", specifier = ">=1.20,<2" },
     { name = "sqlalchemy", specifier = ">=2.0.36" },
     { name = "sqlalchemy-libsql", specifier = ">=0.2.0" },
+    { name = "sqlite-vec", marker = "extra == 'vec'", specifier = ">=0.1.9" },
     { name = "sqlmodel", specifier = ">=0.0.22" },
+    { name = "sse-starlette", specifier = ">=3.5.0" },
     { name = "telegramify-markdown", specifier = ">=1.4.0" },
     { name = "typer", specifier = ">=0.15" },
     { name = "uvicorn", specifier = ">=0.32" },
     { name = "yfinance", marker = "extra == 'prices'", specifier = ">=0.2.50" },
 ]
-provides-extras = ["observability", "observability-phoenix", "prices", "memory", "memory-fastembed", "dev"]
+provides-extras = ["observability", "observability-phoenix", "prices", "memory", "memory-fastembed", "dev", "vec", "slack", "discord"]
 
 [[package]]
 name = "aiofile"
@@ -1170,6 +1199,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69", size = 75520, upload-time = "2021-03-08T10:59:26.269Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
+]
+
+[[package]]
+name = "discord-py"
+version = "2.7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/57/9a2d9abdabdc9db8ef28ce0cf4129669e1c8717ba28d607b5ba357c4de3b/discord_py-2.7.1.tar.gz", hash = "sha256:24d5e6a45535152e4b98148a9dd6b550d25dc2c9fb41b6d670319411641249da", size = 1106326, upload-time = "2026-03-03T18:40:46.24Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f7/a7/17208c3b3f92319e7fad259f1c6d5a5baf8fd0654c54846ced329f83c3eb/discord_py-2.7.1-py3-none-any.whl", hash = "sha256:849dca2c63b171146f3a7f3f8acc04248098e9e6203412ce3cf2745f284f7439", size = 1227550, upload-time = "2026-03-03T18:40:44.492Z" },
 ]
 
 [[package]]
@@ -4374,6 +4415,23 @@ wheels = [
 ]
 
 [[package]]
+name = "semantic-text-splitter"
+version = "0.33.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/4a/b6922f5982ced4751244858266523622866a4c83666b045149a269d9c4c4/semantic_text_splitter-0.33.0.tar.gz", hash = "sha256:6d5db802af52ce6a2a2035f4e72f22b46d346bd0850fd9ca97011f8841aa7826", size = 292411, upload-time = "2026-09-24T09:14:47.904Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5f/fc/37ad3f2d708ba2653d2b3930da5da2724317a65c53ddc1630ca3feceb106/semantic_text_splitter-0.33.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:fdc1b1e09c934a0c1e5c24f8ad5693728b09786d6314f14aea9f0772bef8b23a", size = 8260725, upload-time = "2026-09-24T09:14:08.156Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/e5/88684514e35ecce1793fe816d103784d36cb091a97bf1b7d22c20cb6f12f/semantic_text_splitter-0.33.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:6b5f85a465460253a83fcfa6a71f7fadaca008807a8d46f9dc570c19b77c9cf9", size = 8274441, upload-time = "2026-09-24T09:14:10.302Z" },
+    { url = "https://files.pythonhosted.org/packages/11/01/cdb3004d76804cca8a02f4eca66c33d50536866ba274cfa95dc33fd50d12/semantic_text_splitter-0.33.0-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:fd118f9e6699522e170c0051b2cddb2b68be01b45f93764f072511a3db67867e", size = 8547107, upload-time = "2026-09-24T09:14:12.336Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/89/1cdd7e4c780699eaefb0e6a8cb4b3f02c780ef4a26666bb1daf934c96879/semantic_text_splitter-0.33.0-cp310-abi3-manylinux_2_28_armv7l.whl", hash = "sha256:186dd8554acb97dccdaf888ac2ebd8f34c4d3c96b3d01ec8e69284637d604420", size = 8415853, upload-time = "2026-09-24T09:14:14.703Z" },
+    { url = "https://files.pythonhosted.org/packages/33/7b/9f01013eee4b0c01c2ba1d51281d0d7c6871fb297e14b0fae4d0f9870786/semantic_text_splitter-0.33.0-cp310-abi3-manylinux_2_28_ppc64le.whl", hash = "sha256:2859625d1b85fcd125004c074aaef6d992215f990737ce64cb3318f277f3aba4", size = 8902223, upload-time = "2026-09-24T09:14:17.063Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/57/c9789267cca4c45619d4be506edb7b2493627ed0a71f0d2251321833a60a/semantic_text_splitter-0.33.0-cp310-abi3-manylinux_2_28_s390x.whl", hash = "sha256:b773b39e94ba9decf886f0e047fa70abfcdc05f32fa2ea67e8ddbd79eb8090db", size = 8702493, upload-time = "2026-09-24T09:14:19.407Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/2f/6b1e0c2285a415b0b677a9027973f09913d85d8ca225bf217e0db83b732a/semantic_text_splitter-0.33.0-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:9b44c7a484a1fcbdc1f5370ba98529e215675b7a550eae8ad628662912e609ef", size = 8490465, upload-time = "2026-09-24T09:14:21.912Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/5a/cb1756d777d3e1cb43fb42906bb1624803bcf1ac6f73533caebc9b5c76ec/semantic_text_splitter-0.33.0-cp310-abi3-win32.whl", hash = "sha256:a77be74d19e5901f48f49cbac32a5c12b49be5a982a1471087ee9a56c7e0dbfd", size = 7830221, upload-time = "2026-09-24T09:14:24.322Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/62/d27f449c189ae7eaee1c65222a926fde9ba45250c08ca3a18f9aa07380f5/semantic_text_splitter-0.33.0-cp310-abi3-win_amd64.whl", hash = "sha256:b74eb60519c0b012087184b4997f6ab599c055cca98b194f5bb44b4c5ba2bc7e", size = 8052330, upload-time = "2026-09-24T09:14:26.073Z" },
+]
+
+[[package]]
 name = "sentence-transformers"
 version = "6.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4420,6 +4478,27 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "slack-bolt"
+version = "1.30.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "slack-sdk" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e3/4f/5ba15533d66da2e7174334cc0e2805142e5390c9f4c5f31633df78b17006/slack_bolt-1.30.0.tar.gz", hash = "sha256:af38258d41f801ad9c74503090e0f39accd66c49f667f7e55c97fcdb0e51b886", size = 131180, upload-time = "2026-07-15T20:47:33.679Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2f/ee/1a7a286cf98fa3f4eeffaabc090e82f58f058ab4812aa1d7421d92c2637a/slack_bolt-1.30.0-py2.py3-none-any.whl", hash = "sha256:81f5bc46e79516d23d5e2a31dded6304dd1b8b6b72c0083f2f31d5d801e262c4", size = 235341, upload-time = "2026-07-15T20:47:32.113Z" },
+]
+
+[[package]]
+name = "slack-sdk"
+version = "3.45.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/74/a4b30685bc76846b70baa9edaa45ba577ce5a28fc9e474b51524bb2aa932/slack_sdk-3.45.0.tar.gz", hash = "sha256:1ab794452f238b59db0d8a4d346263d65190288add53ec67a05751d8e7402486", size = 259739, upload-time = "2026-10-01T22:24:56.998Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/af/58/d54e4564946a9a3276f3de2905d18b66977977d4ba0fd7d11164df3c73cb/slack_sdk-3.45.0-py2.py3-none-any.whl", hash = "sha256:6356d4486d1a3ad156462c5544ab1b9c076ff426a250495c08f51b7ad71eb8fb", size = 322681, upload-time = "2026-10-01T22:24:55.133Z" },
 ]
 
 [[package]]
@@ -4516,6 +4595,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/11/c0/cd761f018601bf954c9018420eb6707e3675292dfa514cfda44d06aff2ee/sqlglot-30.21.0.tar.gz", hash = "sha256:6787ac202a3adc0e25434f1512370a655e51cb3de8c792544de5f6ff9c618d25", size = 6064227, upload-time = "2026-09-30T17:35:09.731Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7e/93/acaa0862f841051e490326c1fc8c61d618d2df26f9e7aed26c331419ab15/sqlglot-30.21.0-py3-none-any.whl", hash = "sha256:816d1a4815b7562b3976efcc0b561c928a743f976efd0fb8ad6db7a5b96c069e", size = 763892, upload-time = "2026-09-30T17:35:07.976Z" },
+]
+
+[[package]]
+name = "sqlite-vec"
+version = "0.1.9"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/68/85/9fad0045d8e7c8df3e0fa5a56c630e8e15ad6e5ca2e6106fceb666aa6638/sqlite_vec-0.1.9-py3-none-macosx_10_6_x86_64.whl", hash = "sha256:1b62a7f0a060d9475575d4e599bbf94a13d85af896bc1ce86ee80d1b5b48e5fb", size = 131171, upload-time = "2026-03-31T08:02:31.717Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/3d/3677e0cd2f92e5ebc43cd29fbf565b75582bff1ccfa0b8327c7508e1084f/sqlite_vec-0.1.9-py3-none-macosx_11_0_arm64.whl", hash = "sha256:1d52e30513bae4cc9778ddbf6145610434081be4c3afe57cd877893bad9f6b6c", size = 165434, upload-time = "2026-03-31T08:02:32.712Z" },
+    { url = "https://files.pythonhosted.org/packages/00/d4/f2b936d3bdc38eadcbd2a87875815db36430fab0363182ba5d12cd8e0b51/sqlite_vec-0.1.9-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4e921e592f24a5f9a18f590b6ddd530eb637e2d474e3b1972f9bbeb773aa3cb9", size = 160076, upload-time = "2026-03-31T08:02:33.796Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/ad/6afd073b0f817b3e03f9e37ad626ae341805891f23c74b5292818f49ac63/sqlite_vec-0.1.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.manylinux1_x86_64.whl", hash = "sha256:1515727990b49e79bcaf75fdee2ffc7d461f8b66905013231251f1c8938e7786", size = 163388, upload-time = "2026-03-31T08:02:34.888Z" },
+    { url = "https://files.pythonhosted.org/packages/42/89/81b2907cda14e566b9bf215e2ad82fc9b349edf07d2010756ffdb902f328/sqlite_vec-0.1.9-py3-none-win_amd64.whl", hash = "sha256:4a28dc12fa4b53d7b1dced22da2488fade444e96b5d16fd2d698cd670675cf32", size = 292804, upload-time = "2026-03-31T08:02:36.035Z" },
 ]
 
 [[package]]

@@ -1,5 +1,7 @@
 # Helpers
 
+## Introduction
+
 Small global functions that resolve against the *current* app — the convenient,
 Laravel-style way to reach common services without threading the app through every
 call.

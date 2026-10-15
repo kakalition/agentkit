@@ -1,4 +1,4 @@
-"""Project scaffolding — a full, explorable Laravel-style project (``agentkit new``).
+"""The minimal project skeleton (``agentkit new --minimal``).
 
 The generated project ships the whole tree — providers, console kernel, models,
 repositories, services, tools, agents, events, listeners, jobs, notifications,
@@ -9,9 +9,8 @@ hood and delete what you don't need.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-__all__ = ["PROJECT_FILES", "package_name", "scaffold_project"]
+__all__ = ["MINIMAL_FILES", "PROJECT_FILES", "package_name", "pascal"]
 
 
 def package_name(name: str) -> str:
@@ -375,11 +374,11 @@ from app.Models.Note import Note
 class NoteRepository(Repository[Note]):
     model = Note
 
-    def latest(self) -> Note | None:
-        return self.where().latest("id").first()
+    async def latest(self) -> Note | None:
+        return await self.where().latest("id").first()
 
-    def pinned(self) -> list[Note]:
-        return self.where(pinned=True).all()
+    async def pinned(self) -> list[Note]:
+        return await self.where(pinned=True).all()
 ''',
         # -- Services ----------------------------------------------------------
         "app/Services/__init__.py": '''"""Domain services."""
@@ -392,19 +391,19 @@ from agentkit.foundation.service import Service
 
 
 class NoteService(Service):
-    def add(self, text: str):  # noqa: ANN201
-        with self.repositories as repos:
-            return repos.notes.create(text=text)
+    async def add(self, text: str):  # noqa: ANN201
+        async with self.repositories as repos:
+            return await repos.notes.create(text=text)
 
-    def all(self) -> list:  # noqa: ANN401
-        with self.repositories as repos:
-            return repos.notes.all(order_by="id")
+    async def all(self) -> list:  # noqa: ANN401
+        async with self.repositories as repos:
+            return await repos.notes.all(order_by="id")
 
-    def pin_latest(self):  # noqa: ANN201
-        with self.repositories as repos:
-            note = repos.notes.where().latest("id").first()
+    async def pin_latest(self):  # noqa: ANN201
+        async with self.repositories as repos:
+            note = await repos.notes.where().latest("id").first()
             if note is not None:
-                repos.notes.update(note.id, pinned=True)
+                await repos.notes.update(note.id, pinned=True)
             return note
 ''',
         # -- Agents & tools ----------------------------------------------------
@@ -468,14 +467,14 @@ async def add_note(ctx: RunContext[Deps], text: str) -> str:
         text: The note body.
     """
     validate({"text": text}, {"text": ["required", "string", NonEmpty, "max:500"]})
-    note = ctx.deps.repos.notes.create(text=text)
+    note = await ctx.deps.repos.notes.create(text=text)
     await emit("note.saved", note_id=note.id, text=note.text, conversation_id=ctx.deps.conversation_id)
     return f"saved note #{note.id}: {note.text}"
 
 
 async def list_notes(ctx: RunContext[Deps]) -> str:
     """List the owner's saved notes."""
-    notes = ctx.deps.repos.notes.all(order_by="id")
+    notes = await ctx.deps.repos.notes.all(order_by="id")
     if not notes:
         return "No notes yet."
     return "\\n".join(f"#{note.id} {note.text}" for note in notes)
@@ -528,19 +527,19 @@ class SyncNotes(Job):
     queue = "default"
     max_retries = 3
 
-    def handle(self, app: Any) -> None:
-        with app.repositories() as repos:
-            count = repos.notes.count()
+    async def handle(self, app: Any) -> None:
+        async with app.repositories() as repos:
+            count = await repos.notes.count()
         get_logger("app").info("sync notes: %s note(s)", count)
 
 
-def run() -> None:
+async def run() -> None:
     """Scheduler task entry point (runs in a worker; resolves its own runtime)."""
     from agentkit import scheduler
     from agentkit.runtime import repositories
 
-    with repositories(scheduler.ensure_configured()) as repos:
-        get_logger("app").info("sync notes: %s note(s)", repos.notes.count())
+    async with repositories(scheduler.ensure_configured()) as repos:
+        get_logger("app").info("sync notes: %s note(s)", await repos.notes.count())
 
 
 def register() -> None:
@@ -700,47 +699,22 @@ def app(tmp_path, monkeypatch):
     return application
 
 
-def test_service_and_repository(app):
+async def test_service_and_repository(app):
     from app.Services.NoteService import NoteService
 
     service = NoteService(app)
-    service.add("buy milk")
-    service.add("walk the dog")
-    assert len(service.all()) == 2
+    await service.add("buy milk")
+    await service.add("walk the dog")
+    assert len(await service.all()) == 2
 
 
-def test_schedule_registered(app):
-    with app.repositories() as repos:
-        names = {job.name for job in repos.schedules.list()}
+async def test_schedule_registered(app):
+    async with app.repositories() as repos:
+        names = {job.name for job in await repos.schedules.list()}
     assert "sync-notes" in names
 ''',
     }
 
 
-PROJECT_FILES = _files()
-
-
-def scaffold_project(name: str, directory: str | Path = ".", *, force: bool = False) -> Path:
-    """Write the skeleton for ``name`` into ``directory/name`` and return the path.
-
-    Refuses to write into a non-empty target unless ``force=True``.
-    """
-    package = package_name(name)
-    target = Path(directory).expanduser() / name
-    if target.exists() and any(target.iterdir()) and not force:
-        raise FileExistsError(f"{target} already exists and is not empty (pass force=True)")
-
-    replacements = {
-        "{{project}}": name,
-        "{{package}}": "app",  # Laravel-style flat `app/` package
-        "{{Project}}": pascal(name),
-        "{{PREFIX}}": package.upper(),
-    }
-    for relative, template in PROJECT_FILES.items():
-        content = template
-        for key, value in replacements.items():
-            content = content.replace(key, value)
-        destination = target / relative.replace("{{package}}", "app")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(content, encoding="utf-8")
-    return target
+MINIMAL_FILES: dict[str, str] = _files()
+PROJECT_FILES: dict[str, str] = MINIMAL_FILES

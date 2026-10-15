@@ -1,5 +1,7 @@
 # Multi-Agent Teams
 
+## Introduction
+
 Complex work is easier to reason about when split across specialists. agentkit
 gives you two ways to coordinate them: a **Supervisor** that routes requests, and
 explicit **sub-agent spawning**.

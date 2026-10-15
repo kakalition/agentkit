@@ -1,5 +1,7 @@
 # Human-in-the-Loop
 
+## Introduction
+
 Real agents sometimes need a person: to approve a risky action, or to answer a
 question before proceeding. agentkit supports both — approvals for tools, and
 clarification for the conversation.

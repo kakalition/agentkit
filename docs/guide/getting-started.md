@@ -1,5 +1,7 @@
 # Getting Started
 
+## Introduction
+
 This page walks you from an empty directory to a running agent you can chat with,
 inspect, and extend. It should take about five minutes.
 

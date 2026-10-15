@@ -44,14 +44,14 @@ def test_prompt_dataclass_render():
     assert Prompt("x", "Hello {who}").render(who="world") == "Hello world"
 
 
-def test_budget_violations_and_check(runtime: Runtime):
+async def test_budget_violations_and_check(runtime: Runtime):
     app = _app(runtime, None)
     app.boot()
-    with app.repositories() as repos:
-        repos.usage.add(conversation_id="cli:1", requests=3, total_tokens=100, cost_usd=0.5)
+    async with app.repositories() as repos:
+        await repos.usage.add(conversation_id="cli:1", requests=3, total_tokens=100, cost_usd=0.5)
         with pytest.raises(BudgetExceeded):
-            check_budget(repos, Budget(max_requests=1))
-        totals = check_budget(repos, Budget(max_requests=10, max_tokens=1000, max_cost=5.0))
+            await check_budget(repos, Budget(max_requests=1))
+        totals = await check_budget(repos, Budget(max_requests=10, max_tokens=1000, max_cost=5.0))
         assert totals["requests"] == 3
 
 
@@ -68,10 +68,10 @@ async def test_fork_and_replay(runtime: Runtime):
     app = _app(runtime, model)
     app.boot()
     await app.run("first question", conversation_id="cli:main")
-    copied = app.fork("cli:main", "cli:branch")
+    copied = await app.fork("cli:main", "cli:branch")
     assert copied >= 2
 
     replayed = await app.replay("cli:main", target="cli:replay")
     assert replayed.output == "reply"
-    with app.repositories() as repos:
-        assert repos.messages.list("cli:replay")
+    async with app.repositories() as repos:
+        assert await repos.messages.list("cli:replay")

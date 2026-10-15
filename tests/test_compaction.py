@@ -124,3 +124,23 @@ async def test_summarize_older_note():
     result = await processor([_u("a"), _a("b"), _u("c")])
     assert isinstance(result[0].parts[0], SystemPromptPart)
     assert "summary text" in result[0].parts[0].content
+
+
+async def test_compactor_state_is_per_conversation():
+    """A shared Compactor must not leak rolling memory between conversations."""
+    compactor = Compactor(max_tokens=200, keep_recent=0.3)
+    a = [_u("My name is Ada.")] + [_u(_long()) for _ in range(4)]
+    b = [_u("I prefer metric units.")] + [_u(_long()) for _ in range(4)]
+    first = await compactor.compact(a, conversation_id="convo-a")
+    assert compactor._states["convo-a"].folded  # state recorded for A only
+    assert "convo-b" not in compactor._states
+
+    await compactor.compact(b, conversation_id="convo-b")
+    assert set(compactor._states) == {"convo-a", "convo-b"}
+    # A's folded set is independent of B's.
+    assert compactor._states["convo-a"].folded is not compactor._states["convo-b"].folded
+
+    compactor.reset("convo-a")
+    assert "convo-a" not in compactor._states
+    assert "convo-b" in compactor._states
+    assert transcript(first)  # sanity: produced output

@@ -1,5 +1,7 @@
 # Notifications
 
+## Introduction
+
 A **notification** is a message your agent sends over one or more channels — the
 notification bell for an agent. Define the message once and deliver it anywhere.
 

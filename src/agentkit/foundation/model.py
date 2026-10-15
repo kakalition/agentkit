@@ -1,8 +1,8 @@
-"""A thin, expressive ``Model`` / ``Query`` layer over SQLModel.
+"""A thin, expressive ``Model`` / ``Query`` layer over SQLModel (async).
 
 Deliberately small — equality filters, first/get/create/update/delete, counting
-and pagination — over the existing engine/``Repositories``. It is not Eloquent:
-no relationships, eager loading, or migrations.
+and pagination — over the existing async engine/``Repositories``. It is not
+Eloquent: no relationships, eager loading, or migrations.
 
     from agentkit import Model
 
@@ -10,14 +10,15 @@ no relationships, eager loading, or migrations.
         name: str
         cron: str
 
-    Reminder.create(name="digest", cron="0 8 * * 1")
-    Reminder.where(cron="0 8 * * 1").first()
-    Reminder.count()
+    await Reminder.create(name="digest", cron="0 8 * * 1")
+    await Reminder.where(cron="0 8 * * 1").first()
+    await Reminder.count()
 """
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import func
@@ -27,10 +28,15 @@ from agentkit.errors import NotFound
 from agentkit.foundation.db import active_repos, session_scope
 
 
+@asynccontextmanager
+async def _ambient(repos: Any) -> AsyncIterator[Any]:
+    yield repos
+
+
 def _scope() -> Any:
     existing = active_repos()
     if existing is not None:
-        return nullcontext(existing)
+        return _ambient(existing)
     from agentkit.foundation.facade import current_app
 
     return session_scope(current_app())
@@ -100,26 +106,26 @@ class Query:
             stmt = stmt.limit(self._limit)
         return stmt
 
-    def all(self) -> list[Any]:
-        with _scope() as repos:
-            return list(repos.session.exec(self._statement()).all())
+    async def all(self) -> list[Any]:
+        async with _scope() as repos:
+            return list((await repos.session.exec(self._statement())).all())
 
-    def first(self) -> Any:
-        rows = self.limit(1).all()
+    async def first(self) -> Any:
+        rows = await self.limit(1).all()
         return rows[0] if rows else None
 
-    def count(self) -> int:
-        with _scope() as repos:
+    async def count(self) -> int:
+        async with _scope() as repos:
             stmt: Any = select(func.count()).select_from(self.model)
             for field, value in self.filters.items():
                 stmt = stmt.where(getattr(self.model, field) == value)
-            return int(repos.session.exec(stmt).one())
+            return int((await repos.session.exec(stmt)).one())
 
-    def paginate(self, page: int = 1, per_page: int = 15) -> dict[str, Any]:
+    async def paginate(self, page: int = 1, per_page: int = 15) -> dict[str, Any]:
         page = max(1, page)
         per_page = max(1, per_page)
-        total = self.count()
-        items = self.offset((page - 1) * per_page).limit(per_page).all()
+        total = await self.count()
+        items = await self.offset((page - 1) * per_page).limit(per_page).all()
         return {
             "items": items,
             "total": total,
@@ -145,99 +151,99 @@ class Model(SQLModel):
         return Query(cls).order_by(field, descending=descending)
 
     @classmethod
-    def all(cls, **filters: Any) -> list[Any]:
-        return Query(cls, filters).all()
+    async def all(cls, **filters: Any) -> list[Any]:
+        return await Query(cls, filters).all()
 
     @classmethod
-    def first(cls, **filters: Any) -> Any:
-        rows = Query(cls, filters).limit(1).all()
+    async def first(cls, **filters: Any) -> Any:
+        rows = await Query(cls, filters).limit(1).all()
         return rows[0] if rows else None
 
     @classmethod
-    def first_or_fail(cls, **filters: Any) -> Any:
-        row = cls.first(**filters)
+    async def first_or_fail(cls, **filters: Any) -> Any:
+        row = await cls.first(**filters)
         if row is None:
             raise NotFound(f"{cls.__name__} not found for {filters!r}")
         return row
 
     @classmethod
-    def find_or_fail(cls, ident: Any) -> Any:
-        row = cls.get(ident)
+    async def find_or_fail(cls, ident: Any) -> Any:
+        row = await cls.get(ident)
         if row is None:
             raise NotFound(f"{cls.__name__} {ident!r} not found")
         return row
 
     @classmethod
-    def first_or_create(cls, *, defaults: dict[str, Any] | None = None, **filters: Any) -> Any:
-        row = cls.first(**filters)
+    async def first_or_create(cls, *, defaults: dict[str, Any] | None = None, **filters: Any) -> Any:
+        row = await cls.first(**filters)
         if row is not None:
             return row
-        return cls.create(**{**filters, **(defaults or {})})
+        return await cls.create(**{**filters, **(defaults or {})})
 
     @classmethod
-    def update_or_create(
+    async def update_or_create(
         cls, *, defaults: dict[str, Any] | None = None, **filters: Any
     ) -> Any:
-        row = cls.first(**filters)
+        row = await cls.first(**filters)
         if row is None:
-            return cls.create(**{**filters, **(defaults or {})})
+            return await cls.create(**{**filters, **(defaults or {})})
         for field, value in (defaults or {}).items():
             setattr(row, field, value)
-        with _scope() as repos:
+        async with _scope() as repos:
             repos.session.add(row)
-            repos.session.flush()
-            repos.session.refresh(row)
+            await repos.session.flush()
+            await repos.session.refresh(row)
         return row
 
     @classmethod
-    def get(cls, ident: Any) -> Any:
-        with _scope() as repos:
-            return repos.session.get(cls, ident)
+    async def get(cls, ident: Any) -> Any:
+        async with _scope() as repos:
+            return await repos.session.get(cls, ident)
 
     @classmethod
-    def count(cls, **filters: Any) -> int:
-        return Query(cls, filters).count()
+    async def count(cls, **filters: Any) -> int:
+        return await Query(cls, filters).count()
 
     @classmethod
-    def create(cls, **values: Any) -> Any:
+    async def create(cls, **values: Any) -> Any:
         if "owner_id" not in values and hasattr(cls, "owner_id"):
             from agentkit.foundation.facade import get_current_app
 
             app = get_current_app()
             values["owner_id"] = getattr(getattr(app, "settings", None), "owner_id", "owner")
-        with _scope() as repos:
+        async with _scope() as repos:
             instance = cls(**values)
             repos.session.add(instance)
-            repos.session.flush()
-            repos.session.refresh(instance)
+            await repos.session.flush()
+            await repos.session.refresh(instance)
             return instance
 
     @classmethod
-    def update(cls, ident: Any, **values: Any) -> Any:
-        with _scope() as repos:
-            instance = repos.session.get(cls, ident)
+    async def update(cls, ident: Any, **values: Any) -> Any:
+        async with _scope() as repos:
+            instance = await repos.session.get(cls, ident)
             if instance is None:
                 return None
             for field, value in values.items():
                 setattr(instance, field, value)
             repos.session.add(instance)
-            repos.session.flush()
-            repos.session.refresh(instance)
+            await repos.session.flush()
+            await repos.session.refresh(instance)
             return instance
 
     @classmethod
-    def delete(cls, ident: Any) -> bool:
-        with _scope() as repos:
-            instance = repos.session.get(cls, ident)
+    async def delete(cls, ident: Any) -> bool:
+        async with _scope() as repos:
+            instance = await repos.session.get(cls, ident)
             if instance is None:
                 return False
-            repos.session.delete(instance)
-            repos.session.flush()
+            await repos.session.delete(instance)
+            await repos.session.flush()
             return True
 
     @classmethod
-    def paginate(cls, page: int = 1, per_page: int = 15, **filters: Any) -> dict[str, Any]:
-        return Query(cls, filters).paginate(page, per_page)
+    async def paginate(cls, page: int = 1, per_page: int = 15, **filters: Any) -> dict[str, Any]:
+        return await Query(cls, filters).paginate(page, per_page)
 
 
 __all__ = ["Model", "Query"]

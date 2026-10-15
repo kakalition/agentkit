@@ -75,6 +75,18 @@ def test_scaffold_refuses_non_empty_without_force(tmp_path: Path):
     scaffold_project("demo", tmp_path, force=True)
 
 
+def test_scaffold_full_vs_minimal(tmp_path: Path):
+    full = scaffold_project("full-app", tmp_path, full=True)
+    assert (full / "app" / "Channels" / "Example.py").is_file()
+    assert (full / "config" / "memory.py").is_file()
+    assert "FullStackProvider" in (full / "bootstrap.py").read_text()
+    assert ".full()" in (full / "app" / "Agents" / "assistant.py").read_text()
+
+    minimal = scaffold_project("min-app", tmp_path, full=False)
+    assert not (minimal / "app" / "Channels").exists()
+    assert "FullStackProvider" not in (minimal / "bootstrap.py").read_text()
+
+
 def test_scaffolded_project_boots_and_tests_pass(tmp_path: Path):
     """The generated project boots and its own pytest suite passes (isolated)."""
     target = scaffold_project("demo-app", tmp_path)

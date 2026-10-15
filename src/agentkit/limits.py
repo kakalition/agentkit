@@ -45,7 +45,7 @@ class Budget:
         return reasons
 
 
-def check_budget(
+async def check_budget(
     repos: Any, budget: Budget, *, conversation_id: str | None = None
 ) -> dict[str, Any]:
     """Raise :class:`BudgetExceeded` if recorded usage already meets ``budget``."""
@@ -57,10 +57,10 @@ def check_budget(
         return {}
     scope = conversation_id if budget.per_conversation else None
     if scope is not None:
-        rows = store.list(limit=None) if hasattr(store, "list") else []
+        rows = await store.list(limit=None)
         totals = _totals_for(rows, scope, since)
     else:
-        totals = store.totals(since=since)
+        totals = await store.totals(since=since)
     reasons = budget.violations(totals)
     if reasons:
         raise BudgetExceeded("budget exceeded", detail={"reasons": reasons, "totals": totals})

@@ -227,17 +227,35 @@ class Compactor:
         self.summarize = summarize
         self.section_cap = section_cap
         self._state = _State()
+        # Per-conversation rolling state (a shared Compactor must not leak memory
+        # between conversations). The default state serves conversation_id=None.
+        self._states: dict[str, _State] = {}
 
     # -- callable seam --------------------------------------------------
-    def reset(self) -> None:
+    def reset(self, conversation_id: str | None = None) -> None:
         """Forget the rolling summary (e.g. on a new conversation)."""
-        self._state = _State()
+        if conversation_id is None:
+            self._state = _State()
+        else:
+            self._states.pop(conversation_id, None)
+
+    def _state_for(self, conversation_id: str | None) -> _State:
+        if conversation_id is None:
+            return self._state
+        state = self._states.get(conversation_id)
+        if state is None:
+            state = _State()
+            self._states[conversation_id] = state
+        return state
 
     @property
     def summary(self) -> str:
         return self._state.render(budget_tokens=10**9)
 
-    async def compact(self, messages: list[ModelMessage]) -> list[ModelMessage]:
+    async def compact(
+        self, messages: list[ModelMessage], *, conversation_id: str | None = None
+    ) -> list[ModelMessage]:
+        state = self._state_for(conversation_id)
         messages = list(messages)
         if self._total_tokens(messages) <= self.max_tokens:
             return messages
@@ -251,20 +269,20 @@ class Compactor:
         pinned_ids = {id(message) for message in pinned}
         to_fold = [m for m in droppable if id(m) not in pinned_ids]
 
-        new = [m for m in to_fold if _message_hash(m) not in self._state.folded]
+        new = [m for m in to_fold if _message_hash(m) not in state.folded]
         if new:
-            extracted = await self._extract(new)
+            extracted = await self._extract(new, state)
             if extracted:
-                self._state.merge(extracted, cap=self.section_cap)
-            if self._state.is_empty():
-                self._state.sections["timeline"].append(
+                state.merge(extracted, cap=self.section_cap)
+            if state.is_empty():
+                state.sections["timeline"].append(
                     f"{len(new)} earlier message(s) omitted during compaction"
                 )
             for message in new:
-                self._state.folded.add(_message_hash(message))
+                state.folded.add(_message_hash(message))
 
         summary_budget = int(self.max_tokens * self.summary_token_ratio)
-        rendered = self._state.render(budget_tokens=summary_budget) if not self._state.is_empty() else ""
+        rendered = state.render(budget_tokens=summary_budget) if not state.is_empty() else ""
         result: list[ModelMessage] = []
         if rendered:
             result.append(
@@ -274,8 +292,10 @@ class Compactor:
         result.extend(recent)
         return result
 
-    async def __call__(self, messages: list[ModelMessage]) -> list[ModelMessage]:
-        return await self.compact(messages)
+    async def __call__(
+        self, messages: list[ModelMessage], *, conversation_id: str | None = None
+    ) -> list[ModelMessage]:
+        return await self.compact(messages, conversation_id=conversation_id)
 
     # -- tiers ----------------------------------------------------------
     def _total_tokens(self, messages: list[ModelMessage]) -> int:
@@ -316,26 +336,26 @@ class Compactor:
         return bool(_FACT_RE.search(text) or _CONSTRAINT_RE.search(text))
 
     # -- extraction -----------------------------------------------------
-    async def _extract(self, messages: list[ModelMessage]) -> dict[str, list[str]]:
+    async def _extract(self, messages: list[ModelMessage], state: _State) -> dict[str, list[str]]:
         raw_text = transcript(messages)
         if self.summarize is not None:
             result = self.summarize(self.summary, raw_text)
             if inspect.isawaitable(result):
                 result = await result
-            return self._coerce(result)
+            return self._coerce(result, state)
         if self.model is not None:
             try:
-                return await self._model_extract(raw_text)
+                return await self._model_extract(raw_text, state)
             except Exception:  # pragma: no cover - fall back to heuristics
                 return self._heuristic_extract(messages)
         return self._heuristic_extract(messages)
 
-    def _coerce(self, result: Any) -> dict[str, list[str]]:
+    def _coerce(self, result: Any, state: _State) -> dict[str, list[str]]:
         if isinstance(result, dict):
-            return {key: list(value) for key, value in result.items() if key in self._state.sections}
+            return {key: list(value) for key, value in result.items() if key in state.sections}
         return self._heuristic_from_text(str(result))
 
-    async def _model_extract(self, raw_text: str) -> dict[str, list[str]]:
+    async def _model_extract(self, raw_text: str, state: _State) -> dict[str, list[str]]:
         from pydantic_ai import Agent
 
         schema = ", ".join(f'"{key}"' for key, _ in SECTIONS)
@@ -356,7 +376,7 @@ class Compactor:
         return {
             key: [_truncate(str(item)) for item in value]
             for key, value in payload.items()
-            if key in self._state.sections and isinstance(value, list)
+            if key in state.sections and isinstance(value, list)
         }
 
     def _heuristic_from_text(self, text: str) -> dict[str, list[str]]:

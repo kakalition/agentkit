@@ -10,6 +10,15 @@ client registry (:mod:`agentkit.mcp`), A2A client + task-based server
 """
 
 from agentkit import durability, scheduler, workspace
+from agentkit.agents import (
+    AgentHandle,
+    AgentRegistry,
+    Mailbox,
+    attach_agents,
+    handoff,
+    handoff_tool,
+    mailbox_tools,
+)
 from agentkit.app import AgentApp
 from agentkit.approvals import approval_capability, approval_handler, auto_approver
 from agentkit.audio import synthesize, transcribe
@@ -22,6 +31,7 @@ from agentkit.config import (
     model_settings,
     usage_limits,
 )
+from agentkit.consolidation import consolidate_memories
 from agentkit.deps import ApprovalCallback, ApprovalRequest, Deps
 from agentkit.errors import (
     AgentKitError,
@@ -51,6 +61,7 @@ from agentkit.foundation import (
     Facade,
     Feedback,
     Filesystem,
+    FullStackProvider,
     Job,
     Listener,
     Log,
@@ -110,10 +121,23 @@ from agentkit.helpers import (
 )
 from agentkit.hitl import Clarification, clarification_tool
 from agentkit.knowledge import KnowledgeBase, chunk_text
+from agentkit.learning import (
+    LESSON_TASK,
+    LearningSignals,
+    attach_learning,
+    lessons_digest,
+    reflect,
+    register_reflect_task,
+)
 from agentkit.limits import Budget
 from agentkit.logging import get_logger, request_context, setup_logging
 from agentkit.logging import redact as redact_text
 from agentkit.memory import attach_memory, memory_digest
+from agentkit.model_providers import (
+    register_model_provider,
+    resolve_model,
+    supported_prefixes,
+)
 from agentkit.moderation import (
     ModerationPolicy,
     ModerationResult,
@@ -125,7 +149,15 @@ from agentkit.multimodal import audio, content, document, image, text
 from agentkit.observability import setup_logfire, setup_observability, start_phoenix
 from agentkit.orchestrator import Orchestrator, delegate, make_delegate
 from agentkit.planning import Plan, Planner, PlanStep
-from agentkit.policy import ALLOW, APPROVE, DENY, ToolPolicy
+from agentkit.policy import (
+    ALLOW,
+    APPROVE,
+    DENY,
+    NATIVE_APPROVAL_TOOLS,
+    NATIVE_TOOLS_POLICY,
+    ToolPolicy,
+    native_policy,
+)
 from agentkit.pricing import (
     ModelPrice,
     Pricing,
@@ -139,7 +171,15 @@ from agentkit.routing import ModelRouter, Route
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.sandbox import CommandResult, Sandbox, SandboxError
 from agentkit.session import ChatResult, ChatRunner, StreamEvent, load_history, save_new_messages
-from agentkit.skills import Skill, SkillRegistry, load_skill_file, parse_front_matter
+from agentkit.skills import (
+    Skill,
+    SkillRegistry,
+    load_skill_file,
+    parse_front_matter,
+    render_skill_file,
+    slugify_skill,
+    write_skill_file,
+)
 from agentkit.soul import (
     DEFAULT_SOUL,
     SOUL_FILENAME,
@@ -150,6 +190,7 @@ from agentkit.soul import (
 )
 from agentkit.supervise import Service, run_all
 from agentkit.teams import Supervisor, spawn_tool, team_tools
+from agentkit.toolkits import TOOLKITS, attach_toolkits, enabled_toolkits
 from agentkit.webui import build_webui_app, serve_webui, webui_service
 from agentkit.workspace import (
     default_workspace_root,
@@ -169,6 +210,7 @@ __all__ = [
     "App",
     "Provider",
     "DeferrableProvider",
+    "FullStackProvider",
     "Facade",
     "Event",
     "ChannelSpec",
@@ -256,6 +298,14 @@ __all__ = [
     "Orchestrator",
     "delegate",
     "make_delegate",
+    # agent-to-agent communication
+    "AgentHandle",
+    "AgentRegistry",
+    "Mailbox",
+    "attach_agents",
+    "handoff",
+    "handoff_tool",
+    "mailbox_tools",
     "approval_capability",
     "approval_handler",
     "auto_approver",
@@ -272,6 +322,18 @@ __all__ = [
     # memory
     "attach_memory",
     "memory_digest",
+    "consolidate_memories",
+    # self-learning (reflect -> learn -> apply)
+    "attach_learning",
+    "lessons_digest",
+    "reflect",
+    "register_reflect_task",
+    "LearningSignals",
+    "LESSON_TASK",
+    # native toolkits (first-class agent-callable capabilities)
+    "attach_toolkits",
+    "enabled_toolkits",
+    "TOOLKITS",
     # history compaction
     "Compactor",
     "summarize_older",
@@ -327,6 +389,9 @@ __all__ = [
     "SkillRegistry",
     "load_skill_file",
     "parse_front_matter",
+    "render_skill_file",
+    "slugify_skill",
+    "write_skill_file",
     # cross-cutting: observability, logging, guardrails, policy, errors, health
     "setup_observability",
     "setup_logfire",
@@ -348,9 +413,15 @@ __all__ = [
     "ALLOW",
     "APPROVE",
     "DENY",
+    "NATIVE_TOOLS_POLICY",
+    "NATIVE_APPROVAL_TOOLS",
+    "native_policy",
     # model routing + pricing
     "ModelRouter",
     "Route",
+    "resolve_model",
+    "register_model_provider",
+    "supported_prefixes",
     "Pricing",
     "ModelPrice",
     "default_pricing",

@@ -1,5 +1,7 @@
 # The Agent Builder
 
+## Introduction
+
 `Agent.make(...)` is a fluent builder that assembles a PydanticAI agent from small,
 declarative pieces. It is the front door for constructing agents; internal modules
 keep importing PydanticAI directly.
@@ -137,7 +139,7 @@ when `index=True`, a source listing in the instructions.
 ```python
 from agentkit import KnowledgeBase
 
-kb = KnowledgeBase(); kb.add_directory("./docs")
+kb = KnowledgeBase(); await kb.add_directory("./docs")
 agent.knowledge(kb)
 agent.knowledge(path="./docs")     # index a path directly
 ```

@@ -1,5 +1,7 @@
 # Context Compaction
 
+## Introduction
+
 Long conversations eventually exceed the model's context window. Naively
 summarising everything older, or dropping it, loses facts the model still needs.
 agentkit ships a **tiered, rolling** compactor that shrinks aggressively while

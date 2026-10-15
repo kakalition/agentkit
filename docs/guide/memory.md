@@ -1,7 +1,14 @@
 # Memory
 
+## Introduction
+
 Memory lets an agent remember durable facts about the owner across conversations —
 a name, preferences, timezones, recurring details — and recall them later.
+
+Facts are typed (`fact`, `preference`, `person`, `date`, `episodic`,
+`procedural`), ranked by a hybrid of semantic similarity, recency, and importance,
+and tidied up by a durable `memory:consolidate` task. Memory tools and the facade
+are **async**.
 
 ## Enabling memory
 
@@ -33,19 +40,20 @@ The model calls the tools itself. You can also reach memory directly through the
 from agentkit import Memory
 
 await Memory.remember("My name is Ada", kind="person")
-Memory.search("name")
-Memory.all(limit=20)
-Memory.forget(memory_id)
+await Memory.search("name")
+await Memory.all(limit=20)
+await Memory.forget(memory_id)
 ```
 
 Facts are owner-scoped: one database, one owner, so nothing leaks between agents.
 
 ## How recall works
 
-Each fact is embedded and stored. `recall` searches by cosine similarity and
-appends keyword matches, so it degrades gracefully:
+Each fact is embedded and stored. `recall` ranks candidates by a weighted blend
+of **semantic similarity**, **recency**, and **importance**, and appends keyword
+matches so it degrades gracefully:
 
-- with an embedder configured → semantic recall;
+- with an embedder configured → semantic + hybrid ranking;
 - with no embedder → keyword matching.
 
 Embedders are pluggable via `agentkit.embeddings`:
@@ -66,8 +74,8 @@ calling a tool every turn. You can render it yourself:
 ```python
 from agentkit import memory_digest
 
-with app.repositories() as repos:
-    print(memory_digest(repos, limit=50))
+async with app.repositories() as repos:
+    print(await memory_digest(repos, limit=50))
 ```
 
 ## When to use memory vs. knowledge
@@ -95,5 +103,36 @@ You rarely call `Memory.remember` yourself. Instruct the agent to save durable
 facts ("remember the owner's timezone when they mention it") and it will use the
 tools appropriately.
 :::
+
+## The owner profile
+
+Some facts belong in a profile rather than free-text memory. `OwnerProfile` stores a
+name, timezone, locale, notes, and preferences, and the agent gets three tools for
+it: `remember_person`, `update_profile`, and `get_profile`.
+
+```python
+from agentkit import Memory   # facade
+
+async with app.repositories() as repos:
+    await repos.profile.set(name="Ada", timezone="Europe/Lisbon")
+    profile = await repos.profile.get()
+```
+
+## Consolidation
+
+Over time memory accumulates near-duplicates and stale entries. The durable
+`memory:consolidate` task — registered and scheduled daily by `FullStackProvider` —
+**dedupes** near-identical facts, **summarizes** long same-kind groups, and
+**prunes** expired entries.
+
+```bash
+agentkit memory:consolidate --dry-run    # report only
+agentkit memory:list --kind preference   # inspect
+agentkit memory:forget 12                # delete one
+agentkit memory:profile                  # show the profile
+```
+
+Consolidation is offline by default; pass a `summarizer` to fold a group with a
+model instead of the heuristic.
 
 Continue to [Skills →](/guide/skills)

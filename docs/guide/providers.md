@@ -1,5 +1,7 @@
 # Service Providers
 
+## Introduction
+
 Service providers are the organising unit of a growing agentkit application. They
 bind concerns onto the app in one place and keep your `bootstrap.py` tiny.
 
@@ -42,9 +44,9 @@ class NotesProvider(Provider):
     def boot(self, app):
         from notes.services import notes as svc  # registers @scheduler.task("notes")
 
-        def audit(event):
-            with app.repositories() as repos:
-                repos.audit.append("turn.end", target=event.conversation_id)
+        async def audit(event):
+            async with app.repositories() as repos:
+                await repos.audit.append("turn.end", target=event.conversation_id)
 
         app.on("turn.end", audit)
 ```

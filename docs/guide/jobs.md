@@ -1,5 +1,7 @@
 # Jobs, Cache & Utilities
 
+## Introduction
+
 Small building blocks every agent eventually needs: dispatched work, a cache, file
 storage, validation, and base classes for services and listeners.
 
@@ -17,8 +19,8 @@ class SyncKnowledge(Job):
     def __init__(self, source: str) -> None:
         self.source = source
 
-    def handle(self, app) -> None:
-        app.make("knowledge").add_directory(self.source)
+    async def handle(self, app) -> None:
+        await app.make("knowledge").add_directory(self.source)
 
 await app.dispatch(SyncKnowledge("./docs"))
 ```
@@ -42,9 +44,9 @@ agentkit queue:failed                             # list failed jobs
 ```python
 from agentkit import Queue
 
-Queue.push(SyncKnowledge("./docs"), delay=60)     # enqueue with a delay
-Queue.size()                                      # pending count
-await Queue.run_once()                            # process one (in-process)
+await Queue.push(SyncKnowledge("./docs"), delay=60)   # enqueue with a delay
+await Queue.size()                                    # pending count
+await Queue.run_once()                                # process one (in-process)
 ```
 
 Failed jobs retry up to `max_retries`, then are marked failed with their error and
@@ -114,8 +116,8 @@ from agentkit.foundation.service import Service
 
 class ReminderService(Service):
     def upcoming(self, conversation_id: str) -> list:
-        with self.repositories() as repos:
-            return repos.reminders.pending()
+        async with self.repositories as repos:
+            return await repos.reminders.pending()
 
 service = ReminderService(app)
 ```

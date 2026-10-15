@@ -51,9 +51,9 @@ async def test_moderation_middleware_blocks_input(runtime: Runtime):
         await app.run("make a bomb")
 
 
-def test_feedback_facade_and_repo(runtime: Runtime):
+async def test_feedback_facade_and_repo(runtime: Runtime):
     _app(runtime, FunctionModel(lambda m, i: ModelResponse(parts=[TextPart("ok")])))
-    Feedback.add(1, conversation_id="cli:1", comment="good")
-    Feedback.add(-1, conversation_id="cli:1", comment="bad")
-    assert Feedback.average() == 0.0
-    assert len(Feedback.list(conversation_id="cli:1")) == 2
+    await Feedback.add(1, conversation_id="cli:1", comment="good")
+    await Feedback.add(-1, conversation_id="cli:1", comment="bad")
+    assert await Feedback.average() == 0.0
+    assert len(await Feedback.list(conversation_id="cli:1")) == 2

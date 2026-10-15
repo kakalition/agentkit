@@ -1,36 +1,66 @@
-"""libSQL / SQLite engine wiring.
+"""Async libSQL / SQLite engine wiring.
 
 Sensible local defaults: WAL + a busy timeout so concurrent writers wait rather
-than fail with "database is locked".
+than fail with "database is locked". The local default URL (``sqlite+libsql``)
+is translated to the async ``sqlite+aiosqlite`` driver so the whole data layer is
+async by default.
 """
 
 from __future__ import annotations
 
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
-from sqlalchemy import Engine, create_engine, event
-from sqlalchemy.orm import sessionmaker
-from sqlmodel import Session
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import NullPool
+from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
-# A single process-wide lock: local SQLite/libSQL tolerates one writer, and the
-# lock is shared by runtime.repositories() and schema bootstrap.
-DB_LOCK = threading.RLock()
+__all__ = [
+    "async_database_url",
+    "create_async_db_engine",
+    "make_async_session_factory",
+    "session_scope",
+]
 
 
-def create_db_engine(
+def async_database_url(url: str) -> str:
+    """Map a sync libSQL/SQLite URL to its async driver.
+
+    Local files use ``sqlite+aiosqlite``; other URLs (e.g. a remote driver) are
+    passed through unchanged.
+    """
+    if url.startswith("sqlite+libsql:///"):
+        return "sqlite+aiosqlite:///" + url[len("sqlite+libsql:///") :]
+    if url.startswith("sqlite://"):
+        return "sqlite+aiosqlite://" + url[len("sqlite://") :]
+    return url
+
+
+def create_async_db_engine(
     database_url: str, *, auth_token: str | None = None, echo: bool = False
-) -> Engine:
-    """Create a SQLAlchemy engine for a libSQL/SQLite (or other) URL."""
+) -> AsyncEngine:
+    """Create an async SQLAlchemy engine for a libSQL/SQLite (or other) URL."""
     connect_args: dict[str, Any] = {}
-    if auth_token:
+    url = async_database_url(database_url)
+    if auth_token and not url.startswith("sqlite"):
         connect_args["auth_token"] = auth_token
-    engine = create_engine(database_url, connect_args=connect_args, echo=echo, future=True)
+    kwargs: dict[str, Any] = {"connect_args": connect_args, "echo": echo, "future": True}
+    if url.startswith("sqlite"):
+        # A local SQLite file: no pooling benefit, and NullPool avoids reusing a
+        # connection across event loops (e.g. the sync seam's private loop).
+        kwargs["poolclass"] = NullPool
+    engine = create_async_engine(url, **kwargs)
 
-    if database_url.startswith("sqlite"):
-        @event.listens_for(engine, "connect")
+    if url.startswith("sqlite"):
+
+        @event.listens_for(engine.sync_engine, "connect")
         def _sqlite_pragmas(dbapi_connection: Any, _record: Any) -> None:
             try:
                 cursor = dbapi_connection.cursor()
@@ -44,19 +74,21 @@ def create_db_engine(
     return engine
 
 
-def make_session_factory(engine: Engine) -> sessionmaker[Session]:
-    return sessionmaker(bind=engine, expire_on_commit=False, class_=Session)
+def make_async_session_factory(
+    engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    return async_sessionmaker(engine, expire_on_commit=False, class_=SQLModelAsyncSession)
 
 
-@contextmanager
-def session_scope(factory: sessionmaker[Session]) -> Iterator[Session]:
+@asynccontextmanager
+async def session_scope(factory: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncSession]:
     """Transactional scope: commits on success, rolls back on error."""
     session = factory()
     try:
         yield session
-        session.commit()
+        await session.commit()
     except Exception:
-        session.rollback()
+        await session.rollback()
         raise
     finally:
-        session.close()
+        await session.close()

@@ -31,6 +31,7 @@ from agentkit.foundation.facades import (
     Schedule,
     Storage,
 )
+from agentkit.foundation.fullstack import FullStackProvider
 from agentkit.foundation.jobs import CacheStore
 from agentkit.foundation.middleware import (
     guardrails_hooks,
@@ -76,6 +77,7 @@ __all__ = [
     "Pipeline",
     "DeferrableProvider",
     "Provider",
+    "FullStackProvider",
     "Query",
     "Queue",
     "Repository",

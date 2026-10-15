@@ -1,5 +1,7 @@
 # Observability
 
+## Introduction
+
 You cannot operate what you cannot see. agentkit emits structured logs, traces
 every model and tool call, and ships an operator web UI for inspecting live state.
 

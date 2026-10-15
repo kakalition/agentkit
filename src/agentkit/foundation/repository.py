@@ -1,4 +1,4 @@
-"""Repositories — a base class so you never hand-write CRUD again.
+"""Repositories (async) — a base class so you never hand-write CRUD again.
 
 A repository is the data-access layer for one model. Declare the model and you
 inherit the whole surface (create, get, list, update, delete, count, paginate):
@@ -11,8 +11,8 @@ inherit the whole surface (create, get, list, update, delete, count, paginate):
     class ReminderRepo(Repository[Reminder]):
         model = Reminder
 
-        def due(self, when):            # add only what is special to reminders
-            return self.where(due_at=when).all()
+        async def due(self, when):        # add only what is special to reminders
+            return await self.where(due_at=when).all()
 
 Attach repositories to the app's container declaratively:
 
@@ -98,26 +98,26 @@ class RepositoryQuery(Generic[ModelT]):
             stmt = stmt.limit(self._limit)
         return stmt
 
-    def all(self) -> list[ModelT]:
-        return list(self._repo.session.exec(self._statement()).all())
+    async def all(self) -> list[ModelT]:
+        return list((await self._repo.session.exec(self._statement())).all())
 
-    def first(self) -> ModelT | None:
-        rows = self.limit(1).all()
+    async def first(self) -> ModelT | None:
+        rows = await self.limit(1).all()
         return rows[0] if rows else None
 
-    def count(self) -> int:
+    async def count(self) -> int:
         model = self._repo.model
         stmt: Any = select(func.count()).select_from(model)
         stmt = self._repo._scoped(stmt)
         for field, value in self._filters.items():
             stmt = stmt.where(getattr(model, field) == value)
-        return int(self._repo.session.exec(stmt).one())
+        return int((await self._repo.session.exec(stmt)).one())
 
-    def paginate(self, page: int = 1, per_page: int = 15) -> dict[str, Any]:
+    async def paginate(self, page: int = 1, per_page: int = 15) -> dict[str, Any]:
         page = max(1, page)
         per_page = max(1, per_page)
-        total = self.count()
-        items = self.offset((page - 1) * per_page).limit(per_page).all()
+        total = await self.count()
+        items = await self.offset((page - 1) * per_page).limit(per_page).all()
         return {
             "items": items,
             "total": total,
@@ -126,14 +126,14 @@ class RepositoryQuery(Generic[ModelT]):
             "pages": (total + per_page - 1) // per_page,
         }
 
-    def delete(self) -> int:
+    async def delete(self) -> int:
         model = self._repo.model
         stmt: Any = sql_delete(model)
         stmt = self._repo._scoped(stmt)
         for field, value in self._filters.items():
             stmt = stmt.where(getattr(model, field) == value)
-        result = self._repo.session.exec(stmt)
-        self._repo.session.flush()
+        result = await self._repo.session.exec(stmt)
+        await self._repo.session.flush()
         return int(getattr(result, "rowcount", 0) or 0)
 
 
@@ -168,67 +168,69 @@ class Repository(Generic[ModelT]):
         return self.model(**values)  # type: ignore[no-any-return]
 
     # -- writes ---------------------------------------------------------
-    def create(self, **values: Any) -> ModelT:
+    async def create(self, **values: Any) -> ModelT:
         instance = self.new(**values)
         self.session.add(instance)
-        self.session.flush()
-        self.session.refresh(instance)
+        await self.session.flush()
+        await self.session.refresh(instance)
         return instance
 
     # Laravel-ish alias.
     add = create
 
-    def update(self, ident: Any, **values: Any) -> ModelT | None:
-        instance = self.get(ident)
+    async def update(self, ident: Any, **values: Any) -> ModelT | None:
+        instance = await self.get(ident)
         if instance is None:
             return None
         for field, value in values.items():
             setattr(instance, field, value)
         self.session.add(instance)
-        self.session.flush()
-        self.session.refresh(instance)
+        await self.session.flush()
+        await self.session.refresh(instance)
         return instance
 
-    def update_or_create(self, *, defaults: dict[str, Any], **lookup: Any) -> tuple[ModelT, bool]:
-        instance = self.first(**lookup)
+    async def update_or_create(
+        self, *, defaults: dict[str, Any], **lookup: Any
+    ) -> tuple[ModelT, bool]:
+        instance = await self.first(**lookup)
         if instance is not None:
             for field, value in defaults.items():
                 setattr(instance, field, value)
             self.session.add(instance)
-            self.session.flush()
+            await self.session.flush()
             return instance, False
-        return self.create(**{**lookup, **defaults}), True
+        return await self.create(**{**lookup, **defaults}), True
 
-    def delete(self, ident: Any) -> bool:
-        instance = self.get(ident)
+    async def delete(self, ident: Any) -> bool:
+        instance = await self.get(ident)
         if instance is None:
             return False
-        self.session.delete(instance)
-        self.session.flush()
+        await self.session.delete(instance)
+        await self.session.flush()
         return True
 
     # -- reads ----------------------------------------------------------
-    def get(self, ident: Any) -> ModelT | None:
-        instance = self.session.get(self.model, ident)
+    async def get(self, ident: Any) -> ModelT | None:
+        instance = await self.session.get(self.model, ident)
         if instance is None:
             return None
         if self._has_owner() and getattr(instance, "owner_id", None) != self.owner_id:
             return None
         return instance
 
-    def find(self, ident: Any) -> ModelT:
-        instance = self.get(ident)
+    async def find(self, ident: Any) -> ModelT:
+        instance = await self.get(ident)
         if instance is None:
             raise NotFound(f"{self.model.__name__} {ident!r} not found")
         return instance
 
-    def exists(self, ident: Any) -> bool:
-        return self.get(ident) is not None
+    async def exists(self, ident: Any) -> bool:
+        return await self.get(ident) is not None
 
     def where(self, **filters: Any) -> RepositoryQuery[ModelT]:
         return RepositoryQuery(self, filters)
 
-    def all(
+    async def all(
         self,
         *,
         order_by: Any = None,
@@ -241,16 +243,16 @@ class Repository(Generic[ModelT]):
             query = query.order_by(order_by, descending=descending)
         if limit is not None:
             query = query.limit(limit)
-        return query.all()
+        return await query.all()
 
-    def first(self, **filters: Any) -> ModelT | None:
-        return self.where(**filters).first()
+    async def first(self, **filters: Any) -> ModelT | None:
+        return await self.where(**filters).first()
 
-    def count(self, **filters: Any) -> int:
-        return self.where(**filters).count()
+    async def count(self, **filters: Any) -> int:
+        return await self.where(**filters).count()
 
-    def paginate(self, page: int = 1, per_page: int = 15, **filters: Any) -> dict[str, Any]:
-        return self.where(**filters).paginate(page, per_page)
+    async def paginate(self, page: int = 1, per_page: int = 15, **filters: Any) -> dict[str, Any]:
+        return await self.where(**filters).paginate(page, per_page)
 
-    def delete_where(self, **filters: Any) -> int:
-        return self.where(**filters).delete()
+    async def delete_where(self, **filters: Any) -> int:
+        return await self.where(**filters).delete()

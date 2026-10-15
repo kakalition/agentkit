@@ -39,6 +39,11 @@ class AgentSettings(BaseSettings):
     # model / provider
     openai_api_key: str | None = None
     openai_base_url: str | None = None
+    anthropic_api_key: str | None = None
+    google_api_key: str | None = None
+    groq_api_key: str | None = None
+    mistral_api_key: str | None = None
+    ollama_base_url: str | None = None
     model_name: str = "openai:gpt-4o-mini"
     model_timeout: float = 60.0
     model_retries: int = 2
@@ -59,12 +64,46 @@ class AgentSettings(BaseSettings):
     # optional prefixes for instruction-aware models (e.g. Qwen3/e5); empty for MiniLM
     memory_embedding_query_prompt: str = ""
     memory_embedding_document_prompt: str = ""
+    # hybrid recall weights (similarity / recency / importance) + recency half-life
+    memory_recall_similarity_weight: float = 0.6
+    memory_recall_recency_weight: float = 0.2
+    memory_recall_importance_weight: float = 0.2
+    memory_recall_half_life_days: float = 30.0
+    # consolidation
+    memory_consolidate_duplicate_threshold: float = 0.92
 
     # skills — discoverable ``SKILL.md`` folders the agent can load on demand.
     # ``skills_dir`` overrides the default roots (project ``./skills`` and
     # ``<agent_home>/skills``).
     skills_enabled: bool = True
     skills_dir: str | None = None
+
+    # native tools — first-class, agent-callable toolkits (see ``agentkit.toolkits``).
+    # Each is opt-out: reachable capabilities stay deny-by-default (empty
+    # allow-lists) and every write requires approval.
+    db_tools_enabled: bool = True
+    scheduler_tools_enabled: bool = True
+    queue_tools_enabled: bool = True
+    notification_tools_enabled: bool = True
+    history_tools_enabled: bool = True
+    usage_tools_enabled: bool = True
+    knowledge_admin_enabled: bool = True
+    skill_authoring_enabled: bool = True
+
+    # self-learning — the reflect -> learn -> apply loop (see ``agentkit.learning``).
+    learning_enabled: bool = True
+    learning_reflect_cron: str = "0 4 * * *"
+    learning_window: int = 20
+    learning_skill_threshold: int = 3
+    learning_auto_skills: bool = False
+    learning_max_lessons: int = 50
+
+    # human-in-the-loop approvals
+    approvals_enabled: bool = True
+    # multi-agent: peer tools (send_to/ask_agent/broadcast/handoff_to)
+    subagents_enabled: bool = False
+    mailbox_durable: bool = False
+    max_handoffs: int = 3
 
     # prompts — a file-backed prompt registry (``prompts/<name>.md``).
     prompts_dir: str | None = None
@@ -104,6 +143,23 @@ class AgentSettings(BaseSettings):
     telegram_live_status: bool = True
     telegram_typing_action: bool = True
     telegram_status_interval_s: float = 2.5
+    # Slack (socket mode; needs the ``slack`` extra)
+    slack_bot_token: str | None = None
+    slack_app_token: str | None = None
+    slack_allowed_channel_ids: list[str] = Field(default_factory=list)
+    # Discord (needs the ``discord`` extra)
+    discord_bot_token: str | None = None
+    discord_allowed_guild_ids: list[int] = Field(default_factory=list)
+    # Email (stdlib only: imaplib/smtplib)
+    email_imap_host: str | None = None
+    email_imap_port: int = 993
+    email_imap_user: str | None = None
+    email_imap_password: str | None = None
+    email_smtp_host: str | None = None
+    email_smtp_port: int = 587
+    email_from: str | None = None
+    email_poll_interval_s: float = 30.0
+    email_allowed_senders: list[str] = Field(default_factory=list)
     a2a_public_url: str = "http://127.0.0.1:9000"
     a2a_card_name: str = "Agent"
     a2a_host: str = "127.0.0.1"
@@ -115,6 +171,24 @@ class AgentSettings(BaseSettings):
     @field_validator("telegram_allowed_chat_ids", mode="before")
     @classmethod
     def _split_ids(cls, value: object) -> object:
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            return [int(part) for part in value.replace(",", " ").split() if part]
+        return value
+
+    @field_validator("slack_allowed_channel_ids", "email_allowed_senders", mode="before")
+    @classmethod
+    def _split_string_ids(cls, value: object) -> object:
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            return [part for part in value.replace(",", " ").split() if part]
+        return value
+
+    @field_validator("discord_allowed_guild_ids", mode="before")
+    @classmethod
+    def _split_guild_ids(cls, value: object) -> object:
         if value is None or value == "":
             return []
         if isinstance(value, str):
@@ -170,23 +244,16 @@ def get_settings() -> AgentSettings:
 
 
 def build_model(settings: AgentSettings | None = None):
-    """Build the PydanticAI model with transport timeout and retries."""
-    from openai import AsyncOpenAI
-    from pydantic_ai.models.openai import OpenAIChatModel
-    from pydantic_ai.providers.openai import OpenAIProvider
+    """Build the PydanticAI model for ``settings.model_name`` (``provider:model``).
+
+    A thin wrapper over :func:`agentkit.model_providers.resolve_model`, which
+    dispatches on the provider prefix (openai, anthropic, google, groq, mistral,
+    ollama, and any registered provider).
+    """
+    from agentkit.model_providers import resolve_model
 
     settings = settings or get_settings()
-    client = AsyncOpenAI(
-        api_key=settings.openai_api_key,
-        base_url=settings.openai_base_url,
-        timeout=settings.model_timeout,
-        max_retries=settings.model_retries,
-    )
-    provider = OpenAIProvider(openai_client=client)
-    model_name = settings.model_name
-    if model_name.startswith("openai:"):
-        model_name = model_name.split(":", 1)[1]
-    return OpenAIChatModel(model_name, provider=provider)
+    return resolve_model(settings.model_name, settings)
 
 
 def model_settings(settings: AgentSettings | None = None):

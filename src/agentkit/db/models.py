@@ -115,10 +115,29 @@ class Memory(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     owner_id: str = Field(index=True)
-    kind: str = "fact"  # fact | preference | person | date
+    kind: str = "fact"  # fact | preference | person | date | episodic | procedural
     content: str
     embedding: str | None = Field(default=None)  # base64 float32 vector for semantic recall
+    importance: float = 0.5  # 0..1, used by hybrid recall + consolidation
+    last_used_at: datetime | None = None
+    access_count: int = 0
+    source_conversation_id: str | None = None
+    expires_at: datetime | None = None
     created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class OwnerProfile(SQLModel, table=True):
+    """Single owner-scoped profile row (name, timezone, locale, preferences)."""
+
+    __tablename__ = "owner_profile"
+
+    owner_id: str = Field(primary_key=True)
+    name: str = ""
+    timezone: str = ""
+    locale: str = ""
+    preferences: str = "{}"  # JSON object string
+    notes: str = ""
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
@@ -133,6 +152,22 @@ class KnowledgeChunk(SQLModel, table=True):
     seq: int = 0  # chunk index within the source
     content: str
     embedding: str | None = Field(default=None)  # base64 float32 vector
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class LearningRun(SQLModel, table=True):
+    """A record of one reflection over a conversation window (idempotency)."""
+
+    __tablename__ = "learning_runs"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    conversation_id: str = Field(default="", index=True)
+    signature: str = ""  # hash of the reflected window (re-reflection is cheap)
+    lessons: int = 0
+    preferences: int = 0
+    facts: int = 0
+    detail: str = "{}"
     created_at: datetime = Field(default_factory=_utcnow)
 
 

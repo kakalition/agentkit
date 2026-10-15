@@ -1,5 +1,7 @@
 # Multimodal & Voice
 
+## Introduction
+
 Agents can accept more than text: images, audio, and documents. agentkit provides
 helpers to build content parts and to capture generated media.
 

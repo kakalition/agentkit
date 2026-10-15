@@ -4,6 +4,97 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — full-stack agent
+
+### Added
+- **`Agent.full()`** — expand a builder to the whole agent stack in one call
+  (persona + typed memory + skills + HITL approvals + safety policy + optional
+  knowledge/workspace/peer tools). Every layer is toggleable and idempotent, and
+  respects the `memory_enabled`/`skills_enabled`/`approvals_enabled`/
+  `subagents_enabled` settings flags (a disabled layer is skipped silently).
+- **`FullStackProvider`** (`App(...).fullstack()`) — boot the full stack from
+  settings/config: per-concern config sections (`memory`, `channels`, `interop`,
+  `queue`), the daily durable `memory:consolidate` schedule, and gateway channels
+  registered only when their token/env is present. Unconfigured layers stay idle
+  and never raise.
+- **Multi-provider model registry** (`agentkit.model_providers`): `MODEL_NAME` is
+  `provider:model`; `resolve_model(name, settings)` dispatches to openai,
+  openai-compatible, anthropic, google, groq, mistral and ollama (plus
+  `register_model_provider(prefix, factory)` for custom providers). `build_model`
+  is now a thin wrapper. Missing keys raise a clear `ConfigurationError` naming
+  the env var; an unknown prefix names the supported set.
+- **Typed memory + owner profile**: `Memory` gains `importance`, `last_used_at`,
+  `access_count`, `source_conversation_id` and `expires_at`; a new `OwnerProfile`
+  table + `profile` repo; `MemoryRepo.search` is now a hybrid of semantic
+  similarity, recency and importance (weights in settings), and adds
+  `record_use`/`expired`/`prune_expired`/`near_duplicates`/`merge`. New tools
+  `remember_person`/`update_profile`/`get_profile`; `memory_digest` groups facts
+  by kind and includes the profile. **`memory:consolidate`** (durable task +
+  `agentkit memory:consolidate`, scheduled daily) dedupes, summarizes and prunes.
+  CLI: `memory:list`/`memory:forget`/`memory:profile`.
+- **Shared `Gateway` base + channels**: `Gateway` owns the allow-list,
+  external-id→conversation mapping, `run_turn`/`stream_turn`, approval futures and
+  a `Service` factory. `TelegramGateway` refactors Telegram onto it (helpers
+  `is_allowed`/`send_markdown`/`run_turn`/`ApprovalBroker` unchanged), plus new
+  `SlackGateway` (socket mode), `EmailGateway` (stdlib IMAP/SMTP) and
+  `DiscordGateway` (reaction approvals). Settings for each; notifier senders.
+- **Agent-to-agent communication** (`agentkit.agents`): `AgentHandle` (uniform
+  local/remote-A2A wrapper), `AgentRegistry` (capability resolution + roster),
+  `Mailbox` (in-process/durable `send`/`ask`/`broadcast` with per-agent inboxes
+  and events), `handoff` (full-transcript or brief, with a `max_handoffs` guard)
+  and peer tools `send_to`/`ask_agent`/`broadcast`/`list_agents`/`handoff_to`.
+  Builder sugar: `.subagent()`, `.agents()`, `.mailbox()`, `.handoff_to()`.
+- **Unified orchestrator**: `Orchestrator` and `Supervisor` are one
+  registry-driven implementation; delegation forwards `deps`/`usage`/`model`,
+  supports capability routing + ordered fallbacks, and emits
+  `agent.started`/`finished`/`message`/`handoff`/`error` events.
+- **Concurrency**: `Compactor` now keeps rolling state **per conversation**
+  (`compact(..., conversation_id=…)`), fixing cross-conversation memory leakage.
+- **Introspection**: `/api/info` and `agentkit inspect` report the enabled stack
+  (providers, memory, skills, approvals, sub-agents, channels, interop, queue);
+  more credential fields are masked.
+
+### Changed
+- **Async data layer (breaking).** The whole data layer is async by default:
+  - the engine is `sqlite+aiosqlite` (the local `sqlite+libsql` URL is mapped),
+    with WAL + a busy timeout and `NullPool`; `init_db`/`sync_missing_columns` are
+    awaited (`connection.run_sync`) so DDL never blocks the loop;
+  - `runtime.repositories()` is an async context manager, and `runtime` gained
+    `ensure_initialized` (once, guarded by an `asyncio.Lock`) and
+    `run_repositories_sync` for the sync seams;
+  - **every** repository method, the `Model`/`Query` and `Repository`/
+    `RepositoryQuery` terminals, `DB.session()`/`DB.transaction()`, `ChatRunner`,
+    `load_history`/`save_new_messages`, `KnowledgeBase`, `consolidate_memories`,
+    the `Memory`/`Feedback`/`Queue`/`Schedule` facades, the web UI endpoints, the
+    CLI commands, and the A2A task store are now coroutines (`await …`);
+  - embedding/query work runs via `asyncio.to_thread`; the `DB_LOCK` global is
+    gone (WAL + a bounded busy timeout replace it);
+  - the two seams that cannot be async — DBOS workflow/step bodies and build-time
+    bootstrapping — bridge through `agentkit._sync.run_sync` (a private event
+    loop, never nested inside a running loop).
+  The scaffold, docs and tests are updated to async; `tests/conftest.py` yields an
+  async `repos` fixture.
+
+### Refactored
+- Split the largest modules to keep them small and focused: `db/repositories`
+  (965 → a package with a module per concern), `foundation/scaffold`
+  (templates split into `minimal`/`full`), and `cli` (a package of command
+  modules behind a shared `_app`). Public import paths are unchanged.
+
+### Library swaps
+- **Behaviour-preserving** swaps: validation compiles to Pydantic
+  `TypeAdapter`s (EmailStr/StringConstraints) instead of the hand-rolled regex
+  engine; tool caching uses `cachetools.TTLCache` under an `asyncio.Lock`;
+  `SKILL.md`/prompt front matter parses with `yaml.safe_load` (malformed front
+  matter now raises); `chunk_text` uses `semantic-text-splitter`;
+  vectors/search use numpy (base64 float32 format preserved, `sqlite-vec`
+  detected when available); `StateGraph` is compiled to `pydantic-graph`; web UI
+  SSE uses `sse-starlette`; pricing already used `genai-prices`.
+- **Scaffold**: `agentkit new` defaults to the full-stack project
+  (`FullStackProvider` + `Agent.full()` + `app/Channels/` + `config/memory.py`);
+  `agentkit new --minimal` writes the older skeleton. `scaffold_project(...,
+  full=False)` for the minimal set.
+
 ## [Unreleased]
 
 ### Added

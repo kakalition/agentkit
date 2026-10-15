@@ -1,5 +1,7 @@
 # Facades
 
+## Introduction
+
 Facades give you a terse, expressive syntax for reaching into the application
 container. Instead of resolving a service by hand, you call a static method on a
 facade class, and it resolves against the **current app**.
@@ -8,7 +10,7 @@ facade class, and it resolves against the **current app**.
 from agentkit import Memory, Schedule, DB, Events, Log, Feedback
 
 await Memory.remember("The owner prefers dark mode")
-Schedule.cron("weekly", "0 8 * * 1", "digest")
+await Schedule.cron("weekly", "0 8 * * 1", "digest")
 ```
 
 ## The facades
@@ -26,10 +28,10 @@ Schedule.cron("weekly", "0 8 * * 1", "digest")
 
 ```python
 await Memory.remember("My name is Ada", kind="person")
-Memory.search("name")           # list of matching facts
-Memory.all(limit=20)
-Memory.forget(memory_id)
-Memory.digest()                 # a text digest for the instructions
+await Memory.search("name")           # list of matching facts
+await Memory.all(limit=20)
+await Memory.forget(memory_id)
+await Memory.digest()                 # a text digest for the instructions
 ```
 
 ### Schedule
@@ -38,17 +40,17 @@ Memory.digest()                 # a text digest for the instructions
 @Schedule.task("digest")
 def digest(period: str = "week") -> None: ...
 
-Schedule.cron("weekly", "0 8 * * 1", "digest", args={"period": "week"})
-Schedule.once("welcome", "2030-01-01T09:00", "digest")
-Schedule.list()
-Schedule.enable("weekly"); Schedule.disable("weekly"); Schedule.remove("weekly")
+await Schedule.cron("weekly", "0 8 * * 1", "digest", args={"period": "week"})
+await Schedule.once("welcome", "2030-01-01T09:00", "digest")
+await Schedule.list()
+await Schedule.enable("weekly"); await Schedule.disable("weekly"); await Schedule.remove("weekly")
 ```
 
 ### DB
 
 ```python
 with DB.transaction() as repos:
-    repos.notes.add(text="hello")   # Model.create calls join this session
+    await repos.notes.add(text="hello")   # Model.create calls join this session
 
 with DB.session() as session:
     ...
@@ -68,9 +70,9 @@ await Events.dispatch_async("custom", detail="…")
 ### Feedback
 
 ```python
-Feedback.add(1, conversation_id="cli:1", comment="helpful")
-Feedback.average(conversation_id="cli:1")
-Feedback.list(limit=20)
+await Feedback.add(1, conversation_id="cli:1", comment="helpful")
+await Feedback.average(conversation_id="cli:1")
+await Feedback.list(limit=20)
 ```
 
 ## How resolution works
@@ -87,7 +89,7 @@ from agentkit import current_app, using
 current_app()          # the current App (raises if none)
 
 with using(app):       # scope explicitly
-    Memory.all()
+    await Memory.all()
 ```
 
 You can scope a facade too:
@@ -110,7 +112,7 @@ class Notes(Facade):
         return "notes"
 
 # then, after app.bind("notes", ...):
-Notes.create(text="hello")
+await Notes.create(text="hello")
 ```
 
 ::: warning When to use facades

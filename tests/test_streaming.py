@@ -47,8 +47,8 @@ async def test_stream_persists_history(runtime: Runtime):
     await app.run("first")
     async for _ in app.stream("second"):
         pass
-    with app.repositories() as repos:
-        assert repos.messages.list("cli:default")
+    async with app.repositories() as repos:
+        assert await repos.messages.list("cli:default")
 
 
 async def test_send_and_stream_agree(runtime: Runtime):

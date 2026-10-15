@@ -1,8 +1,6 @@
-"""Durable A2A ``TaskStore`` backed by the app's SQLAlchemy database."""
+"""Durable A2A ``TaskStore`` backed by the app's async SQLAlchemy database."""
 
 from __future__ import annotations
-
-import asyncio
 
 from a2a import types as t
 from a2a.server.context import ServerCallContext
@@ -23,38 +21,38 @@ class SQLAlchemyTaskStore(TaskStore):
             return t.TaskState.Name(task.status.state)
         return "TASK_STATE_UNSPECIFIED"
 
-    def _save(self, task: t.Task) -> None:
+    async def _save(self, task: t.Task) -> None:
         payload = json_format.MessageToJson(task)
-        with repositories(self._runtime) as repos:
-            repos.a2a.upsert(
+        async with repositories(self._runtime) as repos:
+            await repos.a2a.upsert(
                 task.id, self._owner, task.context_id or None, self._state(task), payload
             )
 
-    def _get(self, task_id: str) -> str | None:
-        with repositories(self._runtime) as repos:
-            record = repos.a2a.get(task_id)
+    async def _get(self, task_id: str) -> str | None:
+        async with repositories(self._runtime) as repos:
+            record = await repos.a2a.get(task_id)
             return record.payload if record is not None else None
 
-    def _delete(self, task_id: str) -> None:
-        with repositories(self._runtime) as repos:
-            repos.a2a.delete(task_id)
+    async def _delete(self, task_id: str) -> None:
+        async with repositories(self._runtime) as repos:
+            await repos.a2a.delete(task_id)
 
-    def _list(self) -> list[str]:
-        with repositories(self._runtime) as repos:
-            return [record.payload for record in repos.a2a.list()]
+    async def _list(self) -> list[str]:
+        async with repositories(self._runtime) as repos:
+            return [record.payload for record in await repos.a2a.list()]
 
     async def save(self, task: t.Task, context: ServerCallContext) -> None:
-        await asyncio.to_thread(self._save, task)
+        await self._save(task)
 
     async def get(self, task_id: str, context: ServerCallContext) -> t.Task | None:
-        payload = await asyncio.to_thread(self._get, task_id)
+        payload = await self._get(task_id)
         return json_format.Parse(payload, t.Task()) if payload else None
 
     async def delete(self, task_id: str, context: ServerCallContext) -> None:
-        await asyncio.to_thread(self._delete, task_id)
+        await self._delete(task_id)
 
     async def list(self, params: t.ListTasksRequest, context: ServerCallContext) -> t.ListTasksResponse:
-        payloads = await asyncio.to_thread(self._list)
+        payloads = await self._list()
         tasks = []
         for payload in payloads:
             task = json_format.Parse(payload, t.Task())

@@ -120,7 +120,7 @@ class QueuedJob(Model, table=True):
 class QueueRepo(Repository[QueuedJob]):
     model = QueuedJob
 
-    def ready(self, queue: str, now: datetime, *, limit: int = 1) -> list[QueuedJob]:
+    async def ready(self, queue: str, now: datetime, *, limit: int = 1) -> list[QueuedJob]:
         stmt = (
             select(QueuedJob)
             .where(QueuedJob.owner_id == self.owner_id, QueuedJob.queue == queue)
@@ -129,16 +129,16 @@ class QueueRepo(Repository[QueuedJob]):
             .order_by(QueuedJob.available_at, QueuedJob.id)  # type: ignore[arg-type]
             .limit(limit)
         )
-        return list(self.session.exec(stmt).all())
+        return list((await self.session.exec(stmt)).all())
 
-    def failed_jobs(self, *, limit: int = 50) -> list[QueuedJob]:
-        return self.where(failed=True).order_by("id", descending=True).limit(limit).all()
+    async def failed_jobs(self, *, limit: int = 50) -> list[QueuedJob]:
+        return await self.where(failed=True).order_by("id", descending=True).limit(limit).all()
 
-    def size(self, queue: str | None = None) -> int:
+    async def size(self, queue: str | None = None) -> int:
         filters: dict[str, Any] = {"failed": False}
         if queue is not None:
             filters["queue"] = queue
-        return self.count(**filters)
+        return await self.count(**filters)
 
 
 class Queue:
@@ -152,7 +152,7 @@ class Queue:
         return getattr(self.app.settings, "queue_default", "default") or "default"
 
     # -- producer -------------------------------------------------------
-    def push(
+    async def push(
         self,
         job: Any,
         *,
@@ -163,8 +163,8 @@ class Queue:
         """Persist a job; returns its id."""
         payload = job.to_payload() if hasattr(job, "to_payload") else serialize_job(job)
         now = datetime.now(UTC)
-        with self.app.repositories() as repos:
-            record = repos.queue.create(
+        async with self.app.repositories() as repos:
+            record = await repos.queue.create(
                 queue=queue or getattr(job, "queue", self.default),
                 job=payload["job"],
                 payload=json.dumps(payload),
@@ -173,18 +173,18 @@ class Queue:
             )
             return int(record.id)
 
-    def size(self, queue: str | None = None) -> int:
-        with self.app.repositories() as repos:
-            return repos.queue.size(queue)
+    async def size(self, queue: str | None = None) -> int:
+        async with self.app.repositories() as repos:
+            return await repos.queue.size(queue)
 
-    def failed(self, *, limit: int = 50) -> list[QueuedJob]:
-        with self.app.repositories() as repos:
-            return repos.queue.failed_jobs(limit=limit)
+    async def failed(self, *, limit: int = 50) -> list[QueuedJob]:
+        async with self.app.repositories() as repos:
+            return await repos.queue.failed_jobs(limit=limit)
 
-    def retry(self, job_id: int) -> bool:
+    async def retry(self, job_id: int) -> bool:
         """Requeue a failed job."""
-        with self.app.repositories() as repos:
-            record = repos.queue.get(job_id)
+        async with self.app.repositories() as repos:
+            record = await repos.queue.get(job_id)
             if record is None or not record.failed:
                 return False
             record.failed = False
@@ -194,43 +194,43 @@ class Queue:
             record.available_at = datetime.now(UTC)
             record.updated_at = datetime.now(UTC)
             repos.session.add(record)
-            repos.session.flush()
+            await repos.session.flush()
             return True
 
-    def flush(self) -> int:
+    async def flush(self) -> int:
         """Delete all failed jobs; returns how many were removed."""
-        with self.app.repositories() as repos:
-            rows = repos.queue.failed_jobs(limit=10_000)
+        async with self.app.repositories() as repos:
+            rows = await repos.queue.failed_jobs(limit=10_000)
             for record in rows:
-                repos.session.delete(record)
-            repos.session.flush()
+                await repos.session.delete(record)
+            await repos.session.flush()
             return len(rows)
 
     # -- worker ---------------------------------------------------------
     async def run_once(self, queue: str | None = None) -> bool:
         """Reserve and run one job; returns False when the queue is empty."""
-        record = self._reserve(queue or self.default)
+        record = await self._reserve(queue or self.default)
         if record is None:
             return False
         assert record.id is not None
         try:
             job = deserialize_job(json.loads(record.payload))
         except DeserializationError as exc:
-            self._fail(record.id, str(exc))
+            await self._fail(record.id, str(exc))
             return True
         try:
             await job.dispatch(self.app)
         except Exception as exc:  # pragma: no cover - depends on job
             log.exception("queued job %s failed", record.id)
-            self._fail(record.id, repr(exc))
+            await self._fail(record.id, repr(exc))
             return True
-        self._complete(record.id)
+        await self._complete(record.id)
         return True
 
-    def _reserve(self, queue: str) -> QueuedJob | None:
+    async def _reserve(self, queue: str) -> QueuedJob | None:
         now = datetime.now(UTC)
-        with self.app.repositories() as repos:
-            candidates = repos.queue.ready(queue, now, limit=1)
+        async with self.app.repositories() as repos:
+            candidates = await repos.queue.ready(queue, now, limit=1)
             if not candidates:
                 return None
             record = candidates[0]
@@ -238,17 +238,19 @@ class Queue:
             record.attempts += 1
             record.updated_at = now
             repos.session.add(record)
-            repos.session.flush()
-            repos.session.refresh(record)
+            await repos.session.flush()
+            await repos.session.refresh(record)
             return record
 
-    def _complete(self, job_id: int) -> None:
-        with self.app.repositories() as repos:
-            repos.session.delete(repos.queue.get(job_id))
+    async def _complete(self, job_id: int) -> None:
+        async with self.app.repositories() as repos:
+            record = await repos.queue.get(job_id)
+            if record is not None:
+                await repos.session.delete(record)
 
-    def _fail(self, job_id: int, error: str) -> None:
-        with self.app.repositories() as repos:
-            record = repos.queue.get(job_id)
+    async def _fail(self, job_id: int, error: str) -> None:
+        async with self.app.repositories() as repos:
+            record = await repos.queue.get(job_id)
             if record is None:
                 return
             record.error = error
@@ -259,4 +261,4 @@ class Queue:
             else:
                 record.available_at = datetime.now(UTC)
             repos.session.add(record)
-            repos.session.flush()
+            await repos.session.flush()

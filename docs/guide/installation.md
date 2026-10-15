@@ -1,5 +1,7 @@
 # Installation
 
+## Introduction
+
 agentkit ships a bare, sane starting skeleton — the equivalent of `laravel new`.
 You create a project, open it up, and customise it. Nothing is hidden behind a
 generator you can't read: every file the framework writes is plain Python you own.

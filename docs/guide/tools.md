@@ -1,5 +1,7 @@
 # Tools
 
+## Introduction
+
 Tools are how an agent *acts*. A tool is an ordinary Python function; agentkit adds
 conveniences for registration, approval, caching, and composition.
 
@@ -20,7 +22,7 @@ async def add_note(ctx: RunContext[Deps], text: str, *, pinned: bool = False) ->
         text: The note body.
         pinned: Keep it at the top of the list.
     """
-    ctx.deps.repos.notes.add(text=text, pinned=pinned)
+    await ctx.deps.repos.notes.add(text=text, pinned=pinned)
     return f"saved: {text}"
 ```
 

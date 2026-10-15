@@ -17,6 +17,7 @@ Register a task with the decorator, then schedule it:
 
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from croniter import croniter
 from dbos import DBOS, SetWorkflowID
 
 from agentkit import durability
+from agentkit._sync import run_sync
 from agentkit.config import AgentSettings, get_settings
 from agentkit.db.repositories import Repositories
 from agentkit.runtime import Runtime, build_runtime, repositories
@@ -38,7 +40,7 @@ _runtime: Runtime | None = None
 
 
 def task(name: str):
-    """Register a callable under ``name`` so it can be scheduled."""
+    """Register a callable (sync or async) under ``name`` so it can be scheduled."""
 
     def decorator(function: Callable[..., Any]) -> Callable[..., Any]:
         TASKS[name] = function
@@ -47,11 +49,14 @@ def task(name: str):
     return decorator
 
 
-def invoke_task(task_name: str, args_json: str = "{}") -> Any:
+async def invoke_task(task_name: str, args_json: str = "{}") -> Any:
     function = TASKS.get(task_name)
     if function is None:
         raise ValueError(f"no task registered as {task_name!r}")
-    return function(**json.loads(args_json or "{}"))
+    result = function(**json.loads(args_json or "{}"))
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 @dataclass
@@ -99,28 +104,38 @@ def _require_runtime() -> Runtime:
     return _runtime
 
 
-def _load_due(now_iso: str) -> list[dict[str, str]]:
+async def load_due(now_iso: str) -> list[dict[str, str]]:
     now = datetime.fromisoformat(now_iso)
-    with repositories(_require_runtime()) as repos:
-        jobs = repos.schedules.list(enabled_only=True)
+    async with repositories(_require_runtime()) as repos:
+        jobs = await repos.schedules.list(enabled_only=True)
         return [
             {"name": d.name, "task": d.task, "args": d.args_json, "run_key": d.run_key}
             for d in due_jobs(jobs, now)
         ]
 
 
-def _record_run(name: str) -> None:
-    with repositories(_require_runtime()) as repos:
-        repos.schedules.record_run(name)
+async def record_run(name: str) -> None:
+    async with repositories(_require_runtime()) as repos:
+        await repos.schedules.record_run(name)
 
 
-_load_due_step = DBOS.step()(_load_due)
-_record_run_step = DBOS.step()(_record_run)
+# DBOS steps stay sync (the durable seam) and drive the async data layer on a
+# private loop, so DB work never runs on the caller's event loop.
+def _load_due_step_fn(now_iso: str) -> list[dict[str, str]]:
+    return run_sync(load_due(now_iso))
+
+
+def _record_run_step_fn(name: str) -> None:
+    run_sync(record_run(name))
+
+
+_load_due_step = DBOS.step()(_load_due_step_fn)
+_record_run_step = DBOS.step()(_record_run_step_fn)
 
 
 @DBOS.step(retries_allowed=True, max_attempts=3, backoff_rate=2.0)
 def _invoke_step(task_name: str, args_json: str) -> Any:
-    return invoke_task(task_name, args_json)
+    return run_sync(invoke_task(task_name, args_json))
 
 
 @DBOS.workflow()
@@ -194,30 +209,30 @@ def init_scheduler(
     return runtime
 
 
-def schedule_cron(
+async def schedule_cron(
     name: str, cron: str, task_name: str, *, args: dict[str, Any] | None = None, enabled: bool = True
 ) -> None:
     """Add or update a recurring job."""
     croniter(cron)  # validate the expression
-    with repositories(_require_runtime()) as repos:
-        repos.schedules.upsert(
+    async with repositories(_require_runtime()) as repos:
+        await repos.schedules.upsert(
             name, kind="cron", schedule=cron, task=task_name, args=json.dumps(args or {}), enabled=enabled
         )
 
 
-def schedule_once(
+async def schedule_once(
     name: str, when: datetime | str, task_name: str, *, args: dict[str, Any] | None = None
 ) -> None:
     """Add or update a one-off job that fires at/after ``when``."""
     moment = when if isinstance(when, datetime) else datetime.fromisoformat(str(when))
-    with repositories(_require_runtime()) as repos:
-        repos.schedules.upsert(
+    async with repositories(_require_runtime()) as repos:
+        await repos.schedules.upsert(
             name, kind="once", schedule=moment.isoformat(), task=task_name, args=json.dumps(args or {})
         )
 
 
-def list_jobs() -> list[dict[str, Any]]:
-    with repositories(_require_runtime()) as repos:
+async def list_jobs() -> list[dict[str, Any]]:
+    async with repositories(_require_runtime()) as repos:
         return [
             {
                 "name": job.name,
@@ -229,27 +244,27 @@ def list_jobs() -> list[dict[str, Any]]:
                 "last_run": job.last_run.isoformat() if job.last_run else None,
                 "run_count": job.run_count,
             }
-            for job in repos.schedules.list()
+            for job in await repos.schedules.list()
         ]
 
 
-def set_enabled(name: str, enabled: bool) -> bool:
+async def set_enabled(name: str, enabled: bool) -> bool:
     """Enable or disable a scheduled job (keeps its definition)."""
-    with repositories(_require_runtime()) as repos:
-        return repos.schedules.set_enabled(name, enabled)
+    async with repositories(_require_runtime()) as repos:
+        return await repos.schedules.set_enabled(name, enabled)
 
 
-def remove_job(name: str) -> bool:
-    with repositories(_require_runtime()) as repos:
-        return repos.schedules.remove(name)
+async def remove_job(name: str) -> bool:
+    async with repositories(_require_runtime()) as repos:
+        return await repos.schedules.remove(name)
 
 
-def run_due_now(now: datetime | None = None) -> list[str]:
+async def run_due_now(now: datetime | None = None) -> list[str]:
     """Run due jobs inline (non-durable). Handy for tests and a CLI catch-up."""
     now = now or datetime.now(UTC)
-    with repositories(_require_runtime()) as repos:
-        due = due_jobs(repos.schedules.list(enabled_only=True), now)
+    async with repositories(_require_runtime()) as repos:
+        due = due_jobs(await repos.schedules.list(enabled_only=True), now)
         for item in due:
-            invoke_task(item.task, item.args_json)
-            repos.schedules.record_run(item.name)
+            await invoke_task(item.task, item.args_json)
+            await repos.schedules.record_run(item.name)
     return [item.name for item in due]

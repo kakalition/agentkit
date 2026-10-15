@@ -12,7 +12,20 @@ from agentkit.webui.context import WebUIContext, get_context
 
 router = APIRouter(tags=["config"])
 
-SECRET_FIELDS = ("openai_api_key", "libsql_auth_token", "telegram_bot_token", "libsql_url")
+SECRET_FIELDS = (
+    "openai_api_key",
+    "anthropic_api_key",
+    "google_api_key",
+    "groq_api_key",
+    "mistral_api_key",
+    "libsql_auth_token",
+    "telegram_bot_token",
+    "slack_bot_token",
+    "slack_app_token",
+    "discord_bot_token",
+    "email_imap_password",
+    "libsql_url",
+)
 _MASK = "***"
 
 
@@ -54,6 +67,8 @@ def get_config(ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
 @router.get("/info")
 def get_info(ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
     from agentkit import __version__
+    from agentkit.foundation.facade import get_current_app
+    from agentkit.webui.introspect import stack_view
 
     settings = ctx.settings
     return {
@@ -65,6 +80,7 @@ def get_info(ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
         "db_path": str(settings.db_path),
         "database_url": mask_url(settings.resolved_database_url),
         "model_name": settings.model_name,
+        "stack": stack_view(settings, app=get_current_app()),
         "webui": {
             "enabled": settings.webui_enabled,
             "host": settings.webui_host,

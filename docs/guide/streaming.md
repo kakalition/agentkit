@@ -1,5 +1,7 @@
 # Streaming
 
+## Introduction
+
 Streaming delivers the model's output token by token, so users see progress
 immediately. agentkit's streaming records history, usage, and events exactly like a
 normal turn.
@@ -27,7 +29,7 @@ The return value mirrors `app.run`: the final `ChatResult` carries `output`,
 ## Lower level: `ChatRunner.stream`
 
 ```python
-with app.repositories() as repos:
+async with app.repositories() as repos:
     runner = ChatRunner(app.deps(repos), agent=app.agent(), conversation_id="cli:1")
     async for event in runner.stream("hello"):
         ...

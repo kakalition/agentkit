@@ -1,5 +1,7 @@
 # Testing
 
+## Introduction
+
 agentkit is designed to be as easy to test as it is to run: no network, no clock,
 and no import-time side effects.
 
@@ -36,7 +38,7 @@ def runtime(tmp_path):
 
 @pytest.fixture
 def repos(runtime):
-    with repositories(runtime) as opened:
+    async with repositories(runtime) as opened:
         yield opened
 ```
 

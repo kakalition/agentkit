@@ -28,8 +28,8 @@ def test_check_egress():
     assert not check_egress("http://10.0.0.5")
 
 
-def test_run_checks():
-    ok, results = run_checks([Check("a", lambda: True), Check("b", lambda: False)])
+async def test_run_checks():
+    ok, results = await run_checks([Check("a", lambda: True), Check("b", lambda: False)])
     assert ok is False
     assert results == {"a": True, "b": False}
 

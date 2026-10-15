@@ -25,6 +25,14 @@ dependencies = [
     "python-dateutil>=2.9",
     "babel>=2.16",
     "croniter>=6.0",
+    "numpy>=2.4.6",
+    "aiosqlite>=0.22.1",
+    "semantic-text-splitter>=0.33.0",
+    "pydantic-graph>=2.55.0",
+    "genai-prices>=0.1.10",
+    "cachetools>=7.2.1",
+    "pyyaml>=6.0.3",
+    "sse-starlette>=3.5.0",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +52,15 @@ dev = [
     "bandit>=1.7",
     "pip-audit>=2.7",
     "cyclonedx-bom>=4.1",
+]
+vec = [
+    "sqlite-vec>=0.1.9",
+]
+slack = [
+    "slack-bolt>=1.20,<2",
+]
+discord = [
+    "discord-py>=2.4,<3",
 ]
 
 [project.scripts]
@@ -86,5 +103,5 @@ plugins = ["pydantic.mypy"]
 # SQLModel/SQLAlchemy column stubs (`order_by`, `.desc`) and the `list` method
 # name shadowing the builtin in class-body annotations are false positives here.
 [[tool.mypy.overrides]]
-module = ["agentkit.db.repositories", "agentkit.session"]
+module = ["agentkit.db.repositories", "agentkit.db.repositories.*", "agentkit.session"]
 disable_error_code = ["arg-type", "attr-defined", "union-attr", "valid-type", "misc"]

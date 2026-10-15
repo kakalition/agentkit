@@ -21,9 +21,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import math
-from array import array
 from collections.abc import Sequence
 from typing import Any, Protocol, runtime_checkable
+
+import numpy as np
 
 DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_EMBED_BACKEND = "sentence-transformers"
@@ -185,26 +186,63 @@ def get_default_embedder() -> Embedder | None:
 
 
 def pack_vector(vector: Sequence[float]) -> str:
-    return base64.b64encode(array("f", (float(value) for value in vector)).tobytes()).decode(
-        "ascii"
-    )
+    """Base64-encode a float32 vector (the storage format; libSQL has no BLOB bind)."""
+    data = np.asarray(vector, dtype=np.float32).tobytes()
+    return base64.b64encode(data).decode("ascii")
 
 
 def unpack_vector(blob: str) -> list[float]:
-    values = array("f")
-    values.frombytes(base64.b64decode(blob))
-    return list(values)
+    data = base64.b64decode(blob)
+    return np.frombuffer(data, dtype=np.float32).tolist()
 
 
 def cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
     if len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b, strict=True))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
+    va = np.asarray(a, dtype=np.float32)
+    vb = np.asarray(b, dtype=np.float32)
+    norm_a = float(np.linalg.norm(va))
+    norm_b = float(np.linalg.norm(vb))
     if norm_a <= 0.0 or norm_b <= 0.0:
         return 0.0
-    return dot / (norm_a * norm_b)
+    return float(np.dot(va, vb) / (norm_a * norm_b))
+
+
+def similarity_scores(
+    query: Sequence[float], vectors: Sequence[Sequence[float]]
+) -> list[float]:
+    """Cosine similarity of ``query`` against many same-dimension vectors.
+
+    Vectorized with numpy — the fast fallback used when the optional
+    ``sqlite-vec`` extension is unavailable. All ``vectors`` must share the
+    query's dimension; callers filter mismatches first.
+    """
+    if not vectors:
+        return []
+    q = np.asarray(query, dtype=np.float32)
+    matrix = np.asarray(vectors, dtype=np.float32)
+    query_norm = float(np.linalg.norm(q))
+    if query_norm <= 0.0:
+        return [0.0] * len(vectors)
+    norms = np.linalg.norm(matrix, axis=1)
+    denom = norms * query_norm
+    dots = matrix @ q
+    with np.errstate(divide="ignore", invalid="ignore"):
+        scores = np.where(denom > 0.0, dots / denom, 0.0)
+    return [float(score) for score in scores]
+
+
+def sqlite_vec_available() -> bool:
+    """Whether the optional ``sqlite-vec`` accelerator can be imported/loaded.
+
+    When unavailable, semantic search falls back to the numpy-vectorized cosine
+    scan in :func:`similarity_scores`.
+    """
+    try:  # pragma: no cover - depends on the optional extra
+        import sqlite_vec  # noqa: F401
+    except Exception:
+        return False
+    return True
 
 
 __all__ = [
@@ -222,5 +260,7 @@ __all__ = [
     "embed_query",
     "get_default_embedder",
     "pack_vector",
+    "similarity_scores",
+    "sqlite_vec_available",
     "unpack_vector",
 ]

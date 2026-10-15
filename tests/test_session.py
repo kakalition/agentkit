@@ -21,8 +21,8 @@ async def test_chatrunner_persists_history(runtime: Runtime, repos: Repositories
     result = await runner.send("hello")
     assert result.output == "hi"
     assert result.history_length == 2
-    assert len(repos.messages.list("cli:test")) == 2
+    assert len(await repos.messages.list("cli:test")) == 2
 
     second = await runner.send("again")
     assert second.history_length == 4
-    assert len(repos.messages.list("cli:test")) == 4
+    assert len(await repos.messages.list("cli:test")) == 4

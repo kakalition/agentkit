@@ -16,10 +16,13 @@ instructions (``.knowledge(kb, index=True)`` does it for you).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+
+from semantic_text_splitter import TextSplitter
 
 from agentkit.config import get_settings
 from agentkit.db.repositories import Repositories
@@ -34,31 +37,18 @@ DEFAULT_OVERLAP = 200
 def chunk_text(
     text: str, *, chunk_chars: int = DEFAULT_CHUNK_CHARS, overlap: int = DEFAULT_OVERLAP
 ) -> list[str]:
-    """Split ``text`` into overlapping chunks, preferring paragraph boundaries."""
+    """Split ``text`` into overlapping, boundary-aware chunks.
+
+    Backed by ``semantic-text-splitter`` (Rust), which prefers semantic
+    boundaries (paragraphs, sentences, words) over a fixed character window.
+    """
     text = (text or "").strip()
     if not text:
         return []
     if len(text) <= chunk_chars:
         return [text]
-    chunks: list[str] = []
-    start = 0
-    length = len(text)
-    while start < length:
-        end = min(start + chunk_chars, length)
-        if end < length:
-            window = text[start:end]
-            split = window.rfind("\n\n")
-            if split < chunk_chars // 2:
-                split = window.rfind("\n")
-            if split > chunk_chars // 3:
-                end = start + split
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end >= length:
-            break
-        start = max(end - overlap, start + 1)
-    return chunks
+    splitter = TextSplitter(capacity=chunk_chars, overlap=overlap)
+    return [chunk.strip() for chunk in splitter.chunks(text) if chunk.strip()]
 
 
 class KnowledgeBase:
@@ -85,71 +75,76 @@ class KnowledgeBase:
         return cls(settings=settings or get_settings())
 
     # -- session --------------------------------------------------------
-    @contextmanager
-    def _scope(self) -> Iterator[Any]:
+    @asynccontextmanager
+    async def _scope(self) -> AsyncIterator[Any]:
         if self.app is not None:
-            with self.app.repositories() as repos:
+            async with self.app.repositories() as repos:
                 yield repos
             return
         if self._runtime is None:
             self._runtime = build_runtime(self._settings or get_settings(), repos_factory=self.repos_factory)
-        with repositories(self._runtime) as repos:
+        async with repositories(self._runtime) as repos:
             yield repos
 
     # -- writes ---------------------------------------------------------
-    def add(self, text: str, *, source: str = "") -> int:
+    async def add(self, text: str, *, source: str = "") -> int:
         """Chunk and index ``text``; returns the number of chunks added."""
         chunks = chunk_text(text, chunk_chars=self.chunk_chars, overlap=self.overlap)
         if not chunks:
             return 0
-        with self._scope() as repos:
-            return repos.knowledge.add(source, chunks)
+        async with self._scope() as repos:
+            return await repos.knowledge.add(source, chunks)
 
-    def add_file(self, path: str | Path, *, source: str | None = None) -> int:
+    async def add_file(self, path: str | Path, *, source: str | None = None) -> int:
         path = Path(path).expanduser()
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        return self.add(text, source=source or str(path))
+        text = await asyncio.to_thread(
+            path.read_text, encoding="utf-8", errors="ignore"
+        )
+        return await self.add(text, source=source or str(path))
 
-    def add_directory(
+    async def add_directory(
         self, directory: str | Path, *, pattern: str = "**/*.md"
     ) -> int:
         directory = Path(directory).expanduser()
         added = 0
         for file in sorted(directory.glob(pattern)):
             if file.is_file():
-                added += self.add_file(file)
+                added += await self.add_file(file)
         return added
 
-    def add_many(self, documents: dict[str, str]) -> int:
+    async def add_many(self, documents: dict[str, str]) -> int:
         """Index ``{source: text}``; returns total chunks added."""
-        return sum(self.add(text, source=source) for source, text in documents.items())
+        total = 0
+        for source, text in documents.items():
+            total += await self.add(text, source=source)
+        return total
 
-    def clear(self, source: str | None = None) -> int:
-        with self._scope() as repos:
-            return repos.knowledge.clear(source)
+    async def clear(self, source: str | None = None) -> int:
+        async with self._scope() as repos:
+            return await repos.knowledge.clear(source)
 
     # -- reads ----------------------------------------------------------
-    def search(self, query: str, *, limit: int = 5, source: str | None = None) -> list[Any]:
-        with self._scope() as repos:
-            return repos.knowledge.search(query, limit=limit, source=source)
+    async def search(self, query: str, *, limit: int = 5, source: str | None = None) -> list[Any]:
+        async with self._scope() as repos:
+            return await repos.knowledge.search(query, limit=limit, source=source)
 
-    def sources(self) -> list[str]:
-        with self._scope() as repos:
-            return repos.knowledge.sources()
+    async def sources(self) -> list[str]:
+        async with self._scope() as repos:
+            return await repos.knowledge.sources()
 
-    def count(self, source: str | None = None) -> int:
-        with self._scope() as repos:
-            return repos.knowledge.count(source)
+    async def count(self, source: str | None = None) -> int:
+        async with self._scope() as repos:
+            return await repos.knowledge.count(source)
 
-    def index(self, *, limit: int = 50) -> str:
+    async def index(self, *, limit: int = 50) -> str:
         """A compact source listing for instructions (empty when nothing indexed)."""
-        with self._scope() as repos:
-            sources = repos.knowledge.sources()
+        async with self._scope() as repos:
+            sources = await repos.knowledge.sources()
             if not sources:
                 return ""
             lines = []
             for source in sources[:limit]:
-                lines.append(f"- {source} ({repos.knowledge.count(source)} chunks)")
+                lines.append(f"- {source} ({await repos.knowledge.count(source)} chunks)")
             more = "" if len(sources) <= limit else f"\n- …and {len(sources) - limit} more"
             return "Indexed knowledge (search with `search_knowledge`):\n" + "\n".join(lines) + more
 

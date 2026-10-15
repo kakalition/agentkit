@@ -1,14 +1,14 @@
 """Active-repository scoping for the thin ``Model`` / ``DB`` layer.
 
-A transaction opened with ``DB.transaction()`` (or a ``DB.session()`` block) is
-made *ambient* through a contextvar, so ``Model.create(...)`` inside the block
-joins the same session instead of opening its own.
+An async transaction opened with ``await DB.transaction()`` (or ``async with
+DB.session()``) is made *ambient* through a contextvar, so ``await Model.create(...)``
+inside the block joins the same session instead of opening its own.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from typing import Any
 
@@ -20,8 +20,8 @@ def active_repos() -> Any:
     return _active.get()
 
 
-@contextmanager
-def using_repos(repos: Any) -> Iterator[Any]:
+@asynccontextmanager
+async def using_repos(repos: Any) -> AsyncIterator[Any]:
     token = _active.set(repos)
     try:
         yield repos
@@ -29,14 +29,14 @@ def using_repos(repos: Any) -> Iterator[Any]:
         _active.reset(token)
 
 
-@contextmanager
-def session_scope(app: Any) -> Iterator[Any]:
+@asynccontextmanager
+async def session_scope(app: Any) -> AsyncIterator[Any]:
     """Yield the ambient repositories if any, else open a fresh app session."""
     existing = active_repos()
     if existing is not None:
         yield existing
         return
-    with app.repositories() as repos:
+    async with app.repositories() as repos:
         token = _active.set(repos)
         try:
             yield repos

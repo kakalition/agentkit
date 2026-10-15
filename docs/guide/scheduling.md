@@ -1,5 +1,7 @@
 # Scheduling & Durability
 
+## Introduction
+
 Agents do work on a clock and must survive restarts. agentkit provides durable
 cron *and* one-off jobs, plus DBOS-backed workflows for multi-step processes.
 
@@ -60,17 +62,17 @@ And imperatively at runtime (the `Schedule` facade):
 ```python
 from agentkit import Schedule
 
-Schedule.cron("weekly-digest", "0 8 * * 1", "digest", args={"period": "week"})
-Schedule.once("welcome", "2030-01-01T09:00", "welcome")
+await Schedule.cron("weekly-digest", "0 8 * * 1", "digest", args={"period": "week"})
+await Schedule.once("welcome", "2030-01-01T09:00", "welcome")
 ```
 
 ## Managing jobs
 
 ```python
-Schedule.list()
-Schedule.enable("weekly-digest")
-Schedule.disable("weekly-digest")
-Schedule.remove("weekly-digest")
+await Schedule.list()
+await Schedule.enable("weekly-digest")
+await Schedule.disable("weekly-digest")
+await Schedule.remove("weekly-digest")
 Schedule.run_due()      # run anything due right now (catch-up)
 ```
 

@@ -150,25 +150,25 @@ async def test_global_helpers(runtime: Runtime, tmp_path, monkeypatch):
 
 
 # -- Eloquent-style model helpers ------------------------------------------
-def test_model_first_or_create_and_find_or_fail(runtime: Runtime):
+async def test_model_first_or_create_and_find_or_fail(runtime: Runtime):
     app = App(name="m", settings=runtime.settings, discover=False)
     app.boot()
 
-    created = _Note.first_or_create(text="a")
+    created = await _Note.first_or_create(text="a")
     assert created.id is not None
-    again = _Note.first_or_create(text="a")
+    again = await _Note.first_or_create(text="a")
     assert again.id == created.id
 
-    updated = _Note.update_or_create(defaults={"text": "b"}, text="a")
+    updated = await _Note.update_or_create(defaults={"text": "b"}, text="a")
     assert updated.id == created.id and updated.text == "b"
 
-    assert _Note.find_or_fail(created.id).text == "b"
+    assert (await _Note.find_or_fail(created.id)).text == "b"
     from agentkit.errors import NotFound
 
     with pytest.raises(NotFound):
-        _Note.find_or_fail(999999)
+        await _Note.find_or_fail(999999)
     with pytest.raises(NotFound):
-        _Note.first_or_fail(text="nope")
+        await _Note.first_or_fail(text="nope")
 
 
 # -- Queue retry / flush ----------------------------------------------------
@@ -182,15 +182,15 @@ class _Boom(Job):
 async def test_queue_retry_and_flush(runtime: Runtime):
     app = App(name="q", settings=runtime.settings, discover=False)
     app.boot()
-    app.queue.push(_Boom())
+    await app.queue.push(_Boom())
     await app.queue.run_once()
-    failed = app.queue.failed()
+    failed = await app.queue.failed()
     assert failed
     job_id = failed[0].id
 
-    assert app.queue.retry(job_id) is True
-    assert app.queue.failed() == []
-    assert app.queue.flush() == 0
+    assert await app.queue.retry(job_id) is True
+    assert await app.queue.failed() == []
+    assert await app.queue.flush() == 0
 
 
 # -- Fluent schedule extras -------------------------------------------------

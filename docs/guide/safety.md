@@ -1,5 +1,7 @@
 # Safety & Moderation
 
+## Introduction
+
 agentkit treats safety as a set of first-class surfaces rather than an
 afterthought: tool approvals, policy, prompt-injection scanning, PII redaction,
 moderation, secret redaction, egress checks, and a tamper-evident audit log.
@@ -113,9 +115,9 @@ are rejected.
 Record sensitive actions in a **hash-chained** log that can be verified:
 
 ```python
-with app.repositories() as repos:
-    repos.audit.append("email.sent", target="email:42", actor="owner")
-    assert repos.audit.verify()
+async with app.repositories() as repos:
+    await repos.audit.append("email.sent", target="email:42", actor="owner")
+    assert await repos.audit.verify()
 ```
 
 Tampering with any entry breaks `verify()`.

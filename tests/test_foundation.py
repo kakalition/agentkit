@@ -222,10 +222,10 @@ async def test_memory_facade(runtime: Runtime):
     _app(runtime)
     memory_id = await Memory.remember("My name is Ada")
     assert isinstance(memory_id, int)
-    assert any("Ada" in row.content for row in Memory.search("Ada"))
-    assert Memory.all()
-    assert Memory.forget(memory_id) is True
-    assert Memory.forget(memory_id) is False
+    assert any("Ada" in row.content for row in await Memory.search("Ada"))
+    assert await Memory.all()
+    assert await Memory.forget(memory_id) is True
+    assert await Memory.forget(memory_id) is False
 
 
 def test_events_and_log_facades(runtime: Runtime):
@@ -237,13 +237,13 @@ def test_events_and_log_facades(runtime: Runtime):
     assert Log.channel("agentkit").name == "agentkit"
 
 
-def test_db_facade_session_and_transaction(runtime: Runtime):
+async def test_db_facade_session_and_transaction(runtime: Runtime):
     _app(runtime)
-    with DB.transaction() as repos:
-        repos.memories.add("via transaction")
-    with DB.session() as session:
+    async with DB.transaction() as repos:
+        await repos.memories.add("via transaction")
+    async with DB.session() as session:
         assert session is not None
-    assert any("transaction" in row.content for row in Memory.all())
+    assert any("transaction" in row.content for row in await Memory.all())
 
 
 def test_facade_using_scopes_current_app(runtime: Runtime):

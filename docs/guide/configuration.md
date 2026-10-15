@@ -1,5 +1,7 @@
 # Configuration
 
+## Introduction
+
 agentkit is configured through environment variables (and an optional `.env`),
 with sensible defaults so a working agent needs almost nothing. This page covers
 the framework-level configuration: settings, layered sections, and directories.
@@ -96,7 +98,7 @@ elsewhere with a setting:
 | --- | --- | --- |
 | Skills | `./skills`, `<home>/skills` | `SKILLS_DIR` |
 | Prompts | `./prompts`, `<home>/prompts` | `PROMPTS_DIR` |
-| Knowledge | — (you choose) | `KnowledgeBase.add_directory(path)` |
+| Knowledge | — (you choose) | `await KnowledgeBase.add_directory(path)` |
 
 ## Model and provider settings
 

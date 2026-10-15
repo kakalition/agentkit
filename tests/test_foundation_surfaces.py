@@ -25,10 +25,10 @@ def _app(runtime: Runtime) -> App:
 async def test_memory_facade_digest(runtime: Runtime):
     _app(runtime)
     await Memory.remember("The user keeps a cat named Mochi", kind="person")
-    digest = Memory.digest()
+    digest = await Memory.digest()
     assert digest is not None and "Mochi" in digest
-    assert Memory.all(limit=1)
-    assert Memory.search("Mochi")
+    assert await Memory.all(limit=1)
+    assert await Memory.search("Mochi")
 
 
 async def test_events_facade_async_dispatch(runtime: Runtime):
@@ -51,7 +51,7 @@ def test_log_facade_methods(runtime: Runtime):
     Log.debug("trace")
 
 
-def test_schedule_facade_crud(runtime: Runtime):
+async def test_schedule_facade_crud(runtime: Runtime):
     _app(runtime)
     ran: list[str] = []
 
@@ -61,21 +61,21 @@ def test_schedule_facade_crud(runtime: Runtime):
 
     scheduler_mod._runtime = None
     try:
-        Schedule.cron("weekly", "0 8 * * 1", "digest", args={"period": "week"})
-        Schedule.once("once", "2030-01-01T00:00", "digest")
-        jobs = {job["name"]: job for job in Schedule.list()}
+        await Schedule.cron("weekly", "0 8 * * 1", "digest", args={"period": "week"})
+        await Schedule.once("once", "2030-01-01T00:00", "digest")
+        jobs = {job["name"]: job for job in await Schedule.list()}
         assert jobs["weekly"]["kind"] == "cron"
         assert jobs["once"]["kind"] == "once"
 
-        assert Schedule.disable("weekly") is True
-        assert Schedule.enable("weekly") is True
-        assert Schedule.remove("once") is True
-        assert Schedule.remove("once") is False
+        assert await Schedule.disable("weekly") is True
+        assert await Schedule.enable("weekly") is True
+        assert await Schedule.remove("once") is True
+        assert await Schedule.remove("once") is False
     finally:
         scheduler_mod._runtime = None
 
 
-def test_schedule_facade_run_due(monkeypatch, runtime: Runtime):
+async def test_schedule_facade_run_due(monkeypatch, runtime: Runtime):
     _app(runtime)
     ran: list[str] = []
 
@@ -84,22 +84,22 @@ def test_schedule_facade_run_due(monkeypatch, runtime: Runtime):
         ran.append("ping")
 
     class FakeScheduler:
-        def run_due_now(self, now=None):  # noqa: ANN001
+        async def run_due_now(self, now=None):  # noqa: ANN001
             ran.append("due")
             return ["ping"]
 
     monkeypatch.setattr(
         "agentkit.foundation.facades.ScheduleService._scheduler", lambda self: FakeScheduler()
     )
-    assert Schedule.run_due() == ["ping"]
+    assert await Schedule.run_due() == ["ping"]
     assert ran == ["due"]
 
 
-def test_db_ambient_repos_reuse(runtime: Runtime):
+async def test_db_ambient_repos_reuse(runtime: Runtime):
     app = _app(runtime)
-    with app.repositories() as repos, using_repos(repos):
+    async with app.repositories() as repos, using_repos(repos):
         assert active_repos() is repos
-        with session_scope(app) as inner:
+        async with session_scope(app) as inner:
             assert inner is repos
     assert active_repos() is None
 
@@ -172,11 +172,11 @@ def test_app_pending_tool_before_agent(runtime: Runtime):
     assert "late" in app.agent()._function_toolset.tools
 
 
-def test_app_deps_uses_model_override(runtime: Runtime):
+async def test_app_deps_uses_model_override(runtime: Runtime):
     marker = object()
     app = App(name="deps", settings=runtime.settings, discover=False, model=marker)
     app._runtime = runtime
-    with app.repositories() as repos:
+    async with app.repositories() as repos:
         deps = app.deps(repos)
     assert deps.model is marker
 

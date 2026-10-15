@@ -1,5 +1,7 @@
 # Middleware
 
+## Introduction
+
 Middleware wraps a turn. Register it with `app.middleware(...)` and it runs once
 around every `app.run` / `app.stream`, in the order you add it.
 

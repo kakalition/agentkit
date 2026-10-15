@@ -23,6 +23,7 @@ from telegramify_markdown import Text as TGText
 from telegramify_markdown import telegramify
 
 from agentkit.deps import ApprovalRequest
+from agentkit.gateways.base import Gateway, GatewayError
 from agentkit.gateways.live_status import (
     DEFAULT_STATUS_INTERVAL_S,
     DEFAULT_TYPING_INTERVAL_S,
@@ -233,3 +234,129 @@ class ApprovalBroker:
             future.set_result(value)
             return True
         return False
+
+
+class TelegramGateway(Gateway):
+    """A gateway that serves Telegram over aiogram long-polling.
+
+    Thin transport over :class:`~agentkit.gateways.base.Gateway`: it maps a chat
+    to a conversation, runs turns with the rotating status bubble, and resolves
+    approvals from inline-button callbacks. Pass ``bot``/``dispatcher`` to inject
+    fakes in tests.
+    """
+
+    name = "telegram"
+
+    def __init__(
+        self,
+        app: Any = None,
+        *,
+        settings: Any = None,
+        bot: Any = None,
+        dispatcher: Any = None,
+        allowed_channel_ids: Sequence[int] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        settings = settings if settings is not None else getattr(app, "settings", None)
+        if allowed_channel_ids is None:
+            allowed_channel_ids = getattr(settings, "telegram_allowed_chat_ids", []) or []
+        super().__init__(
+            app, settings=settings, allowed_channel_ids=allowed_channel_ids, **kwargs
+        )
+        self._bot = bot
+        self._dispatcher = dispatcher
+
+    def bot(self) -> Bot:
+        if self._bot is None:
+            token = getattr(self.settings, "telegram_bot_token", None)
+            if not token:
+                raise GatewayError("TELEGRAM_BOT_TOKEN is not set")
+            self._bot = Bot(token)
+        return self._bot
+
+    async def start(self) -> None:
+        from aiogram import Dispatcher
+
+        bot = self.bot()
+        dispatcher = self._dispatcher or Dispatcher()
+        self._register(dispatcher)
+        await dispatcher.start_polling(bot)
+
+    def _register(self, dispatcher: Any) -> None:
+        settings = self.settings
+        gateway = self
+
+        @dispatcher.message()
+        async def _on_message(message: Message) -> None:
+            chat_id = message.chat.id
+            if not gateway.is_allowed(chat_id):
+                return
+            await react_seen(
+                message, enabled=bool(getattr(settings, "telegram_seen_reaction", True))
+            )
+            text = message.text or message.caption or ""
+            bot = gateway.bot()
+
+            async def factory() -> Any:
+                result = await gateway.run_turn(chat_id, text)
+                output = getattr(result, "output", None) or "(no reply)"
+                await send_markdown(bot, chat_id, output)
+                return result
+
+            await run_turn(
+                factory,
+                bot=bot,
+                chat_id=chat_id,
+                live_status=bool(getattr(settings, "telegram_live_status", True)),
+                typing=bool(getattr(settings, "telegram_typing_action", True)),
+                phrase_interval_s=float(
+                    getattr(settings, "telegram_status_interval_s", DEFAULT_STATUS_INTERVAL_S)
+                ),
+            )
+
+        @dispatcher.callback_query()
+        async def _on_callback(query: Any) -> None:
+            action, _, call_id = (query.data or "").partition(":")
+            if action in {"approve", "deny"}:
+                gateway.resolve_approval(call_id, action == "approve")
+            with contextlib.suppress(Exception):
+                await query.answer()
+
+    async def send(self, conversation_id: str, text: str) -> None:
+        chat_id = int(conversation_id.split(":", 1)[1])
+        await send_markdown(self.bot(), chat_id, text)
+
+    async def prompt_approval(self, external_id: Any, request: ApprovalRequest) -> None:
+        chat_id = int(str(external_id))
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✅ Approve", callback_data=f"approve:{request.tool_call_id}"
+                    ),
+                    InlineKeyboardButton(
+                        text="❌ Deny", callback_data=f"deny:{request.tool_call_id}"
+                    ),
+                ]
+            ]
+        )
+        await send_markdown(
+            self.bot(),
+            chat_id,
+            f"Approve **{request.tool_name}**?\n\n```json\n{request.args}\n```",
+            reply_markup=keyboard,
+        )
+
+
+__all__ = [
+    "APPROVAL_TIMEOUT",
+    "ApprovalBroker",
+    "MAX_MESSAGE_LEN",
+    "MIN_FILE_LINES",
+    "SEEN_REACTION",
+    "TelegramGateway",
+    "is_allowed",
+    "react_seen",
+    "run_turn",
+    "send_markdown",
+]

@@ -1,5 +1,7 @@
 # Skills
 
+## Introduction
+
 A **skill** is a folder of instructions the agent loads **on demand**. Inspired by
 progressive disclosure, the model first sees only a cheap *name + description*
 index, and pulls the full "how-to" only when a skill is relevant. This keeps the

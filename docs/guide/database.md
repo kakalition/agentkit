@@ -1,9 +1,15 @@
 # Models & Database
 
+## Introduction
+
 agentkit persists everything in a single local database (libSQL/SQLite) via
 [SQLModel](https://sqlmodel.tiangolo.com) and SQLAlchemy. You get a thin,
-expressive model layer for your own tables, alongside built-in repositories for
-conversations, memory, knowledge, usage, and more.
+expressive **async** model layer for your own tables, alongside built-in
+repositories for conversations, memory, knowledge, usage, and more.
+
+The data layer is async by default: the engine is `sqlite+aiosqlite`, every
+repository method is a coroutine, and the `Model`/`Repository` helpers are awaited.
+See [Async Data Layer](/guide/async) for the design and the synchronous seams.
 
 ## The runtime
 
@@ -13,8 +19,8 @@ A `Runtime` owns the engine, session factory, and the repository container:
 from agentkit import build_runtime, repositories
 
 runtime = build_runtime(settings)
-with repositories(runtime) as repos:
-    repos.conversations.get_or_create("cli:default")
+async with repositories(runtime) as repos:
+    await repos.conversations.get_or_create("cli:default")
 ```
 
 The `App` builds and caches a runtime for you (`app.runtime`), and
@@ -40,14 +46,14 @@ class Note(Model, table=True):
 ### Creating, reading, updating, deleting
 
 ```python
-note = Note.create(text="buy milk", pinned=True)
+note = await Note.create(text="buy milk", pinned=True)
 
-Note.where(pinned=True).all()
-Note.where(pinned=True).first()
-Note.get(note.id)
-Note.count()
-Note.update(note.id, text="buy oat milk")
-Note.delete(note.id)
+await Note.where(pinned=True).all()
+await Note.where(pinned=True).first()
+await Note.get(note.id)
+await Note.count()
+await Note.update(note.id, text="buy oat milk")
+await Note.delete(note.id)
 ```
 
 ### Querying
@@ -56,14 +62,14 @@ Note.delete(note.id)
 
 ```python
 (
-    Note.where(pinned=True)
+    await Note.where(pinned=True)
         .order_by("text")
         .limit(10)
         .all()
 )
 
-Note.where(pinned=True).count()
-Note.paginate(page=2, per_page=15, pinned=True)
+await Note.where(pinned=True).count()
+await Note.paginate(page=2, per_page=15, pinned=True)
 ```
 
 `paginate` returns a dict with `items`, `total`, `page`, `per_page`, and `pages`.
@@ -77,8 +83,8 @@ commit together:
 from agentkit import DB
 
 with DB.transaction():
-    Note.create(text="a")
-    Note.create(text="b")
+    await Note.create(text="a")
+    await Note.create(text="b")
 # both committed (or both rolled back on error)
 ```
 
@@ -86,7 +92,7 @@ Outside a transaction, each operation opens (and commits) its own short session.
 
 ## Built-in repositories
 
-`Repositories` exposes the framework's own stores, all owner-scoped:
+`Repositories` exposes the framework's own stores, all owner-scoped and async:
 
 | Repo | Access |
 | --- | --- |
@@ -130,8 +136,8 @@ existing databases, agentkit ships a lightweight drift repair:
 ```python
 from agentkit.db.migrations import init_db, sync_missing_columns
 
-init_db(engine)                 # create any missing tables
-added = sync_missing_columns(engine)   # add drifted columns
+await init_db(engine)                 # create any missing tables
+added = await sync_missing_columns(engine)   # add drifted columns
 ```
 
 For complex schema evolution, an Alembic helper is available; see

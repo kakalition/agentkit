@@ -82,6 +82,17 @@ class Agent:
         self._knowledge_path: Any = None
         self._knowledge_index = True
         self._knowledge_limit = 5
+        self._handles: list[Any] = []
+        self._registry: Any = None
+        self._mailbox: Any = None
+        self._handoff_requested = False
+        self._full_layers: set[str] = set()
+        self._native_requested: set[str] = set()
+        self._native_all = False
+        self._agent_models: dict[str, Any] = {}
+        self._agent_tasks: list[str] | None = None
+        self._agent_jobs: dict[str, Any] = {}
+        self._learning_requested = False
 
     # -- construction ---------------------------------------------------
     @classmethod
@@ -268,6 +279,192 @@ class Agent:
         self._policies.append(policy)
         return self
 
+    def subagent(
+        self,
+        agent: Any,
+        *,
+        name: str | None = None,
+        description: str = "",
+        capabilities: tuple[str, ...] | list[str] = (),
+    ) -> Agent:
+        """Register ``agent`` as a peer (reachable via the mailbox/handoff tools)."""
+        from agentkit.agents.handle import AgentHandle
+
+        self._handles.append(
+            AgentHandle.local(
+                agent, name=name, description=description, capabilities=capabilities
+            )
+        )
+        return self
+
+    def agents(self, registry: Any) -> Agent:
+        """Attach a shared :class:`~agentkit.agents.registry.AgentRegistry`."""
+        self._registry = registry
+        return self
+
+    def mailbox(self, mailbox: Any) -> Agent:
+        """Attach a :class:`~agentkit.agents.mailbox.Mailbox` message bus."""
+        self._mailbox = mailbox
+        return self
+
+    def handoff_to(self, agents: Any = None) -> Agent:
+        """Enable the ``handoff_to`` tool (optionally over a registry or mapping)."""
+        if agents is not None:
+            if hasattr(agents, "resolve"):
+                self._registry = agents
+            else:
+                from agentkit.agents.registry import AgentRegistry
+
+                registry = self._registry or AgentRegistry()
+                for key, agent in agents.items():
+                    registry.register_local(agent, name=key)
+                self._registry = registry
+        self._handoff_requested = True
+        return self
+
+    # -- native toolkits + self-learning ---------------------------------
+    def database(self, models: Mapping[str, Any] | None = None) -> Agent:
+        """Expose allow-listed models as CRUD tools (read + approval-gated write).
+
+        ``models`` maps a name to a :class:`~agentkit.foundation.Model` or
+        :class:`~agentkit.foundation.Repository` subclass. Nothing is reachable
+        unless named here (or on the app via ``App.models``).
+        """
+        self._native_requested.add("database")
+        if models:
+            self._agent_models.update(models)
+        return self
+
+    def scheduler(self, tasks: Iterable[str] | None = None) -> Agent:
+        """Expose schedule/list/cancel/run tools over an allow-list of tasks."""
+        self._native_requested.add("scheduler")
+        if tasks is not None:
+            self._agent_tasks = list(tasks)
+        return self
+
+    def queue(self, jobs: Mapping[str, Any] | None = None) -> Agent:
+        """Expose enqueue/queue-status/retry tools over an allow-list of jobs."""
+        self._native_requested.add("queue")
+        if jobs:
+            self._agent_jobs.update(jobs)
+        return self
+
+    def notifications(self) -> Agent:
+        """Expose the ``notify``/``notify_me`` tools."""
+        self._native_requested.add("notifications")
+        return self
+
+    def history(self) -> Agent:
+        """Expose tools to list/search/read past conversations."""
+        self._native_requested.add("history")
+        return self
+
+    def usage(self) -> Agent:
+        """Expose read-only usage and audit-trail tools."""
+        self._native_requested.add("usage")
+        return self
+
+    def knowledge_admin(self) -> Agent:
+        """Expose knowledge-write tools (index/replace/forget documents)."""
+        self._native_requested.add("knowledge_admin")
+        return self
+
+    def skill_authoring(self) -> Agent:
+        """Expose skill-authoring tools (approval-gated ``SKILL.md`` writes)."""
+        self._native_requested.add("skills_admin")
+        return self
+
+    def native(
+        self,
+        enabled: Iterable[str] | None = None,
+        *,
+        models: Mapping[str, Any] | None = None,
+        tasks: Iterable[str] | None = None,
+        jobs: Mapping[str, Any] | None = None,
+    ) -> Agent:
+        """Attach the native toolkits (all settings-enabled ones by default)."""
+        if enabled is None:
+            self._native_all = True
+        else:
+            self._native_requested.update(enabled)
+        if models:
+            self._agent_models.update(models)
+        if tasks is not None:
+            self._agent_tasks = list(tasks)
+        if jobs:
+            self._agent_jobs.update(jobs)
+        return self
+
+    def learning(self, enabled: bool = True) -> Agent:
+        """Attach the self-learning tools + lessons digest (see ``agentkit.learning``)."""
+        self._learning_requested = enabled
+        return self
+
+    def full(
+        self,
+        *,
+        persona: bool = True,
+        memory: bool = True,
+        skills: bool = True,
+        knowledge: Any = None,
+        hitl: bool = True,
+        safety: bool = True,
+        workspace: Any = None,
+        subagents: Any = None,
+        native: bool = True,
+        learning: bool = True,
+        models: Mapping[str, Any] | None = None,
+        tasks: Iterable[str] | None = None,
+        jobs: Mapping[str, Any] | None = None,
+        settings: Any = None,
+    ) -> Agent:
+        """Expand to the full agent capability stack (each layer toggleable, idempotent).
+
+        Respects settings flags (``memory_enabled``, ``skills_enabled``,
+        ``approvals_enabled``) so a disabled layer is silently skipped, and never
+        double-registers a layer when called more than once.
+        """
+        resolved = settings or self._settings
+
+        def enabled(flag: str, default: bool = True) -> bool:
+            return bool(getattr(resolved, flag, default)) if resolved is not None else default
+
+        if persona and "persona" not in self._full_layers:
+            self.persona()
+            self._full_layers.add("persona")
+        if memory and enabled("memory_enabled") and "memory" not in self._full_layers:
+            self.memory()
+            self._full_layers.add("memory")
+        if skills and enabled("skills_enabled") and "skills" not in self._full_layers:
+            self.skills()
+            self._full_layers.add("skills")
+        if knowledge is not None and "knowledge" not in self._full_layers:
+            self.knowledge(knowledge)
+            self._full_layers.add("knowledge")
+        if hitl and enabled("approvals_enabled") and "hitl" not in self._full_layers:
+            self.approvals()
+            self.clarify()
+            self._full_layers.add("hitl")
+        if safety and "safety" not in self._full_layers:
+            from agentkit.policy import default_policy
+
+            self.policy(default_policy())
+            self._full_layers.add("safety")
+        if workspace is not None and "workspace" not in self._full_layers:
+            self.workspace(workspace)
+            self._full_layers.add("workspace")
+        if subagents is not None:
+            self.handoff_to(subagents)
+        elif enabled("subagents_enabled", False):
+            self._handoff_requested = True
+        if native and "native" not in self._full_layers:
+            self.native(models=models, tasks=tasks, jobs=jobs)
+            self._full_layers.add("native")
+        if learning and enabled("learning_enabled") and "learning" not in self._full_layers:
+            self.learning()
+            self._full_layers.add("learning")
+        return self
+
     def capability(self, capability: Any) -> Agent:
         self._capabilities.append(capability)
         return self
@@ -397,11 +594,47 @@ class Agent:
             built.tool(make_delegate(specialist, tool_name=tool_name, description=description))
         if self._memory:
             attach_memory(built)
+        self._attach_agents(built, resolved_settings, events or self._events)
         self._attach_skills(built, resolved_settings)
         self._attach_knowledge(built, resolved_settings)
         self._attach_workspace(built)
+        self._attach_native(built, resolved_settings)
+        self._attach_learning(built, resolved_settings)
         self._built = built
         return built
+
+    def _attach_agents(
+        self, agent: PydanticAgent[Any, Any], settings: Any, events: Any
+    ) -> None:
+        if getattr(agent, "_agentkit_agents_attached", False):
+            return
+        if not (self._handles or self._registry is not None or self._mailbox is not None):
+            return
+        registry = self._registry
+        if registry is None:
+            from agentkit.agents.registry import AgentRegistry
+
+            registry = AgentRegistry()
+        for handle in self._handles:
+            registry.register(handle)
+        mailbox = self._mailbox
+        if mailbox is None:
+            from agentkit.agents.mailbox import Mailbox
+
+            durable = bool(getattr(settings, "mailbox_durable", False)) if settings else False
+            mailbox = Mailbox(registry, durable=durable, events=events)
+        from agentkit.agents.tools import attach_agents
+
+        max_handoffs = getattr(settings, "max_handoffs", None) if settings else None
+        attach_agents(
+            agent,
+            registry,
+            mailbox,
+            include_handoff=True,
+            max_handoffs=max_handoffs,
+        )
+        self._registry = registry
+        self._mailbox = mailbox
 
     def _resolve_skills(self, settings: Any) -> Any:
         if settings is not None and getattr(settings, "skills_enabled", True) is False:
@@ -460,20 +693,22 @@ class Agent:
 
         kb = self._knowledge_kb
         if kb is None:
+            from agentkit._sync import run_sync
+
             kb = KnowledgeBase(settings=settings)
             if self._knowledge_path is not None:
                 target = Path(self._knowledge_path).expanduser()
                 if target.is_dir():
-                    kb.add_directory(target)
+                    run_sync(kb.add_directory(target))
                 elif target.is_file():
-                    kb.add_file(target)
+                    run_sync(kb.add_file(target))
         default_limit = self._knowledge_limit
 
         if self._knowledge_index:
 
             @agent.instructions
-            def _knowledge_instructions(ctx: RunContext[Any]) -> str | None:
-                return kb.index() or None
+            async def _knowledge_instructions(ctx: RunContext[Any]) -> str | None:
+                return await kb.index() or None
 
         @agent.tool
         async def search_knowledge(ctx: RunContext[Any], query: str, limit: int | None = None) -> str:
@@ -483,7 +718,33 @@ class Agent:
                 query: What to look for.
                 limit: Maximum passages to return (default 5).
             """
-            return kb.format_hits(kb.search(query, limit=limit or default_limit))
+            return kb.format_hits(await kb.search(query, limit=limit or default_limit))
+
+    def _attach_native(self, agent: PydanticAgent[Any, Any], settings: Any) -> None:
+        enabled = set(self._native_requested)
+        if self._native_all:
+            from agentkit.toolkits import enabled_toolkits
+
+            enabled |= enabled_toolkits(settings)
+        if not enabled:
+            return
+        from agentkit.toolkits import attach_toolkits
+
+        attach_toolkits(
+            agent,
+            enabled=enabled,
+            settings=settings,
+            models=self._agent_models,
+            tasks=self._agent_tasks,
+            jobs=self._agent_jobs,
+        )
+
+    def _attach_learning(self, agent: PydanticAgent[Any, Any], settings: Any) -> None:
+        if not self._learning_requested:
+            return
+        from agentkit.learning import attach_learning
+
+        attach_learning(agent, settings=settings)
 
     def _attach_workspace(self, agent: PydanticAgent[Any, Any]) -> None:
         if not self._workspace_requested:

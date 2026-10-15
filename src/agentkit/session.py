@@ -49,22 +49,22 @@ def deserialize_messages(payloads: list[str]) -> list[ModelMessage]:
     return messages
 
 
-def load_history(
+async def load_history(
     repos: Any, conversation_id: str, *, max_messages: int = DEFAULT_MAX_HISTORY
 ) -> list[ModelMessage]:
-    payloads = [m.payload for m in repos.messages.list(conversation_id)]
+    payloads = [m.payload for m in await repos.messages.list(conversation_id)]
     if max_messages and len(payloads) > max_messages:
         payloads = payloads[-max_messages:]
     return deserialize_messages(payloads)
 
 
-def save_new_messages(
+async def save_new_messages(
     repos: Any, conversation_id: str, messages: list[ModelMessage], start_index: int
 ) -> int:
     new_messages = messages[start_index:]
     if not new_messages:
         return 0
-    return repos.messages.append(conversation_id, [serialize_message(m) for m in new_messages])
+    return await repos.messages.append(conversation_id, [serialize_message(m) for m in new_messages])
 
 
 def _tool_calls(messages: list[ModelMessage]) -> list[str]:
@@ -100,6 +100,15 @@ def last_user_prompt(messages: list[ModelMessage]) -> tuple[str, int] | None:
             if isinstance(part, UserPromptPart) and isinstance(part.content, str):
                 return part.content, index
     return None
+
+
+def _accepts_conversation(processor: Any) -> bool:
+    """Whether a history processor accepts a ``conversation_id`` keyword."""
+    try:
+        parameters = inspect.signature(processor).parameters
+    except (TypeError, ValueError):  # pragma: no cover - builtins etc.
+        return False
+    return "conversation_id" in parameters
 
 
 @dataclass
@@ -200,10 +209,13 @@ class ChatRunner:
     async def _begin(self, text: Any) -> tuple[Any, str, list[ModelMessage]]:
         repos = self.deps.repos
         channel = self.conversation_id.split(":", 1)[0]
-        repos.conversations.get_or_create(self.conversation_id, channel=channel)
-        history = load_history(repos, self.conversation_id, max_messages=self.max_history)
+        await repos.conversations.get_or_create(self.conversation_id, channel=channel)
+        history = await load_history(repos, self.conversation_id, max_messages=self.max_history)
         if self.history_processor is not None:
-            processed = self.history_processor(history)
+            if _accepts_conversation(self.history_processor):
+                processed = self.history_processor(history, conversation_id=self.conversation_id)
+            else:
+                processed = self.history_processor(history)
             if inspect.isawaitable(processed):
                 processed = await processed
             history = list(processed)
@@ -226,9 +238,9 @@ class ChatRunner:
         output: Any,
         run_usage: Any,
     ) -> ChatResult:
-        save_new_messages(repos, self.conversation_id, all_messages, start_index=len(history))
-        repos.conversations.touch(self.conversation_id)
-        usage = self._record_usage(repos, run_usage)
+        await save_new_messages(repos, self.conversation_id, all_messages, start_index=len(history))
+        await repos.conversations.touch(self.conversation_id)
+        usage = await self._record_usage(repos, run_usage)
         artifacts = list(self.deps.artifacts)
         try:
             from agentkit.multimodal import collect_artifacts
@@ -264,7 +276,7 @@ class ChatRunner:
         except Exception:  # pragma: no cover - defensive
             return None
 
-    def _record_usage(self, repos: Any, run_usage: Any) -> dict[str, Any] | None:
+    async def _record_usage(self, repos: Any, run_usage: Any) -> dict[str, Any] | None:
         """Record token usage + estimated cost if the repos expose a usage store."""
         store = getattr(repos, "usage", None)
         if store is None or run_usage is None:
@@ -280,7 +292,7 @@ class ChatRunner:
         }
         cost = usage_cost(run_usage, model_name)
         totals["cost_usd"] = cost
-        store.add(
+        await store.add(
             conversation_id=self.conversation_id,
             kind="turn",
             model=model_name,
@@ -289,5 +301,5 @@ class ChatRunner:
         )
         return totals
 
-    def reset(self) -> None:
-        self.deps.repos.messages.clear(self.conversation_id)
+    async def reset(self) -> None:
+        await self.deps.repos.messages.clear(self.conversation_id)

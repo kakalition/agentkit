@@ -65,6 +65,7 @@ export default defineConfig({
           items: [
             { text: "The Application", link: "/guide/application" },
             { text: "Service Providers", link: "/guide/providers" },
+            { text: "The Full Stack", link: "/guide/fullstack" },
             { text: "The Agent Builder", link: "/guide/agents" },
             { text: "Tools", link: "/guide/tools" },
             { text: "Configuration", link: "/guide/configuration" },
@@ -92,9 +93,11 @@ export default defineConfig({
             { text: "Streaming", link: "/guide/streaming" },
             { text: "Human-in-the-Loop", link: "/guide/hitl" },
             { text: "Orchestrator & Sub-Agents", link: "/guide/orchestrator" },
+            { text: "Agent Communication", link: "/guide/agent-communication" },
             { text: "Planning & Graphs", link: "/guide/planning" },
             { text: "Multi-Agent Teams", link: "/guide/teams" },
             { text: "Model Routing & Cost", link: "/guide/routing" },
+            { text: "Multiple Model Providers", link: "/guide/multi-provider" },
             { text: "Multimodal & Voice", link: "/guide/multimodal" },
           ],
         },
@@ -110,6 +113,7 @@ export default defineConfig({
             { text: "Prompt Registry", link: "/guide/prompts" },
             { text: "MCP & A2A", link: "/guide/protocols" },
             { text: "Deployment", link: "/guide/deployment" },
+            { text: "Async Data Layer", link: "/guide/async" },
           ],
         },
         {

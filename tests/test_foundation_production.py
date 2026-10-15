@@ -22,7 +22,7 @@ def _app(runtime: Runtime, **kwargs) -> App:
     return app
 
 
-def test_applies_dict_schedules_to_db(runtime: Runtime):
+async def test_applies_dict_schedules_to_db(runtime: Runtime):
     app = _app(runtime)
     app.schedules(
         [
@@ -31,8 +31,8 @@ def test_applies_dict_schedules_to_db(runtime: Runtime):
         ]
     )
     app.boot()
-    with app.repositories() as repos:
-        jobs = {job.name: job for job in repos.schedules.list()}
+    async with app.repositories() as repos:
+        jobs = {job.name: job for job in await repos.schedules.list()}
     assert jobs["digest"].kind == "cron"
     assert jobs["digest"].task == "digest"
     assert jobs["once"].kind == "once"
@@ -45,21 +45,21 @@ class _Spec:
     cron: str
 
 
-def test_applies_object_schedules_to_db(runtime: Runtime):
+async def test_applies_object_schedules_to_db(runtime: Runtime):
     app = _app(runtime)
     app.schedules([_Spec(name="weekly", task="weekly", cron="0 9 * * 1")])
     app.boot()
-    with app.repositories() as repos:
-        rows = repos.schedules.list()
+    async with app.repositories() as repos:
+        rows = await repos.schedules.list()
     assert [row.name for row in rows] == ["weekly"]
 
 
-def test_schedule_spec_without_cron_or_when_is_skipped(runtime: Runtime):
+async def test_schedule_spec_without_cron_or_when_is_skipped(runtime: Runtime):
     app = _app(runtime)
     app.schedules([{"name": "bad", "task": "t"}])
     app.boot()  # logs and continues rather than raising
-    with app.repositories() as repos:
-        assert repos.schedules.list() == []
+    async with app.repositories() as repos:
+        assert await repos.schedules.list() == []
 
 
 def test_schedule_spec_without_name_raises(runtime: Runtime):
@@ -145,11 +145,11 @@ def test_serve_defaults_webui_to_settings(runtime: Runtime, monkeypatch):
     assert captured["webui"] is False
 
 
-def test_applies_nothing_when_no_schedules(runtime: Runtime):
+async def test_applies_nothing_when_no_schedules(runtime: Runtime):
     app = _app(runtime)
     app.boot()
-    with app.repositories() as repos:
-        assert repos.schedules.list() == []
+    async with app.repositories() as repos:
+        assert await repos.schedules.list() == []
 
 
 def test_config_section_cached_on_app(runtime: Runtime, monkeypatch):

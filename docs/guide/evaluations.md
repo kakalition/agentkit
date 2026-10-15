@@ -1,5 +1,7 @@
 # Evaluations
 
+## Introduction
+
 You would not ship a web app without tests. Agents deserve the same: suites of
 inputs with expected outcomes, run in CI. agentkit's evaluations are executed by
 [`pydantic_evals`](https://ai.pydantic.dev/evals/), Pydantic's evaluation framework.

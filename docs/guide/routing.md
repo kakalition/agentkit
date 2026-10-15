@@ -1,5 +1,7 @@
 # Model Routing & Cost
 
+## Introduction
+
 Different turns deserve different models: a cheap model for a quick answer, a
 capable one for hard reasoning, with a fallback if the first fails. agentkit routes
 per turn and records the cost of every call.
@@ -64,13 +66,13 @@ default_pricing().set("openai:gpt-5-mini", input=0.00025, output=0.002)
 ### Reading usage
 
 ```python
-with app.repositories() as repos:
-    totals = repos.usage.totals()
+async with app.repositories() as repos:
+    totals = await repos.usage.totals()
     # {"requests": …, "input_tokens": …, "output_tokens": …,
     #  "total_tokens": …, "cost_usd": …}
 
-    repos.usage.list(limit=50)                       # per-turn rows
-    repos.usage.totals(since=yesterday)              # a window
+    await repos.usage.list(limit=50)                 # per-turn rows
+    await repos.usage.totals(since=yesterday)        # a window
 ```
 
 Each `ChatResult.usage` also carries the per-turn totals.

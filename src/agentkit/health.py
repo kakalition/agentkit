@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import inspect
 import signal
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,14 +17,17 @@ from starlette.routing import Route
 @dataclass
 class Check:
     name: str
-    fn: Callable[[], bool]
+    fn: Callable[[], Any]
 
 
-def run_checks(checks: list[Check]) -> tuple[bool, dict[str, bool]]:
+async def run_checks(checks: list[Check]) -> tuple[bool, dict[str, bool]]:
     results: dict[str, bool] = {}
     for check in checks:
         try:
-            results[check.name] = bool(check.fn())
+            outcome = check.fn()
+            if inspect.isawaitable(outcome):
+                outcome = await outcome
+            results[check.name] = bool(outcome)
         except Exception:  # pragma: no cover - defensive
             results[check.name] = False
     return all(results.values()), results
@@ -32,9 +36,11 @@ def run_checks(checks: list[Check]) -> tuple[bool, dict[str, bool]]:
 def db_check(runtime: Any, *, name: str = "db") -> Check:
     """Readiness check that the database is reachable."""
 
-    def _check() -> bool:
-        with runtime.session_factory() as session:  # type: ignore[attr-defined]
-            session.execute(__import__("sqlalchemy").text("SELECT 1"))
+    async def _check() -> bool:
+        from sqlmodel import select
+
+        async with runtime.session_factory() as session:  # type: ignore[attr-defined]
+            await session.exec(select(1))
         return True
 
     return Check(name, _check)
@@ -48,7 +54,7 @@ def health_routes(checks: list[Check] | None = None) -> list[Route]:
         return JSONResponse({"status": "ok"})
 
     async def readyz(request: Any) -> JSONResponse:
-        ok, results = run_checks(checks)
+        ok, results = await run_checks(checks)
         return JSONResponse(
             {"status": "ok" if ok else "error", "checks": results},
             status_code=200 if ok else 503,

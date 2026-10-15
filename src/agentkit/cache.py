@@ -8,20 +8,24 @@ calls with the same arguments do not re-run the side effect::
 
     agent.tool(cached_tool(lookup, ttl=60))
 
-The wrapper preserves the original signature (via ``functools.wraps``) so
-PydanticAI still derives the correct JSON schema.
+The cache is a ``cachetools.TTLCache`` mutated under an :class:`asyncio.Lock` so
+concurrent tasks cannot corrupt it. The wrapper preserves the original signature
+(via ``functools.wraps``) so PydanticAI still derives the correct JSON schema.
 """
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import inspect
-import time
-from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
+from cachetools import TTLCache
+
 __all__ = ["cached_tool"]
+
+_MISSING = object()
 
 
 def _is_context(value: Any) -> bool:
@@ -36,7 +40,8 @@ def cached_tool(
     key: Callable[..., Any] | None = None,
 ) -> Callable[..., Any]:
     """Wrap ``function`` with a TTL cache over its (non-context) arguments."""
-    store: OrderedDict[Any, tuple[float, Any]] = OrderedDict()
+    store: TTLCache[Any, Any] = TTLCache(maxsize=maxsize, ttl=ttl)
+    lock = asyncio.Lock()
 
     def _key(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         if key is not None:
@@ -48,18 +53,15 @@ def cached_tool(
     @functools.wraps(function)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         cache_key = _key(args, kwargs)
-        now = time.monotonic()
-        hit = store.get(cache_key)
-        if hit is not None and hit[0] > now:
-            store.move_to_end(cache_key)
-            return hit[1]
+        async with lock:
+            hit = store.get(cache_key, _MISSING)
+        if hit is not _MISSING:
+            return hit
         result = function(*args, **kwargs)
         if inspect.isawaitable(result):
             result = await result
-        store[cache_key] = (now + ttl, result)
-        store.move_to_end(cache_key)
-        while len(store) > maxsize:
-            store.popitem(last=False)
+        async with lock:
+            store[cache_key] = result
         return result
 
     wrapper.cache_clear = store.clear  # type: ignore[attr-defined]

@@ -1,5 +1,7 @@
 # Events & Lifecycle
 
+## Introduction
+
 agentkit fires lifecycle events at the real seams of a turn, so you can observe and
 react without patching internals. Wire listeners with `app.on(...)`.
 
@@ -51,8 +53,8 @@ Listeners are usually registered during `boot()`:
 class AuditProvider(Provider):
     def boot(self, app):
         def audit(event):
-            with app.repositories() as repos:
-                repos.audit.append("turn.end", target=event.conversation_id)
+            async async with app.repositories() as repos:
+                await repos.audit.append("turn.end", target=event.conversation_id)
         app.on("turn.end", audit)
 ```
 

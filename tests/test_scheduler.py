@@ -37,40 +37,40 @@ def test_disabled_job_not_due():
     assert scheduler.due_jobs([job], datetime(2026, 1, 1, 0, 0, tzinfo=UTC)) == []
 
 
-def test_schedule_cron_and_run(sched):
+async def test_schedule_cron_and_run(sched):
     calls: list[dict] = []
 
     @sched.task("noop")
     def noop(**kwargs):
         calls.append(kwargs)
 
-    sched.schedule_cron("c", "* * * * *", "noop", args={"x": 1})
-    fired = sched.run_due_now(datetime(2026, 1, 1, 0, 0, tzinfo=UTC))
+    await sched.schedule_cron("c", "* * * * *", "noop", args={"x": 1})
+    fired = await sched.run_due_now(datetime(2026, 1, 1, 0, 0, tzinfo=UTC))
     assert fired == ["c"]
     assert calls == [{"x": 1}]
 
-    jobs = {job["name"]: job for job in sched.list_jobs()}
+    jobs = {job["name"]: job for job in await sched.list_jobs()}
     assert jobs["c"]["run_count"] == 1
     assert jobs["c"]["kind"] == "cron"
 
 
-def test_schedule_once_disables_after_run(sched):
+async def test_schedule_once_disables_after_run(sched):
     sched.task("noop2")(lambda **kwargs: None)
-    sched.schedule_once("o", datetime(2026, 1, 1, 0, 0, tzinfo=UTC), "noop2")
-    sched.run_due_now(datetime(2026, 1, 1, 0, 5, tzinfo=UTC))
-    assert sched.list_jobs()[0]["enabled"] is False
+    await sched.schedule_once("o", datetime(2026, 1, 1, 0, 0, tzinfo=UTC), "noop2")
+    await sched.run_due_now(datetime(2026, 1, 1, 0, 5, tzinfo=UTC))
+    assert (await sched.list_jobs())[0]["enabled"] is False
 
 
-def test_remove_job(sched):
+async def test_remove_job(sched):
     sched.task("noop3")(lambda **kwargs: None)
-    sched.schedule_cron("temp", "0 0 * * *", "noop3")
-    assert sched.remove_job("temp") is True
-    assert sched.list_jobs() == []
+    await sched.schedule_cron("temp", "0 0 * * *", "noop3")
+    assert await sched.remove_job("temp") is True
+    assert await sched.list_jobs() == []
 
 
-def test_invalid_cron_rejected(sched):
+async def test_invalid_cron_rejected(sched):
     with pytest.raises(ValueError):
-        sched.schedule_cron("bad", "not a cron", "t")
+        await sched.schedule_cron("bad", "not a cron", "t")
 
 
 def test_tick_accepts_dbos_scheduled_signature():

@@ -1,8 +1,14 @@
 # Models & Repositories
 
+## Introduction
+
 Persist your data with a `Model` (the table) and a `Repository` (the data-access
 layer). Declare the model and you inherit the whole CRUD surface — you only write
 the queries that are special.
+
+Both layers are **async**: repository methods and `Model`/`RepositoryQuery`
+terminals are coroutines, so use `await` (and `async def` for your own methods).
+See [Async Data Layer](/guide/async).
 
 ## A model
 
@@ -30,20 +36,20 @@ from agentkit import Repository
 class ReminderRepo(Repository[Reminder]):
     model = Reminder                       # that's it — CRUD is inherited
 
-    def due(self, when: datetime) -> list[Reminder]:   # add only what's special
-        return self.where(delivered=False).all()
+    async def due(self, when: datetime) -> list[Reminder]:   # add only what's special
+        return await self.where(delivered=False).all()
 ```
 
 You now have, for free:
 
 ```python
-repo.create(text="stretch", due_at=tomorrow)   # also repo.add(...)
-repo.get(id); repo.find(id)                    # find() raises NotFound
-repo.all(order_by="due_at"); repo.first(text="x")
-repo.where(pinned=True).order_by("id").limit(5).all()
-repo.update(id, text="new"); repo.delete(id)
-repo.update_or_create(defaults={...}, text="x")
-repo.count(); repo.paginate(page=2, per_page=15)
+await repo.create(text="stretch", due_at=tomorrow)   # also repo.add(...)
+await repo.get(id); await repo.find(id)              # find() raises NotFound
+await repo.all(order_by="due_at"); await repo.first(text="x")
+await repo.where(pinned=True).order_by("id").limit(5).all()
+await repo.update(id, text="new"); await repo.delete(id)
+await repo.update_or_create(defaults={...}, text="x")
+await repo.count(); await repo.paginate(page=2, per_page=15)
 ```
 
 `where(...)` returns a chainable `RepositoryQuery` with `where`, `order_by`,
@@ -68,7 +74,7 @@ Tools and services reach them through the session:
 
 ```python
 async def remind_me(ctx, text: str, when: str) -> str:
-    reminder = ctx.deps.repos.reminders.create(text=text, due_at=parse_when(when))
+    reminder = await ctx.deps.repos.reminders.create(text=text, due_at=parse_when(when))
     return f"set #{reminder.id}"
 ```
 

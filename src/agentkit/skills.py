@@ -30,10 +30,13 @@ pulls the *how* only when a skill is relevant.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 log = logging.getLogger("agentkit.skills")
 
@@ -47,48 +50,12 @@ _FRONT_MATTER_FENCE = "---"
 # ---------------------------------------------------------------------------
 
 
-def _strip_quotes(value: str) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
-
-
-def _parse_scalar(value: str) -> Any:
-    value = _strip_quotes(value)
-    if value.startswith("[") and value.endswith("]"):
-        inner = value[1:-1].strip()
-        if not inner:
-            return []
-        return [_strip_quotes(part) for part in inner.split(",") if part.strip()]
-    return value
-
-
-def _parse_front_matter_minimal(text: str) -> dict[str, Any]:
-    """Parse the flat ``key: value`` / block-list subset skills actually use."""
-    data: dict[str, Any] = {}
-    current_list: str | None = None
-    for raw in text.splitlines():
-        if not raw.strip() or raw.lstrip().startswith("#"):
-            continue
-        if raw.lstrip().startswith("- ") and current_list:
-            data.setdefault(current_list, []).append(_strip_quotes(raw.lstrip()[2:]))
-            continue
-        if ":" in raw:
-            key, _, value = raw.partition(":")
-            key = key.strip()
-            value = value.strip()
-            current_list = None
-            if value:
-                data[key] = _parse_scalar(value)
-            else:
-                data[key] = []
-                current_list = key
-    return data
-
-
 def parse_front_matter(text: str) -> tuple[dict[str, Any], str]:
-    """Split a ``SKILL.md`` into (front matter, body)."""
+    """Split a ``SKILL.md`` into (front matter, body).
+
+    Front matter is parsed with ``yaml.safe_load``. Malformed YAML raises a
+    :class:`ValueError` naming the problem (discovery skips such skills).
+    """
     stripped = text.lstrip("\ufeff")
     lines = stripped.splitlines()
     if not lines or lines[0].strip() != _FRONT_MATTER_FENCE:
@@ -102,14 +69,59 @@ def parse_front_matter(text: str) -> tuple[dict[str, Any], str]:
         return {}, stripped.strip()
     raw_meta = "\n".join(lines[1:end])
     body = "\n".join(lines[end + 1 :]).strip()
-    try:  # use PyYAML when present for full YAML; fall back to the subset parser
-        import yaml
-
+    try:
         parsed = yaml.safe_load(raw_meta)
-        meta = parsed if isinstance(parsed, dict) else {}
-    except Exception:
-        meta = _parse_front_matter_minimal(raw_meta)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"invalid YAML front matter: {exc}") from exc
+    if parsed is None:
+        meta: dict[str, Any] = {}
+    elif isinstance(parsed, dict):
+        meta = parsed
+    else:
+        raise ValueError("front matter must be a YAML mapping")
     return meta, body
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
+
+
+def slugify_skill(name: str) -> str:
+    """A safe directory slug for a skill name."""
+    slug = _SLUG_RE.sub("-", (name or "").strip().lower()).strip("-")
+    return slug or "skill"
+
+
+def render_skill_file(
+    name: str, *, description: str = "", body: str = "", allowed_tools: Sequence[str] = ()
+) -> str:
+    """Render a valid ``SKILL.md`` (front matter + body) for ``name``."""
+    meta: dict[str, Any] = {"name": name}
+    if description:
+        meta["description"] = description
+    if allowed_tools:
+        meta["allowed-tools"] = list(allowed_tools)
+    front = yaml.safe_dump(meta, sort_keys=False, default_flow_style=False).strip()
+    return f"---\n{front}\n---\n\n{body.strip()}\n"
+
+
+def write_skill_file(
+    root: str | Path,
+    name: str,
+    *,
+    description: str = "",
+    body: str = "",
+    allowed_tools: Sequence[str] = (),
+) -> Path:
+    """Write a ``SKILL.md`` under ``root/<slug>`` and return its path."""
+    slug = slugify_skill(name)
+    directory = Path(root).expanduser() / slug
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / SKILL_FILENAME
+    target.write_text(
+        render_skill_file(slug, description=description, body=body, allowed_tools=allowed_tools),
+        encoding="utf-8",
+    )
+    return target
 
 
 # ---------------------------------------------------------------------------
@@ -306,4 +318,7 @@ __all__ = [
     "SkillRegistry",
     "load_skill_file",
     "parse_front_matter",
+    "render_skill_file",
+    "slugify_skill",
+    "write_skill_file",
 ]

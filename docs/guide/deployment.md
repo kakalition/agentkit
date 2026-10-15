@@ -1,5 +1,7 @@
 # Deployment
 
+## Introduction
+
 An agentkit service is one process by default. This page covers running it in
 production: serving channels, containers, and hardening.
 

@@ -6,9 +6,9 @@ the settings, repositories, container, and notifications for free::
     from agentkit.foundation.service import Service
 
     class ReminderService(Service):
-        def upcoming(self, conversation_id: str) -> list:
-            with self.repositories() as repos:
-                return repos.reminders.list()
+        async def upcoming(self, conversation_id: str) -> list:
+            async with self.repositories as repos:
+                return await repos.reminders.list()
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ class Service:
 
     @property
     def repositories(self) -> Any:
+        """The app's async repository scope (``async with self.repositories as repos:``)."""
         return self.app.repositories()
 
     def resolve(self, name: str) -> Any:

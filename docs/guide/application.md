@@ -1,5 +1,7 @@
 # The Application
 
+## Introduction
+
 At the heart of every agentkit service is the **`App`** — a small, explicit
 container that owns your settings, a service container, the lifecycle event bus, a
 middleware pipeline, and the registries that providers contribute to.

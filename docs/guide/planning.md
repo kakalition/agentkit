@@ -1,5 +1,7 @@
 # Planning & Graphs
 
+## Introduction
+
 Two tools for multi-step work: a **Planner** that decomposes a goal and executes
 the steps, and a **StateGraph** for deterministic, branching pipelines.
 

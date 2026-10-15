@@ -9,35 +9,35 @@ from agentkit.deps import Deps
 from agentkit.memory import attach_memory, memory_digest
 
 
-def test_memory_repo_crud(repos: Repositories):
-    first = repos.memories.add("My name is Ada", kind="person")
-    repos.memories.add("Prefers metric units", kind="preference")
+async def test_memory_repo_crud(repos: Repositories):
+    first = await repos.memories.add("My name is Ada", kind="person")
+    await repos.memories.add("Prefers metric units", kind="preference")
     assert isinstance(repos.memories, MemoryRepo)
 
-    assert len(repos.memories.list()) == 2
-    assert repos.memories.get(first.id) is not None
+    assert len(await repos.memories.list()) == 2
+    assert await repos.memories.get(first.id) is not None
     assert first.embedding is not None
     # Semantic ranking puts the lexically-closest memory first.
-    assert repos.memories.search("ada")[0].content == "My name is Ada"
+    assert (await repos.memories.search("ada"))[0].content == "My name is Ada"
 
-    assert repos.memories.update(first.id, "My name is Ada Lovelace") is True
-    assert repos.memories.search("lovelace")[0].content == "My name is Ada Lovelace"
+    assert await repos.memories.update(first.id, "My name is Ada Lovelace") is True
+    assert (await repos.memories.search("lovelace"))[0].content == "My name is Ada Lovelace"
 
-    assert repos.memories.forget(first.id) is True
-    assert repos.memories.forget(first.id) is False
-    assert repos.memories.clear() == 1
-    assert repos.memories.list() == []
+    assert await repos.memories.forget(first.id) is True
+    assert await repos.memories.forget(first.id) is False
+    assert await repos.memories.clear() == 1
+    assert await repos.memories.list() == []
 
 
-def test_memory_search_keyword_fallback(repos: Repositories):
+async def test_memory_search_keyword_fallback(repos: Repositories):
     repo = MemoryRepo(repos.session, "owner", embedder=None)
-    repo.add("My name is Ada")
-    repo.add("Prefers metric units")
-    assert repo.search("ada")[0].content == "My name is Ada"
-    assert repo.search("nomatch") == []
+    await repo.add("My name is Ada")
+    await repo.add("Prefers metric units")
+    assert (await repo.search("ada"))[0].content == "My name is Ada"
+    assert await repo.search("nomatch") == []
 
 
-def test_memory_search_uses_embeddings(repos: Repositories):
+async def test_memory_search_uses_embeddings(repos: Repositories):
     """A stub embedder proves ranking is by vector similarity, not keywords."""
 
     class StubEmbedder:
@@ -53,17 +53,17 @@ def test_memory_search_uses_embeddings(repos: Repositories):
             return [self.vectors[text] for text in texts]
 
     repo = MemoryRepo(repos.session, "owner", embedder=StubEmbedder())
-    repo.add("The user keeps a cat named Mochi")
-    repo.add("The user commutes by train")
+    await repo.add("The user keeps a cat named Mochi")
+    await repo.add("The user commutes by train")
     # "kitten" appears in neither memory as a keyword, yet ranks the cat first.
-    hits = repo.search("kitten")
+    hits = await repo.search("kitten")
     assert hits[0].content == "The user keeps a cat named Mochi"
 
 
-def test_memory_digest(repos: Repositories):
-    assert memory_digest(repos) is None
-    repos.memories.add("My name is Ada")
-    digest = memory_digest(repos)
+async def test_memory_digest(repos: Repositories):
+    assert await memory_digest(repos) is None
+    await repos.memories.add("My name is Ada")
+    digest = await memory_digest(repos)
     assert digest is not None and "My name is Ada" in digest
 
 
@@ -95,5 +95,5 @@ async def test_agent_remembers_via_tool(deps: Deps):
     deps.model = FunctionModel(model_fn)
     result = await agent.run("my name is Ada", deps=deps, model=deps.model)
     assert result.output == "noted"
-    saved = deps.repos.memories.list()
+    saved = await deps.repos.memories.list()
     assert [m.content for m in saved] == ["My name is Ada"]

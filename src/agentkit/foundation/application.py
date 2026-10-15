@@ -15,6 +15,7 @@ may act.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from typing import Any
@@ -112,6 +113,9 @@ class App:
         self._notifier = Notifier(self)
         self._storage: Filesystem | None = None
         self._queue: Queue | None = None
+        self._agent_models: dict[str, Any] = {}
+        self._agent_tasks: list[str] = []
+        self._agent_jobs: dict[str, Any] = {}
 
         self.container.instance("app", self)
         self._bind_facades()
@@ -134,6 +138,12 @@ class App:
             providers = [providers]
         self._providers.extend(providers)
         return self
+
+    def fullstack(self) -> App:
+        """Register :class:`~agentkit.foundation.fullstack.FullStackProvider`."""
+        from agentkit.foundation.fullstack import FullStackProvider
+
+        return self.providers([FullStackProvider])
 
     def boot(self) -> App:
         """Run the register/boot lifecycle once (idempotent)."""
@@ -289,23 +299,29 @@ class App:
         args = fields.get("args")
         cron = fields.get("cron")
         when = fields.get("when") or fields.get("at")
-        with self.repositories() as repos:
-            if cron:
-                repos.schedules.upsert(
-                    name,
-                    kind="cron",
-                    schedule=cron,
-                    task=task,
-                    args=json.dumps(args or {}),
-                    enabled=fields.get("enabled", True),
-                )
-            elif when:
-                dot = when if isinstance(when, str) else when.isoformat()
-                repos.schedules.upsert(
-                    name, kind="once", schedule=dot, task=task, args=json.dumps(args or {})
-                )
-            else:
-                raise ValueError(f"schedule {name!r} needs a 'cron' or 'when' field")
+
+        async def _register() -> None:
+            async with self.repositories() as repos:
+                if cron:
+                    await repos.schedules.upsert(
+                        name,
+                        kind="cron",
+                        schedule=cron,
+                        task=task,
+                        args=json.dumps(args or {}),
+                        enabled=fields.get("enabled", True),
+                    )
+                elif when:
+                    dot = when if isinstance(when, str) else when.isoformat()
+                    await repos.schedules.upsert(
+                        name, kind="once", schedule=dot, task=task, args=json.dumps(args or {})
+                    )
+                else:
+                    raise ValueError(f"schedule {name!r} needs a 'cron' or 'when' field")
+
+        from agentkit._sync import run_sync
+
+        run_sync(_register())
 
     def migrations(self, migrations: Any) -> App:
         self._migrations.extend(migrations)
@@ -358,9 +374,26 @@ class App:
         self._model_resolver = resolver
         return self
 
-    def models(self, resolver: Any) -> App:
-        """Alias for :meth:`model_resolver`."""
-        return self.model_resolver(resolver)
+    def models(self, models_or_resolver: Any) -> App:
+        """Record the native-toolkit model allow-list, or set the model resolver.
+
+        Passing a mapping (``{"notes": Note}``) allow-lists those models for the
+        database toolkit; passing a callable is an alias for :meth:`model_resolver`.
+        """
+        if isinstance(models_or_resolver, Mapping):
+            self._agent_models.update(models_or_resolver)
+            return self
+        return self.model_resolver(models_or_resolver)
+
+    def agent_tasks(self, tasks: Any) -> App:
+        """Record the task allow-list the scheduler/queue toolkits may reach."""
+        self._agent_tasks = list(tasks)
+        return self
+
+    def agent_jobs(self, jobs: Any) -> App:
+        """Record the :class:`~agentkit.foundation.queue.Job` allow-list by name."""
+        self._agent_jobs.update(jobs)
+        return self
 
     def clarify(self, handler: Any) -> App:
         """Set a ``handler(question, options) -> str`` for the ``ask_user`` tool."""
@@ -372,10 +405,10 @@ class App:
         self._budget = budget
         return self
 
-    def fork(self, source: str, target: str, *, upto: int | None = None) -> int:
+    async def fork(self, source: str, target: str, *, upto: int | None = None) -> int:
         """Copy a conversation's messages into ``target`` (branching)."""
-        with self.repositories() as repos:
-            return repos.conversations.fork(source, target, upto=upto)
+        async with self.repositories() as repos:
+            return await repos.conversations.fork(source, target, upto=upto)
 
     async def replay(
         self,
@@ -387,15 +420,15 @@ class App:
         """Re-run the last user prompt (optionally into a fresh ``target`` conversation)."""
         from agentkit.session import last_user_prompt, load_history
 
-        with self.repositories() as repos:
-            history = load_history(repos, conversation_id, max_messages=10_000)
+        async with self.repositories() as repos:
+            history = await load_history(repos, conversation_id, max_messages=10_000)
         prompt = last_user_prompt(history)
         if prompt is None:
             raise ValueError(f"conversation {conversation_id!r} has no user prompt to replay")
         text, index = prompt
         target = target or f"{conversation_id}:replay"
-        with self.repositories() as repos:
-            repos.conversations.fork(conversation_id, target, upto=index)
+        async with self.repositories() as repos:
+            await repos.conversations.fork(conversation_id, target, upto=index)
         return await self.run(text, conversation_id=target, approve=approve)
 
     def middlewares(self) -> list[Any]:
@@ -466,7 +499,7 @@ class App:
         if not isinstance(job, Job):
             raise TypeError("dispatch() expects a Job instance")
         if getattr(self.settings, "queue_enabled", False):
-            return self.queue.push(job, queue=queue)
+            return await self.queue.push(job, queue=queue)
         return await job.dispatch(self)
 
     # -- runtime / deps -------------------------------------------------
@@ -495,6 +528,7 @@ class App:
         )
         if self._clarify_handler is not None:
             deps.extras["clarify"] = self._clarify_handler
+        deps.extras["app"] = self
         return deps
 
     def _require_agent(self) -> Any:
@@ -516,11 +550,11 @@ class App:
         turn = Turn(conversation_id=conversation_id, text=text, approve=approve)
 
         async def destination(current: Turn) -> Turn:
-            with self.repositories() as repos:
+            async with self.repositories() as repos:
                 if self._budget is not None:
                     from agentkit.limits import check_budget
 
-                    check_budget(repos, self._budget, conversation_id=current.conversation_id)
+                    await check_budget(repos, self._budget, conversation_id=current.conversation_id)
                 runner = ChatRunner(
                     self.deps(repos, approve=current.approve, context=current),
                     agent=self._require_agent(),
@@ -542,11 +576,11 @@ class App:
         approve: ApprovalCallback | None = None,
     ) -> Any:
         """Stream one turn as :class:`~agentkit.session.StreamEvent` increments."""
-        with self.repositories() as repos:
+        async with self.repositories() as repos:
             if self._budget is not None:
                 from agentkit.limits import check_budget
 
-                check_budget(repos, self._budget, conversation_id=conversation_id)
+                await check_budget(repos, self._budget, conversation_id=conversation_id)
             runner = ChatRunner(
                 self.deps(repos, approve=approve),
                 agent=self._require_agent(),
@@ -564,7 +598,7 @@ class App:
         approve: ApprovalCallback | None = None,
     ) -> ChatResult:
         """Resume a turn that deferred tool calls (approvals / clarification)."""
-        with self.repositories() as repos:
+        async with self.repositories() as repos:
             runner = ChatRunner(
                 self.deps(repos, approve=approve),
                 agent=self._require_agent(),

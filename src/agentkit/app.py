@@ -107,7 +107,7 @@ class AgentApp:
         conversation_id: str = "cli:default",
         approve: ApprovalCallback | None = None,
     ) -> ChatResult:
-        with self.repositories() as repos:
+        async with self.repositories() as repos:
             runner = ChatRunner(
                 self.deps(repos, approve=approve),
                 agent=self.agent,

@@ -216,20 +216,32 @@ def test_builder_skills_enforce_builds(tmp_path: Path):
     assert "load_skill" in set(agent._function_toolset.tools.keys())
 
 
-def test_minimal_front_matter_parser():
-    from agentkit.skills import _parse_front_matter_minimal, _parse_scalar
-
-    data = _parse_front_matter_minimal(
-        "name: x\ndescription: has: colon\nitems:\n  - a\n  - b\nempty:\n# comment\n"
+def test_front_matter_yaml_block_list_and_quoting():
+    meta, body = parse_front_matter(
+        "---\nname: x\ndescription: 'has: colon'\nitems:\n  - a\n  - b\nempty: []\n"
+        "numbers: [1, 2]\n---\nBody\n"
     )
-    assert data["name"] == "x"
-    assert data["description"] == "has: colon"
-    assert data["items"] == ["a", "b"]
-    assert data["empty"] == []
-    assert _parse_scalar("[a, b]") == ["a", "b"]
-    assert _parse_scalar("[]") == []
-    assert _parse_scalar("'q'") == "q"
-    assert _parse_scalar("plain") == "plain"
+    assert meta["name"] == "x"
+    assert meta["description"] == "has: colon"
+    assert meta["items"] == ["a", "b"]
+    assert meta["empty"] == []
+    assert meta["numbers"] == [1, 2]
+    assert body == "Body"
+
+
+def test_front_matter_empty_is_blank_mapping():
+    meta, body = parse_front_matter("---\n---\nBody\n")
+    assert meta == {}
+    assert body == "Body"
+
+
+def test_front_matter_malformed_raises():
+    import pytest
+
+    with pytest.raises(ValueError, match="front matter"):
+        parse_front_matter("---\nname: [unterminated\n---\nBody\n")
+    with pytest.raises(ValueError, match="mapping"):
+        parse_front_matter("---\n- a\n- b\n---\nBody\n")
 
 
 def test_skill_allowed_tools_string_form(tmp_path: Path):

@@ -49,8 +49,8 @@ async def test_server_roundtrip_and_persistence(runtime: Runtime):
     assert (await client.fetch_card(BASE)).name == "Echo"
     assert await client.call_agent(BASE, "hi") == "echo: hi"
 
-    with repositories(runtime) as repos:
-        rows = repos.a2a.list()
+    async with repositories(runtime) as repos:
+        rows = await repos.a2a.list()
     assert rows and rows[0].state == "TASK_STATE_COMPLETED"
     assert "echo: hi" in rows[0].payload
 

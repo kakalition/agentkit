@@ -8,8 +8,8 @@ and open short-lived repository sessions as needed.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from agentkit.foundation.db import session_scope
@@ -24,26 +24,26 @@ class MemoryService:
         self.app = app
 
     async def remember(self, content: str, *, kind: str = "fact") -> int:
-        with self.app.repositories() as repos:
-            return int(repos.memories.add(content, kind=kind).id)
+        async with self.app.repositories() as repos:
+            return int((await repos.memories.add(content, kind=kind)).id)
 
-    def search(self, query: str, *, limit: int = 5) -> list[Any]:
-        with self.app.repositories() as repos:
-            return list(repos.memories.search(query, limit=limit))
+    async def search(self, query: str, *, limit: int = 5) -> list[Any]:
+        async with self.app.repositories() as repos:
+            return list(await repos.memories.search(query, limit=limit))
 
-    def all(self, limit: int | None = None) -> list[Any]:
-        with self.app.repositories() as repos:
-            return list(repos.memories.list(limit=limit))
+    async def all(self, limit: int | None = None) -> list[Any]:
+        async with self.app.repositories() as repos:
+            return list(await repos.memories.list(limit=limit))
 
-    def forget(self, memory_id: int) -> bool:
-        with self.app.repositories() as repos:
-            return bool(repos.memories.forget(memory_id))
+    async def forget(self, memory_id: int) -> bool:
+        async with self.app.repositories() as repos:
+            return bool(await repos.memories.forget(memory_id))
 
-    def digest(self, *, limit: int = 50) -> str | None:
+    async def digest(self, *, limit: int = 50) -> str | None:
         from agentkit.memory import memory_digest
 
-        with self.app.repositories() as repos:
-            return memory_digest(repos, limit=limit)
+        async with self.app.repositories() as repos:
+            return await memory_digest(repos, limit=limit)
 
 
 class ScheduleService:
@@ -62,7 +62,7 @@ class ScheduleService:
         """Decorator registering a task callable under ``name``."""
         return self._scheduler().task(name)
 
-    def cron(
+    async def cron(
         self,
         name: str,
         expr: str,
@@ -71,25 +71,27 @@ class ScheduleService:
         args: dict[str, Any] | None = None,
         enabled: bool = True,
     ) -> None:
-        self._scheduler().schedule_cron(name, expr, task, args=args, enabled=enabled)
+        await self._scheduler().schedule_cron(name, expr, task, args=args, enabled=enabled)
 
-    def once(self, name: str, when: Any, task: str, *, args: dict[str, Any] | None = None) -> None:
-        self._scheduler().schedule_once(name, when, task, args=args)
+    async def once(
+        self, name: str, when: Any, task: str, *, args: dict[str, Any] | None = None
+    ) -> None:
+        await self._scheduler().schedule_once(name, when, task, args=args)
 
-    def enable(self, name: str) -> bool:
-        return bool(self._scheduler().set_enabled(name, True))
+    async def enable(self, name: str) -> bool:
+        return bool(await self._scheduler().set_enabled(name, True))
 
-    def disable(self, name: str) -> bool:
-        return bool(self._scheduler().set_enabled(name, False))
+    async def disable(self, name: str) -> bool:
+        return bool(await self._scheduler().set_enabled(name, False))
 
-    def remove(self, name: str) -> bool:
-        return bool(self._scheduler().remove_job(name))
+    async def remove(self, name: str) -> bool:
+        return bool(await self._scheduler().remove_job(name))
 
-    def run_due(self, now: Any = None) -> list[str]:
-        return list(self._scheduler().run_due_now(now))
+    async def run_due(self, now: Any = None) -> list[str]:
+        return list(await self._scheduler().run_due_now(now))
 
-    def list(self) -> list[dict[str, Any]]:
-        return list(self._scheduler().list_jobs())
+    async def list(self) -> list[dict[str, Any]]:
+        return list(await self._scheduler().list_jobs())
 
 
 class DBService:
@@ -105,14 +107,14 @@ class DBService:
     def repositories(self):
         return self.app.repositories()
 
-    @contextmanager
-    def session(self) -> Iterator[Any]:
-        with session_scope(self.app) as repos:
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[Any]:
+        async with session_scope(self.app) as repos:
             yield repos.session
 
-    @contextmanager
-    def transaction(self) -> Iterator[Any]:
-        with session_scope(self.app) as repos:
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Any]:
+        async with session_scope(self.app) as repos:
             yield repos
 
 
@@ -141,7 +143,7 @@ class FeedbackService:
     def __init__(self, app: Any) -> None:
         self.app = app
 
-    def add(
+    async def add(
         self,
         rating: int,
         *,
@@ -149,21 +151,22 @@ class FeedbackService:
         message_id: int | None = None,
         comment: str = "",
     ) -> Any:
-        with session_scope(self.app) as repos:
-            return repos.feedback.add(
+        async with session_scope(self.app) as repos:
+            return await repos.feedback.add(
                 rating=rating,
                 conversation_id=conversation_id,
                 message_id=message_id,
                 comment=comment,
             )
 
-    def list(self, *, conversation_id: str | None = None, limit: int = 50) -> list[Any]:
-        with session_scope(self.app) as repos:
-            return repos.feedback.list(conversation_id=conversation_id, limit=limit)
+    async def list(self, *, conversation_id: str | None = None, limit: int = 50) -> list[Any]:
+        async with session_scope(self.app) as repos:
+            return await repos.feedback.list(conversation_id=conversation_id, limit=limit)
 
-    def average(self, *, conversation_id: str | None = None) -> float | None:
-        with session_scope(self.app) as repos:
-            return repos.feedback.average(conversation_id=conversation_id)
+    async def average(self, *, conversation_id: str | None = None) -> float | None:
+        async with session_scope(self.app) as repos:
+            return await repos.feedback.average(conversation_id=conversation_id)
+
 
 class QueueService:
     """Backs the ``Queue`` facade."""
@@ -175,17 +178,17 @@ class QueueService:
     def queue(self) -> Any:
         return self.app.queue
 
-    def push(self, job: Any, **kwargs: Any) -> int:
-        return self.queue.push(job, **kwargs)
+    async def push(self, job: Any, **kwargs: Any) -> int:
+        return await self.queue.push(job, **kwargs)
 
     async def run_once(self, queue: str | None = None) -> bool:
         return await self.queue.run_once(queue)
 
-    def size(self, queue: str | None = None) -> int:
-        return self.queue.size(queue)
+    async def size(self, queue: str | None = None) -> int:
+        return await self.queue.size(queue)
 
-    def failed(self, *, limit: int = 50) -> list[Any]:
-        return self.queue.failed(limit=limit)
+    async def failed(self, *, limit: int = 50) -> list[Any]:
+        return await self.queue.failed(limit=limit)
 
 
 class LogService:

@@ -1,5 +1,7 @@
 # Conversations
 
+## Introduction
+
 A **conversation** is a durable, id-addressed thread of messages. Every turn
 appends to it, so an agent resumes where it left off across restarts.
 
@@ -21,7 +23,7 @@ The prefix becomes the conversation's `channel`, which the operator UI groups by
 a turn:
 
 ```python
-with app.repositories() as repos:
+async async with app.repositories() as repos:
     runner = ChatRunner(
         app.deps(repos),
         agent=app.agent(),
@@ -66,7 +68,7 @@ coherent by [context compaction](/guide/compaction).
 ```python
 from agentkit import load_history
 
-with app.repositories() as repos:
+async async with app.repositories() as repos:
     messages = load_history(repos, "cli:default", max_messages=40)
 ```
 
@@ -91,9 +93,9 @@ Every turn records tokens and an estimated cost (from `genai_prices`) against th
 conversation:
 
 ```python
-with app.repositories() as repos:
-    totals = repos.usage.totals()                      # global
-    rows = repos.usage.list(limit=50)                  # per-turn rows
+async async with app.repositories() as repos:
+    totals = await repos.usage.totals()                # global
+    rows = await repos.usage.list(limit=50)            # per-turn rows
 ```
 
 `UsageRepo.totals()` returns `requests`, `input_tokens`, `output_tokens`,
@@ -106,10 +108,10 @@ Sensitive actions can be recorded in a **hash-chained** audit log that is
 verifiable:
 
 ```python
-with app.repositories() as repos:
-    repos.audit.append("note.created", target=f"note:{note.id}", actor="owner")
+async async with app.repositories() as repos:
+    await repos.audit.append("note.created", target=f"note:{note.id}", actor="owner")
 
-    assert repos.audit.verify()    # tamper-evident
+    assert await repos.audit.verify()    # tamper-evident
 ```
 
 Each entry hashes the previous entry, so any edit breaks the chain.

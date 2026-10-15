@@ -48,66 +48,69 @@ def _app(runtime: Runtime, repos_factory=Repositories) -> App:
 
 
 # -- Repository base --------------------------------------------------------
-def test_repository_crud(runtime: Runtime):
+async def test_repository_crud(runtime: Runtime):
     app = _app(runtime, PrimitiveRepositories)
     app.boot()
-    with app.repositories() as repos:
+    async with app.repositories() as repos:
         repo = repos.primitives
         assert isinstance(repo, PrimitiveRepo)
 
-        note = repo.create(text="hello", pinned=True)
+        note = await repo.create(text="hello", pinned=True)
         assert note.owner_id == "owner"
-        assert repo.count() == 1
+        assert await repo.count() == 1
 
-        assert repo.get(note.id).text == "hello"
-        assert repo.exists(note.id) is True
-        assert repo.find(note.id).text == "hello"
-        assert repo.where(pinned=True).first().text == "hello"
-        assert repo.where(pinned=True).count() == 1
+        got = await repo.get(note.id)
+        assert got is not None and got.text == "hello"
+        assert await repo.exists(note.id) is True
+        assert (await repo.find(note.id)).text == "hello"
+        first = await repo.where(pinned=True).first()
+        assert first is not None and first.text == "hello"
+        assert await repo.where(pinned=True).count() == 1
 
-        assert repo.update(note.id, text="hi").text == "hi"
-        assert repo.first(text="hi") is not None
+        updated = await repo.update(note.id, text="hi")
+        assert updated is not None and updated.text == "hi"
+        assert await repo.first(text="hi") is not None
 
-        page = repo.paginate(page=1, per_page=10)
+        page = await repo.paginate(page=1, per_page=10)
         assert page["total"] == 1 and page["pages"] == 1
 
-        assert repo.delete(note.id) is True
-        assert repo.delete(note.id) is False
-        assert repo.count() == 0
+        assert await repo.delete(note.id) is True
+        assert await repo.delete(note.id) is False
+        assert await repo.count() == 0
 
 
-def test_repository_update_or_create(runtime: Runtime):
+async def test_repository_update_or_create(runtime: Runtime):
     app = _app(runtime, PrimitiveRepositories)
     app.boot()
-    with app.repositories() as repos:
+    async with app.repositories() as repos:
         repo = repos.primitives
-        created, was_created = repo.update_or_create(defaults={"pinned": True}, text="a")
+        created, was_created = await repo.update_or_create(defaults={"pinned": True}, text="a")
         assert was_created is True
-        again, was_created = repo.update_or_create(defaults={"pinned": False}, text="a")
+        again, was_created = await repo.update_or_create(defaults={"pinned": False}, text="a")
         assert was_created is False
         assert again.id == created.id and again.pinned is False
 
 
 # -- fluent Schedule --------------------------------------------------------
-def test_fluent_schedule_applies_to_db(runtime: Runtime):
+async def test_fluent_schedule_applies_to_db(runtime: Runtime):
     app = _app(runtime)
     app.schedule("ping").every_minute()
     app.schedule("digest", args={"period": "week"}).daily_at("08:00")
     app.boot()
 
-    with app.repositories() as repos:
-        jobs = {job.name: job for job in repos.schedules.list()}
+    async with app.repositories() as repos:
+        jobs = {job.name: job for job in await repos.schedules.list()}
     assert jobs["schedule:ping"].schedule == "* * * * *"
     assert jobs["schedule:digest"].schedule == "0 8 * * *"
     assert jobs["schedule:digest"].task == "digest"
 
 
-def test_fluent_schedule_one_off(runtime: Runtime):
+async def test_fluent_schedule_one_off(runtime: Runtime):
     app = _app(runtime)
     app.schedule("welcome").at("2030-01-01T09:00")
     app.boot()
-    with app.repositories() as repos:
-        job = repos.schedules.list()[0]
+    async with app.repositories() as repos:
+        job = (await repos.schedules.list())[0]
     assert job.kind == "once"
 
 
@@ -125,14 +128,14 @@ class ReminderDue(Notification):
         return f"⏰ Reminder: {self.message}"
 
 
-def test_notification_delivers_to_conversation(runtime: Runtime):
+async def test_notification_delivers_to_conversation(runtime: Runtime):
     app = _app(runtime)
     app.boot()
     sent = app.notify(ReminderDue("stretch"), conversation_id="cli:1")
 
     assert {item.channel for item in sent} == {"log", "conversation"}
-    with app.repositories() as repos:
-        messages = repos.messages.list("cli:1")
+    async with app.repositories() as repos:
+        messages = await repos.messages.list("cli:1")
     assert messages and "Reminder: stretch" in messages[0].payload
 
 
@@ -288,8 +291,8 @@ async def test_queue_push_and_run_once(runtime: Runtime):
     app = _app(runtime)
     app.boot()
     _ran.clear()
-    app.queue.push(_WriteJob("q"))
-    assert app.queue.size() >= 1
+    await app.queue.push(_WriteJob("q"))
+    assert await app.queue.size() >= 1
     assert await app.queue.run_once() is True
     assert _ran == ["q"]
     assert await app.queue.run_once() is False  # queue drained
@@ -313,10 +316,10 @@ async def test_app_dispatch_honours_queue_enabled(runtime: Runtime):
 async def test_queue_marks_failed_after_retries(runtime: Runtime):
     app = _app(runtime)
     app.boot()
-    app.queue.push(_BoomJob())
+    await app.queue.push(_BoomJob())
     # Each run retries the failing job until max_retries is reached.
     for _ in range(_BoomJob.max_retries):
         assert await app.queue.run_once() is True
     assert await app.queue.run_once() is False   # failed jobs are not eligible
-    failed = app.queue.failed()
+    failed = await app.queue.failed()
     assert failed and failed[0].error

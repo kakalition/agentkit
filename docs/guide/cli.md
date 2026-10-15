@@ -1,5 +1,7 @@
 # Artisan-style CLI
 
+## Introduction
+
 `agentkit` is the console entry point. It runs your app, scaffolds code, inspects
 what you built, and manages the workspace — in the spirit of `artisan`.
 
