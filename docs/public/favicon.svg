@@ -1,11 +1,12 @@
 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="g" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#8b7bb8"/>
-      <stop offset="0.5" stop-color="#6366f1"/>
-      <stop offset="1" stop-color="#2e7d6f"/>
-    </linearGradient>
-  </defs>
-  <rect x="2" y="2" width="28" height="28" rx="9" fill="url(#g)"/>
-  <path d="M16 8.5l1.9 5.1 5.1 1.9-5.1 1.9L16 22.5l-1.9-5.1L9 15.5l5.1-1.9L16 8.5z" fill="#fff" fill-opacity="0.95"/>
+  <style>
+    .ak-mark { fill: #0a0a0a; }
+    .ak-star { fill: #ffffff; }
+    @media (prefers-color-scheme: dark) {
+      .ak-mark { fill: #fafafa; }
+      .ak-star { fill: #0a0a0a; }
+    }
+  </style>
+  <rect class="ak-mark" x="2" y="2" width="28" height="28" rx="9" />
+  <path class="ak-star" d="M16 8.5l1.9 5.1 5.1 1.9-5.1 1.9L16 22.5l-1.9-5.1L9 15.5l5.1-1.9L16 8.5z" />
 </svg>

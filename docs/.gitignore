@@ -1,5 +1,6 @@
 node_modules
-.vitepress/dist
-.vitepress/cache
+build
+dist
+.react-router
 *.local
 .DS_Store
