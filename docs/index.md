@@ -5,7 +5,7 @@ description: Build, run, and ship durable AI agents in Python.
 ---
 
 <section class="ak-hero">
-  <GradientBackdrop />
+  <FeralGradient />
   <div class="ak-hero-inner">
     <div class="ak-hero-copy">
       <p class="ak-eyebrow">Python · PydanticAI · DBOS</p>

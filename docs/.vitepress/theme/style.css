@@ -428,6 +428,35 @@
   opacity: 0.55;
 }
 
+/* -------------------------- landing hero: feralui gradient element (React) */
+/* The exported <StaticGradient/>-style element fills this host; the host also
+   carries a soft CSS fallback so the hero is never bare before React mounts. */
+.feral-gradient-host {
+  position: absolute;
+  inset: -12% -12% auto -12%;
+  height: 132%;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+  filter: blur(6px) saturate(122%);
+  opacity: 0.92;
+  background:
+    radial-gradient(60% 55% at 18% 22%, var(--ak-fuji), transparent 64%),
+    radial-gradient(55% 50% at 82% 30%, var(--ak-tokiwa), transparent 62%),
+    radial-gradient(50% 45% at 52% 78%, var(--ak-sakura), transparent 66%),
+    radial-gradient(60% 60% at 40% 12%, var(--ak-ai), transparent 64%);
+  -webkit-mask-image: radial-gradient(125% 105% at 50% 0%, #000 52%, transparent 100%);
+  mask-image: radial-gradient(125% 105% at 50% 0%, #000 52%, transparent 100%);
+}
+.dark .feral-gradient-host { opacity: 0.72; }
+.feral-gradient-host .feral-gradient-export {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  aspect-ratio: auto !important;
+}
+
 /* --------------------------------------------------------------- hero orb */
 .ak-orb-wrap {
   position: relative;

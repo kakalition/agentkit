@@ -1,5 +1,6 @@
-import { defineConfig } from "vitepress";
+import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vitepress";
 
 const base = "/";
 
@@ -29,7 +30,8 @@ export default defineConfig({
   },
 
   vite: {
-    plugins: [tailwindcss()],
+    // The landing hero mounts the FeralUI gradient element (React) client-side.
+    plugins: [tailwindcss(), react()],
   },
 
   themeConfig: {
