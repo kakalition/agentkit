@@ -42,6 +42,10 @@ def inspect(
     typer.echo(f"config: {', '.join(data['config']) or '(none)'}")
     stack = data["stack"]
     active = [name for name, on in stack["channels"].items() if on]
+    drivers = stack.get("drivers", {})
+    if drivers:
+        summary = ", ".join(f"{kind}={info['driver']}" for kind, info in sorted(drivers.items()))
+        typer.echo(f"drivers: {summary}")
     typer.echo(f"model: {stack['model_name']} (providers: {', '.join(stack['model_providers'])})")
     typer.echo(f"memory: {'on' if stack['memory']['enabled'] else 'off'} ({stack['memory']['embedding_backend']})")
     typer.echo(f"subagents: {'on' if stack['subagents']['enabled'] else 'off'}")

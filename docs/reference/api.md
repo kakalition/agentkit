@@ -76,6 +76,37 @@ Related: `discover_providers`, `load_bootstrap`, `scaffold_project`,
 `Planner`, `Plan`, `PlanStep`, `StateGraph`, `END`, `GraphError`, `Supervisor`,
 `spawn_tool`, `team_tools`.
 
+## Contracts & drivers
+
+Every subsystem's contract lives in `agentkit.contracts` (runtime-checkable
+Protocols): `CacheContract`, `PromptStore`, `EmbedderContract`, `MemoryStore`,
+`RecallStrategy`, `Chunker`, `Retriever`, `Reranker`, `FileSystem`, `QueueDriver`,
+`SchedulerDriver`, `Durability`, `Dialect`, `Tracer`, `PriceProvider`,
+`RateLimiterContract`, `AuthStrategy`, `Vault`, `Scanner`, `DocumentLoader`,
+`Speech`/`Transcriber`/`Synthesizer`, `Extractor`/`LearningStrategy`/
+`LearningSink`, `Topology`, `ContextStrategy`, `TaskStore`, `PlanningStrategy`,
+`AgentMiddleware`, `GraphExecutor`, `CodeExecutor`, `Reporter`, `Channel`,
+`NotificationChannel`.
+
+The registry and the typed identifiers:
+
+| Name | What it is |
+| --- | --- |
+| `DriverKind` | the `StrEnum` of every subsystem kind |
+| `Manager` | base class resolving a settings-selected driver per kind |
+| `register_driver`, `register`, `resolve`, `unregister` | the global driver registry |
+| `CacheDriver`, `EmbeddingsDriver`, `CommsDriver`, … | per-subsystem driver `StrEnum`s (`agentkit.support.kinds`) |
+
+`App.manager(kind)`, `App.extend(kind, name, factory)` and `App.drivers()` expose
+the layer, and each subsystem has a convenience accessor (`app.cache`,
+`app.tasks`, `app.graph_executor`, `app.code_executor`, `app.eval_reporter`,
+`app.comms`, `app.vault`, …).
+
+## Capability helpers
+
+`attach_tasks`, `attach_code_executor`, `subagent_tool`, `assert_trajectory`,
+`CommsContext` (on `Deps.comms`).
+
 ## Models, routing, cost
 
 `Model`, `Query`, `DB`, `ModelRouter`, `Route`, `Pricing`, `ModelPrice`,
@@ -110,7 +141,8 @@ Related: `discover_providers`, `load_bootstrap`, `scaffold_project`,
 
 ## Evaluations
 
-`EvalSuite`, `Case`, `CaseResult`, `Report`.
+`EvalSuite`, `Case`, `CaseResult`, `Report`, `TextReporter`, `JsonReporter`,
+`PydanticReporter`, `capture_turns`, `load_captured`, `assert_trajectory`.
 
 ## Observability & ops
 
@@ -125,8 +157,10 @@ Related: `discover_providers`, `load_bootstrap`, `scaffold_project`,
 ## Submodules
 
 Everything is also importable from its module, e.g.
-`agentkit.foundation`, `agentkit.skills`, `agentkit.knowledge`,
+`agentkit.foundation`, `agentkit.contracts`, `agentkit.support`,
+`agentkit.skills`, `agentkit.knowledge`,
 `agentkit.compaction`, `agentkit.evals`, `agentkit.planning`, `agentkit.graph`,
 `agentkit.teams`, `agentkit.prompts`, `agentkit.limits`, `agentkit.moderation`,
 `agentkit.multimodal`, `agentkit.audio`, `agentkit.sandbox`, `agentkit.pricing`,
-`agentkit.routing`, `agentkit.hitl`, `agentkit.cache`.
+`agentkit.routing`, `agentkit.hitl`, `agentkit.cache`, `agentkit.tasks`,
+`agentkit.executors`, `agentkit.comms`, `agentkit.learning`.

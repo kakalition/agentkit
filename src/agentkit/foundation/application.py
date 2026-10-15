@@ -14,6 +14,7 @@ may act.
 
 from __future__ import annotations
 
+import importlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -38,12 +39,10 @@ from agentkit.foundation.facades import (
     ScheduleService,
     StorageService,
 )
-from agentkit.foundation.jobs import CacheStore
 from agentkit.foundation.notifications import Notifier
 from agentkit.foundation.provider import Provider
-from agentkit.foundation.queue import Job, Queue
+from agentkit.foundation.queue import Job
 from agentkit.foundation.schedule import ScheduleBuilder
-from agentkit.foundation.storage import Filesystem
 from agentkit.logging import get_logger
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.security import Actor
@@ -52,6 +51,45 @@ from agentkit.session import ChatResult, ChatRunner
 log = get_logger("agentkit.app")
 
 PROVIDER_ENTRY_POINT_GROUP = "agentkit.providers"
+
+# Modules whose import registers the built-in core drivers (via Manager subclasses
+# and @register_driver). Importing them lazily keeps App construction robust even
+# when callers import agentkit.foundation.application directly.
+_BUILTIN_DRIVER_MODULES = (
+    "agentkit.foundation.jobs",  # cache
+    "agentkit.prompts",  # prompts
+    "agentkit.embeddings",  # embeddings
+    "agentkit.pricing",  # pricing
+    "agentkit.ingest",  # ingest
+    "agentkit.audio",  # audio
+    "agentkit.db.engine",  # database dialect
+    "agentkit.foundation.queue",  # queue
+    "agentkit.scheduler",  # scheduler
+    "agentkit.observability",  # observability
+    "agentkit.foundation.storage",  # storage
+    "agentkit.guardrails",  # guardrails
+    "agentkit.ratelimit",  # rate limiting
+    "agentkit.durability",  # durability
+    "agentkit.security.authenticator",  # auth
+    "agentkit.security.credentials",  # vault
+    "agentkit.memory",  # memory store + recall strategy
+    "agentkit.knowledge",  # rag: chunker / retriever / reranker
+    "agentkit.learning",  # learning extractor / strategy / sink
+    "agentkit.comms",  # comms topologies
+    "agentkit.tasks",  # task store + planning strategy
+    "agentkit.agents.subagent",  # subagent context strategies
+    "agentkit.foundation.agent_middleware",  # agent middleware
+    "agentkit.graph",  # graph executors
+    "agentkit.executors",  # code executors
+    "agentkit.evals",  # eval reporters
+    "agentkit.gateways.registry",  # chat channels
+    "agentkit.foundation.notifications",  # notification channels
+)
+
+
+def _load_builtin_drivers() -> None:
+    for module in _BUILTIN_DRIVER_MODULES:
+        importlib.import_module(module)
 
 
 def discover_providers(group: str = PROVIDER_ENTRY_POINT_GROUP) -> list[Any]:
@@ -110,10 +148,8 @@ class App:
         self._model_resolver: Any = None
         self._clarify_handler: Any = None
         self._budget: Any = None
-        self._cache = CacheStore()
+        self._managers: dict[str, Any] = {}
         self._notifier = Notifier(self)
-        self._storage: Filesystem | None = None
-        self._queue: Queue | None = None
         self._agent_models: dict[str, Any] = {}
         self._agent_tasks: list[str] = []
         self._agent_jobs: dict[str, Any] = {}
@@ -122,6 +158,7 @@ class App:
         self._approval_queue: Any = None
 
         self.container.instance("app", self)
+        _load_builtin_drivers()
         self._bind_facades()
         if discover:
             self._providers.extend(discover_providers())
@@ -488,6 +525,35 @@ class App:
         """Resolve a binding (alias for :meth:`make`, Laravel's ``resolve``)."""
         return self.make(name)
 
+    # -- drivers / managers --------------------------------------------
+    def manager(self, kind: str) -> Any:
+        """The :class:`~agentkit.support.manager.Manager` for a subsystem ``kind``."""
+        manager = self._managers.get(kind)
+        if manager is None:
+            from agentkit.support.manager import manager_class
+
+            manager = manager_class(kind)(self)
+            self._managers[kind] = manager
+        return manager
+
+    def extend(self, kind: str, name: str, factory: Any) -> App:
+        """Register a custom ``kind`` driver (``app.extend("cache", "redis", fn)``)."""
+        self.manager(kind).extend(name, factory)
+        return self
+
+    def drivers(self) -> dict[str, Any]:
+        """Every registered kind's active driver and available alternatives."""
+        from agentkit.support.manager import registered_managers
+
+        view: dict[str, Any] = {}
+        for kind in sorted(set(self._managers) | set(registered_managers())):
+            manager = self.manager(kind)
+            view[kind] = {
+                "driver": manager.configured_driver(),
+                "available": manager.available(),
+            }
+        return view
+
     def _apply_bindings(self, provider: Provider) -> None:
         for abstract, concrete in provider.bindings.items():
             self.container.bind(abstract, _binding_factory(concrete))
@@ -500,16 +566,14 @@ class App:
         return self.make("db")
 
     @property
-    def cache(self) -> CacheStore:
-        """The in-process cache store (see the ``Cache`` facade)."""
-        return self._cache
+    def cache(self) -> Any:
+        """The configured cache driver (see the ``Cache`` facade; ``cache_driver``)."""
+        return self.manager("cache").driver()
 
     @property
-    def storage(self) -> Filesystem:
-        """The agent's file store under ``<agent_home>/storage``."""
-        if self._storage is None:
-            self._storage = Filesystem(self.settings.home / "storage")
-        return self._storage
+    def storage(self) -> Any:
+        """The configured file store (see the ``Storage`` facade; ``storage_driver``)."""
+        return self.manager("storage").driver()
 
     @property
     def notifier(self) -> Notifier:
@@ -528,11 +592,134 @@ class App:
         return self._credential_service
 
     @property
-    def queue(self) -> Queue:
-        """The database-backed job queue (see the ``Queue`` facade)."""
-        if self._queue is None:
-            self._queue = Queue(self)
-        return self._queue
+    def queue(self) -> Any:
+        """The configured job queue driver (see the ``Queue`` facade; ``queue_driver``)."""
+        return self.manager("queue").driver()
+
+    @property
+    def pricing(self) -> Any:
+        """The configured price provider (``pricing_driver``, default ``genai``)."""
+        return self.manager("pricing").driver()
+
+    @property
+    def ingest(self) -> Any:
+        """The configured document loader (``ingest_driver``, default ``default``)."""
+        return self.manager("ingest").driver()
+
+    @property
+    def speech(self) -> Any:
+        """The configured speech driver (``audio_driver``, default ``openai``)."""
+        return self.manager("audio").driver()
+
+    @property
+    def dialect(self) -> Any:
+        """The configured DB dialect (``database_driver``, default ``sqlite``)."""
+        return self.manager("database").driver()
+
+    @property
+    def tracer(self) -> Any:
+        """The configured tracer driver (the ``observability`` setting)."""
+        return self.manager("observability").driver()
+
+    @property
+    def guard(self) -> Any:
+        """The configured guardrail scanner (``guardrails_driver``, default ``regex``)."""
+        return self.manager("guardrails").driver()
+
+    @property
+    def limiter(self) -> Any:
+        """The configured rate-limit driver (``rate_limit_driver``, default ``database``)."""
+        return self.manager("ratelimit").driver()
+
+    @property
+    def durability(self) -> Any:
+        """The configured durability driver (``durability_driver``, default ``dbos``)."""
+        return self.manager("durability").driver()
+
+    @property
+    def vault(self) -> Any:
+        """The configured secret vault (``vault_driver``, default ``fernet``)."""
+        return self.manager("vault").driver()
+
+    @property
+    def auth(self) -> Any:
+        """The configured auth strategy (``auth_driver``, default ``default``)."""
+        return self.manager("auth").driver()
+
+    @property
+    def memory(self) -> Any:
+        """The configured memory store (``memory_driver``, default ``repository``)."""
+        return self.manager("memory").driver()
+
+    @property
+    def chunker(self) -> Any:
+        """The configured RAG chunker (``chunker_driver``, default ``semantic``)."""
+        return self.manager("chunker").driver()
+
+    @property
+    def retriever(self) -> Any:
+        """The configured RAG retriever (``retriever_driver``, default ``repository``)."""
+        return self.manager("retriever").driver()
+
+    @property
+    def reranker(self) -> Any:
+        """The configured RAG reranker (``reranker_driver``, default ``identity``)."""
+        return self.manager("reranker").driver()
+
+    @property
+    def extractor(self) -> Any:
+        """The configured learning extractor (``learning_extractor_driver``)."""
+        return self.manager("learning_extractor").driver()
+
+    @property
+    def learning_strategy(self) -> Any:
+        """The configured learning strategy (``learning_strategy_driver``)."""
+        return self.manager("learning_strategy").driver()
+
+    @property
+    def learning_sink(self) -> Any:
+        """The configured learning sink (``learning_sink_driver``)."""
+        return self.manager("learning_sink").driver()
+
+    @property
+    def comms(self) -> Any:
+        """The configured agent comms topology (``comms_driver``, default ``mailbox``)."""
+        return self.manager("comms").driver()
+
+    @property
+    def tasks(self) -> Any:
+        """The configured task store (``tasks_driver``, default ``memory``)."""
+        return self.manager("tasks").driver()
+
+    @property
+    def planning(self) -> Any:
+        """The configured planning strategy (``planning_driver``, default ``single``)."""
+        return self.manager("planning").driver()
+
+    @property
+    def context_strategy(self) -> Any:
+        """The configured subagent context strategy (``context_driver``, default ``isolated``)."""
+        return self.manager("context").driver()
+
+    @property
+    def agent_middleware(self) -> Any:
+        """The configured agent middleware (``agent_middleware_driver``, default ``noop``)."""
+        return self.manager("agent_middleware").driver()
+
+    @property
+    def graph_executor(self) -> Any:
+        """The configured graph executor (``graph_driver``, default ``sequential``)."""
+        return self.manager("graph").driver()
+
+    @property
+    def code_executor(self) -> Any:
+        """The configured code executor (``code_executor_driver``, default ``local``)."""
+        return self.manager("codeexec").driver()
+
+    @property
+    def eval_reporter(self) -> Any:
+        """The configured eval reporter (``evals_reporter_driver``, default ``text``)."""
+        return self.manager("evals_reporter").driver()
 
     def notify(self, notification: Any, *, to: Any = None, conversation_id: str | None = None) -> Any:
         """Send a :class:`~agentkit.foundation.notifications.Notification`."""
@@ -588,6 +775,8 @@ class App:
         if self._clarify_handler is not None:
             deps.extras["clarify"] = self._clarify_handler
         deps.extras["app"] = self
+        deps.extras.setdefault("task_store", self.manager("tasks").driver())
+        deps.extras.setdefault("code_executor", self.manager("codeexec").driver())
         return deps
 
     def _require_agent(self) -> Any:

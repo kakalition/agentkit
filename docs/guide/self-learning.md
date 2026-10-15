@@ -163,8 +163,15 @@ assert "learning:reflect" in TASKS
 
 ## Review inbox
 
-Set `LEARNING_REQUIRE_REVIEW=true` to hold new lessons as `proposed` until you
-approve them — they are never applied (or distilled into skills) while pending.
+**Learning is review-gated by default** (`LEARNING_REQUIRE_REVIEW=true`): new
+lessons are held as `proposed` until you approve them — they are never applied
+(or distilled into skills) while pending. Set `LEARNING_REQUIRE_REVIEW=false` to
+let new lessons become active immediately.
+
+```bash
+LEARNING_REQUIRE_REVIEW=true    # default
+```
+
 Memories carry a `status` (`active` | `proposed` | `rejected`); only `active`
 rows show up in listings, search, the digest, and distillation.
 
@@ -205,3 +212,104 @@ quality of the distilled lessons.
 :::
 
 Continue to [The Full Stack →](/guide/fullstack)
+
+## Learning drivers: reflect, learn, apply
+
+### What this is
+
+Self-learning means the agent **improves from its own past conversations**. The
+loop has three moves:
+
+- **reflect** — read recent turns and write down what is worth keeping: a lesson
+  ("when X, do Y"), a preference, or a fact.
+- **learn** — store those notes durably, with secrets and personal data stripped.
+- **apply** — feed the stored lessons back into future turns, so behaviour
+  actually changes.
+
+Think of a barista who keeps a notebook of regulars: after a shift they jot "Ada
+always wants oat milk", file it by the register, and glance at the notes before
+taking an order next time. A scrawled note is only worth acting on once someone
+has reviewed it — which is exactly what the review gate enforces.
+
+::: danger Learning is review-gated by default
+`LEARNING_REQUIRE_REVIEW=true` is the default. New lessons are stored with the
+status **`proposed`** and are **never applied or distilled into skills** until a
+human approves them. Only `active` rows appear in listings, search, the digest,
+and skill distillation. Set `LEARNING_REQUIRE_REVIEW=false` to apply lessons
+immediately.
+:::
+
+Three swappable pieces run that loop, each its own driver: the **extractor**
+(how reflect reads the conversation), the **strategy** (what the whole pass
+does), and the **sink** (where lessons are written).
+
+### End-to-end example
+
+```python
+from agentkit import App, DriverKind, lessons_digest
+from agentkit.learning import NoopStrategy
+
+app = App(name="assistant")
+
+# Defaults: extractor=model, strategy=reflect_apply, sink=memory.
+extractor = app.extractor                 # ModelExtractor()
+strategy = app.learning_strategy          # ReflectApplyStrategy()
+sink = app.learning_sink                  # MemorySink()
+
+# Run the loop by hand: reflect (extract) -> learn (store) -> apply (digest).
+items = await extractor.extract(messages, model)       # {"lessons": [...], ...}
+await sink.store(repos, items, conversation_id="cli:1")
+print(await lessons_digest(repos))                     # injected into next turn
+
+# Switch a driver per app, e.g. an agent that should never learn:
+app.extend(DriverKind.LEARNING_STRATEGY, "none", lambda app: NoopStrategy())
+# or, one line of config:  LEARNING_STRATEGY_DRIVER=none
+```
+
+### Drivers
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `model` (extractor) | Reads the conversation with a language-model call and returns lessons, preferences, and facts as JSON; falls back to the keyword heuristic if the call fails. | Default. Pick it for the best-quality notes when a model is available. |
+| `heuristic` (extractor) | Offline keyword and template matching; no model call at all. | Pick it when you have no model budget, want fully deterministic runs, or are offline. |
+| `reflect_apply` (strategy) | The full pass: extract → store → digest. | Default. Pick it for ordinary learning. |
+| `none` (strategy) | A no-op that never learns. | Pick it for deterministic or specialist agents that must not change behaviour over time. |
+| `memory` (sink) | Writes lessons, preferences, and facts into the owner's memories (lessons as `procedural`), after redaction. | The only built-in sink and the default. |
+
+The three accessors `app.extractor`, `app.learning_strategy`, and
+`app.learning_sink` each return the configured driver for one kind.
+
+### Selecting a driver
+
+```bash
+LEARNING_EXTRACTOR_DRIVER=model         # model (default) | heuristic
+LEARNING_STRATEGY_DRIVER=reflect_apply  # reflect_apply (default) | none
+LEARNING_SINK_DRIVER=memory             # memory
+```
+
+- **Precedence** — an explicit name passed in code wins, then the setting, then
+  the default (`model`, `reflect_apply`, `memory`).
+- **Per app** — `app.extend(DriverKind.LEARNING_EXTRACTOR, "name", factory)`.
+- **Reusable** — ship one for everyone with `@register_driver`:
+
+```python
+from agentkit import DriverKind, register_driver
+
+@register_driver(DriverKind.LEARNING_EXTRACTOR, "llm")
+def _llm_extractor(app):
+    return MyExtractor()            # async extract(messages, model=None) -> dict
+```
+
+Then select it with `LEARNING_EXTRACTOR_DRIVER=llm`. See
+[Contracts & Drivers](/guide/drivers).
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| Lessons never seem to apply | review gating is on (the default): they are `proposed` until approved. Run `agentkit learning:review approve <id>`, or set `LEARNING_REQUIRE_REVIEW=false`. |
+| The agent learned the wrong thing | an unwanted lesson became `active`; `forget_lesson` it (or reject it in the inbox) and tighten `LEARNING_WINDOW`. |
+| Reflection finds nothing | the window is empty, the turns contain nothing durable, or the same window was already reflected (reflection is idempotent). |
+| Nothing is stored | the `memory` sink needs a memory store; confirm `app.learning_sink` resolves and repositories are available. |
+| Learning does nothing at all | `LEARNING_ENABLED=false` disables the tools and the durable task, or the strategy is set to `none`. |
+| `unknown learning_extractor driver` | the `LEARNING_*_DRIVER` value is misspelled or not registered; fix it or `app.extend(...)` it. |

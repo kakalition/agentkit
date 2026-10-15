@@ -11,7 +11,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agentkit.contracts.ingest import DocumentLoader
 from agentkit.errors import DependencyMissing, InvalidInput
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, IngestDriver
+from agentkit.support.manager import Manager
 
 TEXT_SUFFIXES = frozenset({".txt", ".md", ".markdown", ".rst", ".csv", ".json", ".log", ".yaml", ".yml"})
 HTML_SUFFIXES = frozenset({".html", ".htm"})
@@ -118,9 +122,75 @@ async def fetch_url(url: str, *, settings: Any = None) -> str:
     return text
 
 
+class DefaultDocumentLoader:
+    """The default loader: every supported format (text, HTML, PDF, DOCX)."""
+
+    def supports(self, suffix: str) -> bool:
+        return (suffix or "").lower() in SUPPORTED_SUFFIXES
+
+    def load(
+        self,
+        source: str | Path | bytes,
+        *,
+        suffix: str | None = None,
+        settings: Any = None,
+    ) -> str:
+        if isinstance(source, bytes):
+            resolved = (suffix or ".txt").lower()
+            guard_size(len(source), settings)
+            return text_from_bytes(source, resolved)
+        return extract_text(source, settings=settings)
+
+
+class TextDocumentLoader:
+    """A text-only loader (no PDF/DOCX/HTML parsing) for minimal deployments."""
+
+    def supports(self, suffix: str) -> bool:
+        return (suffix or "").lower() in TEXT_SUFFIXES
+
+    def load(
+        self,
+        source: str | Path | bytes,
+        *,
+        suffix: str | None = None,
+        settings: Any = None,
+    ) -> str:
+        if isinstance(source, bytes):
+            guard_size(len(source), settings)
+            return source.decode("utf-8", errors="ignore")
+        path = Path(source).expanduser()
+        if not path.is_file():
+            raise IngestError(f"file not found: {path}")
+        if path.suffix.lower() not in TEXT_SUFFIXES:
+            raise IngestError(f"unsupported file type: {path.suffix or path.name}")
+        guard_size(path.stat().st_size, settings)
+        return path.read_text(encoding="utf-8", errors="ignore")
+
+
+class IngestManager(Manager):
+    """Resolves the configured document loader (``ingest_driver``, default ``default``)."""
+
+    kind = DriverKind.INGEST
+    default_driver = IngestDriver.DEFAULT
+
+
+@register_driver(DriverKind.INGEST, IngestDriver.DEFAULT)
+def _default_loader_driver(app: Any) -> DefaultDocumentLoader:
+    return DefaultDocumentLoader()
+
+
+@register_driver(DriverKind.INGEST, IngestDriver.TEXT)
+def _text_loader_driver(app: Any) -> TextDocumentLoader:
+    return TextDocumentLoader()
+
+
 __all__ = [
     "SUPPORTED_SUFFIXES",
+    "DefaultDocumentLoader",
+    "DocumentLoader",
     "IngestError",
+    "IngestManager",
+    "TextDocumentLoader",
     "docx_to_text",
     "extract_text",
     "fetch_url",

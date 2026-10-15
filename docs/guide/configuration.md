@@ -100,6 +100,25 @@ elsewhere with a setting:
 | Prompts | `./prompts`, `<home>/prompts` | `PROMPTS_DIR` |
 | Knowledge | — (you choose) | `await KnowledgeBase.add_directory(path)` |
 
+## Driver selection
+
+Pluggable subsystems are chosen with a `<kind>_driver` setting, defaulting to the
+built-in class:
+
+```bash
+CACHE_DRIVER=null                # array (default) | null
+PROMPTS_DRIVER=memory            # file (default) | memory
+STORAGE_DRIVER=local             # local (default) | memory
+QUEUE_DRIVER=database            # database (default) | sync
+GUARDRAILS_DRIVER=regex          # regex (default) | moderation
+```
+
+Each field is a typed `StrEnum` (`agentkit.support.kinds`), so an invalid value
+fails at settings load. See [Contracts & Drivers](/guide/drivers) for the full
+table, per-app overrides (`app.extend`), and shipping your own driver
+(`@register_driver`) — and [Configuration reference](/reference/configuration)
+for the complete list.
+
 ## Model and provider settings
 
 ```bash

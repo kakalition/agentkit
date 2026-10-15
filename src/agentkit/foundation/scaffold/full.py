@@ -26,9 +26,21 @@ The default project ships the **whole agent stack**, wired through
 | Queue | `QUEUE_ENABLED=true` | `QUEUE_ENABLED=false` |
 | Native toolkits | `*_TOOLS_ENABLED=true` | disable the individual `*_TOOLS_ENABLED` flag |
 | Self-learning | `LEARNING_ENABLED=true` | `LEARNING_ENABLED=false` |
+| Drivers | each `<X>_DRIVER` setting | see `/guide/drivers` |
 
 Unconfigured layers stay idle (a debug log, never an error). See
 `docs/guide/fullstack.md` in the agentkit repository for details.
+
+### Swapping a driver
+
+Every subsystem resolves a driver from settings (`CACHE_DRIVER`, `PROMPTS_DRIVER`,
+`STORAGE_DRIVER`, …). Override one app-locally in
+`app/Providers/DriverServiceProvider.py` with `app.extend(DriverKind.X, "name", factory)`;
+a reusable driver library ships its driver with the
+`@register_driver(DriverKind.X, "name")` decorator. `agentkit inspect` prints the
+active driver for every subsystem. The same settings apply to the newer
+capabilities (todo tools via `.full()`, opt-in `.code_execution()`, graph/comms
+executors, eval reporters).
 """
 
 _FULL_STACK_ENV = """
@@ -50,9 +62,21 @@ _FULL_STACK_ENV = """
 # EMAIL_FROM=
 # -- Multi-agent ------------------------------------------------------------
 SUBAGENTS_ENABLED=false
-# -- Self-learning (reflect -> learn -> apply) -------------------------------
+# -- Self-learning (reflect -> learn -> apply; review-gated by default) ------
 # LEARNING_ENABLED=true
 # LEARNING_REFLECT_CRON=0 4 * * *
+# LEARNING_REQUIRE_REVIEW=true
+# -- Drivers (see docs: /guide/drivers) --------------------------------------
+# CACHE_DRIVER=array            # array | null
+# PROMPTS_DRIVER=file           # file | memory
+# MEMORY_DRIVER=repository      # repository | in_memory
+# STORAGE_DRIVER=local          # local | memory
+# QUEUE_DRIVER=database         # database | sync
+# SCHEDULER_DRIVER=dbos         # dbos | memory
+# GUARDRAILS_DRIVER=regex       # regex | moderation
+# COMMS_DRIVER=mailbox          # mailbox | broadcast | pipeline | pubsub | ...
+# GRAPH_DRIVER=sequential       # sequential | parallel | checkpointed
+# CODE_EXECUTOR_DRIVER=local    # local | docker | jupyter | e2b (extras)
 # -- Native toolkits (opt-out; reachable models/tasks/jobs stay allow-listed) -
 # DB_TOOLS_ENABLED=true
 # SCHEDULER_TOOLS_ENABLED=true
@@ -82,11 +106,12 @@ from agentkit import App, FullStackProvider
 
 from app.config import Settings
 from app.Providers.AppServiceProvider import AppServiceProvider
+from app.Providers.DriverServiceProvider import DriverServiceProvider
 from app.Providers.EventServiceProvider import EventServiceProvider
 from app.Repositories import AppRepositories
 
 app = App(name="{{project}}", settings=Settings, repos_factory=AppRepositories)
-app.providers([EventServiceProvider, AppServiceProvider, FullStackProvider])
+app.providers([EventServiceProvider, AppServiceProvider, DriverServiceProvider, FullStackProvider])
 ''',
         "app/Agents/assistant.py": '''"""The agent, built declaratively with ``Agent.make(...).full()``."""
 
@@ -115,10 +140,11 @@ def build_assistant() -> Agent:
         # .database({"note": Note})            # expose allow-listed models to the agent
         # .scheduler(["sync_notes"])           # expose allow-listed tasks
         # .queue()                             # enqueue allow-listed jobs/tasks
-        .learning()                            # reflect -> learn -> apply
-        # The whole agent stack: persona + memory + skills + HITL + safety
+        .learning()                            # reflect -> learn -> apply (review-gated)
+        # The whole agent stack: persona + memory + skills + HITL + safety + todos
         # (each layer skipped when its settings flag disables it).
         .full()
+        # .code_execution()                    # opt in to the approval-gated run_code tool
         .policy(assistant_policy())
         .output(str)
     )
@@ -144,6 +170,38 @@ class Kernel:
 
     def commands(self) -> list[Any]:
         return [PinNoteCommand()]
+''',
+        "app/Providers/DriverServiceProvider.py": '''"""Select or override pluggable drivers (see docs: ``/guide/drivers``).
+
+Every subsystem resolves a driver from settings (``CACHE_DRIVER``,
+``PROMPTS_DRIVER``, ``STORAGE_DRIVER``, …). Override one app-locally with
+``app.extend``; a reusable driver library ships its driver with the
+``@register_driver(DriverKind.X, "name")`` decorator instead.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from agentkit import DriverKind, Provider
+from agentkit.logging import get_logger
+
+
+class DriverServiceProvider(Provider):
+    # The subsystems this app reports on boot (all are configurable the same way).
+    WATCHED = (DriverKind.CACHE, DriverKind.PROMPTS, DriverKind.EMBEDDINGS, DriverKind.QUEUE)
+
+    def register(self, app: Any) -> None:
+        # App-local override (takes precedence for this app only):
+        #   app.extend(DriverKind.CACHE, "redis", lambda app: MyCache(app.settings))
+        return None
+
+    def boot(self, app: Any) -> None:
+        active = app.drivers()
+        get_logger("app.drivers").debug(
+            "active drivers: %s",
+            {str(kind): active.get(str(kind), {}).get("driver") for kind in self.WATCHED},
+        )
 ''',
         "app/Channels/__init__.py": '''"""Channels — transports that deliver turns to and from the agent."""
 ''',

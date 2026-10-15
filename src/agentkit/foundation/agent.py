@@ -93,6 +93,8 @@ class Agent:
         self._agent_tasks: list[str] | None = None
         self._agent_jobs: dict[str, Any] = {}
         self._learning_requested = False
+        self._todos_requested = False
+        self._code_requested = False
 
     # -- construction ---------------------------------------------------
     @classmethod
@@ -400,6 +402,16 @@ class Agent:
         self._learning_requested = enabled
         return self
 
+    def todos(self, enabled: bool = True) -> Agent:
+        """Attach the in-loop todo tools (see ``agentkit.tasks``)."""
+        self._todos_requested = enabled
+        return self
+
+    def code_execution(self, enabled: bool = True) -> Agent:
+        """Attach the approval-gated ``run_code`` tool (see ``agentkit.executors``)."""
+        self._code_requested = enabled
+        return self
+
     def full(
         self,
         *,
@@ -413,6 +425,8 @@ class Agent:
         subagents: Any = None,
         native: bool = True,
         learning: bool = True,
+        todos: bool = True,
+        code: bool = False,
         models: Mapping[str, Any] | None = None,
         tasks: Iterable[str] | None = None,
         jobs: Mapping[str, Any] | None = None,
@@ -463,6 +477,12 @@ class Agent:
         if learning and enabled("learning_enabled") and "learning" not in self._full_layers:
             self.learning()
             self._full_layers.add("learning")
+        if todos and "todos" not in self._full_layers:
+            self.todos()
+            self._full_layers.add("todos")
+        if code and "code" not in self._full_layers:
+            self.code_execution()
+            self._full_layers.add("code")
         return self
 
     def capability(self, capability: Any) -> Agent:
@@ -600,6 +620,8 @@ class Agent:
         self._attach_workspace(built)
         self._attach_native(built, resolved_settings)
         self._attach_learning(built, resolved_settings)
+        self._attach_tasks(built)
+        self._attach_code(built)
         self._built = built
         return built
 
@@ -746,6 +768,20 @@ class Agent:
 
         attach_learning(agent, settings=settings)
 
+    def _attach_tasks(self, agent: PydanticAgent[Any, Any]) -> None:
+        if not self._todos_requested:
+            return
+        from agentkit.tasks import attach_tasks
+
+        attach_tasks(agent)
+
+    def _attach_code(self, agent: PydanticAgent[Any, Any]) -> None:
+        if not self._code_requested:
+            return
+        from agentkit.executors import attach_code_executor
+
+        attach_code_executor(agent)
+
     def _attach_workspace(self, agent: PydanticAgent[Any, Any]) -> None:
         if not self._workspace_requested:
             return
@@ -801,6 +837,80 @@ class Agent:
                 return render_command(await sandbox.run(command))
             except Exception as exc:
                 return f"ERROR: {exc}"
+
+        async def _walk(root: str = ".") -> list[str]:
+            files: list[str] = []
+            for entry in await sandbox.list(root):
+                try:
+                    children = await sandbox.list(entry)
+                except Exception:
+                    children = None
+                if children is None:
+                    files.append(entry)
+                else:
+                    files.extend(await _walk(entry))
+            return files
+
+        @agent.tool
+        async def edit_file(ctx: RunContext[Any], path: str, old: str, new: str) -> str:
+            """Replace the first occurrence of ``old`` with ``new`` in a file.
+
+            Args:
+                path: Path relative to the workspace root.
+                old: The exact text to replace.
+                new: The replacement text.
+            """
+            try:
+                text = await sandbox.read(path)
+            except Exception as exc:
+                return f"ERROR: {exc}"
+            updated = text.replace(old, new, 1)
+            if updated == text:
+                return f"no change (pattern not found in {path})"
+            try:
+                await sandbox.write(path, updated)
+            except Exception as exc:
+                return f"ERROR: {exc}"
+            return f"edited {path}"
+
+        @agent.tool
+        async def glob(ctx: RunContext[Any], pattern: str) -> str:
+            """List workspace files matching an fnmatch pattern (e.g. "src/*.py").
+
+            Args:
+                pattern: An fnmatch glob, matched against relative paths.
+            """
+            import fnmatch
+
+            try:
+                matches = [path for path in await _walk() if fnmatch.fnmatch(path, pattern)]
+            except Exception as exc:
+                return f"ERROR: {exc}"
+            return "\n".join(matches) or "(no matches)"
+
+        @agent.tool
+        async def grep(ctx: RunContext[Any], pattern: str) -> str:
+            """Search workspace files for a regular expression.
+
+            Args:
+                pattern: The regular expression to search for.
+            """
+            import re
+
+            try:
+                regex = re.compile(pattern)
+                hits: list[str] = []
+                for path in await _walk():
+                    try:
+                        text = await sandbox.read(path)
+                    except Exception:
+                        continue
+                    for number, line in enumerate(text.splitlines(), start=1):
+                        if regex.search(line):
+                            hits.append(f"{path}:{number}: {line}")
+            except Exception as exc:
+                return f"ERROR: {exc}"
+            return "\n".join(hits) or "(no matches)"
 
     def _instructions(self, settings: Any) -> Any:
         """Compose the instructions string, or a per-run callable when the persona

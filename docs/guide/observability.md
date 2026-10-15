@@ -97,3 +97,107 @@ single id lets you reconstruct a whole turn across surfaces.
 :::
 
 Continue to [Scheduling & Durability →](/guide/scheduling)
+
+## Drivers
+
+### What a tracing driver is, in plain English
+
+**Tracing** is keeping a **diary of what the agent did**. Each time the agent
+starts a piece of work — handling a message, calling the model, running a tool —
+it writes down an entry: when it started, when it finished, and what happened in
+between. A single entry like that is called a **span**; the whole story of one
+request, from first entry to last, is called a **trace**. You read the diary to
+answer questions a plain log cannot: *which step was slow? which tool failed?
+where did this turn's time and tokens go?*
+
+The **tracing driver** is where those entries are written and shipped: to a
+local UI you can browse, to your terminal, to a backend you run, or nowhere.
+Because tracing on every step can be noisy, the driver is selected by a single
+setting — and, unusually, the setting *is* the driver name (`observability`).
+The tracer is reached through `app.tracer`, and `app.tracer.setup(settings)`
+turns on the active driver.
+
+### A runnable example
+
+```python
+from agentkit import App
+
+app = App()   # reads OBSERVABILITY from the env / .env (default: phoenix)
+
+# Default behavior: OBSERVABILITY=phoenix launches a local Arize Phoenix UI
+# (self-hosted, no account) and exports spans to it; if Phoenix is not
+# installed, spans fall back to the console.
+enabled = app.tracer.setup(app.settings)   # -> True while tracing is on
+print(enabled)
+
+# Switch by setting an env var and rebuilding the app:
+#   OBSERVABILITY=console  -> print spans to the terminal
+#   OBSERVABILITY=otlp     -> export to your own collector (set OTLP_ENDPOINT)
+#   OBSERVABILITY=off      -> disable tracing entirely
+```
+
+### Built-in drivers
+
+The kind is `observability`, and the `OBSERVABILITY` setting names the driver
+directly:
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `phoenix` (default) | Launches a local Arize Phoenix UI and exports spans to it. Falls back to printing spans on the console when the `phoenix` package is not installed. | Local, self-hosted tracing with no hosted account. |
+| `console` | Prints spans to the terminal. | A quick look during development, with no backend to run. |
+| `otlp` | Exports spans over OTLP to a backend you run — Arize Phoenix, Jaeger, Grafana Tempo, Langfuse, or an OpenTelemetry Collector. Set `OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`. Needs the `observability` extra. | Sending traces to your existing observability stack. |
+| `off` | Disables tracing. | When you want no tracing output or overhead. |
+
+::: warning Local mode, always
+agentkit runs the instrumenter in **local mode**: spans are never sent to any
+hosted account. Export only ever goes to a backend *you* run.
+:::
+
+### How to select a driver
+
+```bash
+OBSERVABILITY=phoenix     # phoenix | console | otlp | off
+OTLP_ENDPOINT=            # for OBSERVABILITY=otlp (or OTEL_EXPORTER_OTLP_ENDPOINT)
+```
+
+Selection follows the standard precedence: an explicit name passed in code
+(`app.manager("observability").driver("console")`), then the setting, then the
+default (`phoenix`). Because `observability` is typed, an invalid value fails at
+settings load with a `ValidationError` rather than silently doing nothing.
+
+### Override it just for your app
+
+`app.extend(...)` registers a tracer scoped to this application only:
+
+```python
+from agentkit import DriverKind
+
+app.extend(DriverKind.OBSERVABILITY, "acme", lambda app: AcmeTracer(app.settings))
+```
+
+Then select it with `OBSERVABILITY=acme`.
+
+### Ship a reusable driver
+
+Register it globally so any app can use it. A tracer only needs a `setup`
+method that returns whether tracing is enabled:
+
+```python
+from agentkit import DriverKind, register_driver
+
+@register_driver(DriverKind.OBSERVABILITY, "acme")
+def _acme_tracer(app):
+    return AcmeTracer(app.settings)
+```
+
+See [Contracts & Drivers](/guide/drivers) for the full contract.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| No Phoenix UI after `OBSERVABILITY=phoenix` | The `phoenix` package is not installed; spans fall back to the console. |
+| No spans at all | `OBSERVABILITY=off` is set. |
+| `otlp` exports nothing | The `observability` extra is missing, or neither `OTLP_ENDPOINT` nor `OTEL_EXPORTER_OTLP_ENDPOINT` is set. |
+| `ValidationError` when settings load | The `OBSERVABILITY` value is not one of `phoenix`, `console`, `otlp`, `off`. |
+| A changed setting had no effect | The manager caches the driver; call `app.manager("observability").forget()` or restart the process. |

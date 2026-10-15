@@ -32,7 +32,7 @@ from agentkit.foundation.facades import (
     Storage,
 )
 from agentkit.foundation.fullstack import FullStackProvider
-from agentkit.foundation.jobs import CacheStore
+from agentkit.foundation.jobs import CacheManager, CacheStore, NullCacheStore
 from agentkit.foundation.middleware import (
     guardrails_hooks,
     lifecycle_hooks,
@@ -55,7 +55,9 @@ __all__ = [
     "Agent",
     "App",
     "Cache",
+    "CacheManager",
     "CacheStore",
+    "NullCacheStore",
     "ChannelSpec",
     "Command",
     "Container",

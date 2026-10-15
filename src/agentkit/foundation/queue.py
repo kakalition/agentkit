@@ -26,9 +26,13 @@ from typing import Any
 
 from sqlmodel import Field, select
 
+from agentkit.contracts.queue import QueueDriver
 from agentkit.foundation.model import Model
 from agentkit.foundation.repository import Repository
 from agentkit.logging import get_logger
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, QueueDriverKind
+from agentkit.support.manager import Manager
 
 log = get_logger("agentkit.queue")
 
@@ -36,8 +40,11 @@ __all__ = [
     "DeserializationError",
     "Job",
     "Queue",
+    "QueueDriver",
+    "QueueManager",
     "QueueRepo",
     "QueuedJob",
+    "SyncQueue",
     "deserialize_job",
     "serialize_job",
 ]
@@ -266,3 +273,50 @@ class Queue:
                 record.available_at = datetime.now(UTC)
             repos.session.add(record)
             await repos.session.flush()
+
+
+class SyncQueue:
+    """A synchronous driver: jobs run inline, nothing is persisted."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def push(
+        self,
+        job: Any,
+        *,
+        queue: str | None = None,
+        delay: float = 0.0,
+        max_retries: int | None = None,
+    ) -> int:
+        if hasattr(job, "dispatch"):
+            await job.dispatch(self.app)
+        else:  # pragma: no cover - defensive
+            raise TypeError("queue.push() expects a Job instance")
+        return 0
+
+    async def run_once(self, queue: str | None = None) -> bool:
+        return False
+
+    async def size(self, queue: str | None = None) -> int:
+        return 0
+
+    async def failed(self, *, limit: int = 50) -> list[Any]:
+        return []
+
+
+class QueueManager(Manager):
+    """Resolves the configured queue driver (``queue_driver``, default ``database``)."""
+
+    kind = DriverKind.QUEUE
+    default_driver = QueueDriverKind.DATABASE
+
+
+@register_driver(DriverKind.QUEUE, QueueDriverKind.DATABASE)
+def _database_queue_driver(app: Any) -> Queue:
+    return Queue(app)
+
+
+@register_driver(DriverKind.QUEUE, QueueDriverKind.SYNC)
+def _sync_queue_driver(app: Any) -> SyncQueue:
+    return SyncQueue(app)

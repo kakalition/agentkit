@@ -25,10 +25,28 @@ from typing import Any
 from semantic_text_splitter import TextSplitter
 
 from agentkit.config import get_settings
+from agentkit.contracts.rag import Chunker, Reranker, Retriever
 from agentkit.db.repositories import Repositories
 from agentkit.runtime import build_runtime, repositories
+from agentkit.support import register_driver
+from agentkit.support.kinds import ChunkerDriver, DriverKind, RerankerDriver, RetrieverDriver
+from agentkit.support.manager import Manager
 
-__all__ = ["DEFAULT_CHUNK_CHARS", "DEFAULT_OVERLAP", "KnowledgeBase", "chunk_text"]
+__all__ = [
+    "DEFAULT_CHUNK_CHARS",
+    "DEFAULT_OVERLAP",
+    "Chunker",
+    "FixedChunker",
+    "IdentityReranker",
+    "InMemoryRetriever",
+    "KnowledgeBase",
+    "LexicalReranker",
+    "Reranker",
+    "RepositoryRetriever",
+    "Retriever",
+    "SemanticChunker",
+    "chunk_text",
+]
 
 DEFAULT_CHUNK_CHARS = 1200
 DEFAULT_OVERLAP = 200
@@ -164,3 +182,147 @@ class KnowledgeBase:
         for position, chunk in enumerate(hits, start=1):
             rendered.append(f"[{position}] {chunk.source}#{chunk.seq}\n{chunk.content}")
         return "\n\n".join(rendered)
+
+
+# --------------------------------------------------------------------------
+# Drivers
+# --------------------------------------------------------------------------
+
+
+class SemanticChunker:
+    """The default chunker: boundary-aware splitting (``semantic-text-splitter``)."""
+
+    def __init__(self, *, chunk_chars: int = DEFAULT_CHUNK_CHARS, overlap: int = DEFAULT_OVERLAP) -> None:
+        self.chunk_chars = chunk_chars
+        self.overlap = overlap
+
+    def chunk(self, text: str, **options: Any) -> list[str]:
+        return chunk_text(
+            text,
+            chunk_chars=int(options.get("chunk_chars", self.chunk_chars)),
+            overlap=int(options.get("overlap", self.overlap)),
+        )
+
+
+class FixedChunker:
+    """A simple fixed-size overlapping chunker (no Rust dependency)."""
+
+    def __init__(self, *, chunk_chars: int = DEFAULT_CHUNK_CHARS, overlap: int = DEFAULT_OVERLAP) -> None:
+        self.chunk_chars = chunk_chars
+        self.overlap = overlap
+
+    def chunk(self, text: str, **options: Any) -> list[str]:
+        text = (text or "").strip()
+        if not text:
+            return []
+        size = int(options.get("chunk_chars", self.chunk_chars))
+        step = max(1, size - int(options.get("overlap", self.overlap)))
+        return [text[start : start + size].strip() for start in range(0, len(text), step) if text[start : start + size].strip()]
+
+
+class RepositoryRetriever:
+    """The default retriever: the agent database's indexed knowledge chunks."""
+
+    def __init__(self, app: Any = None) -> None:
+        self.app = app
+        self._kb = KnowledgeBase(app) if app is not None else None
+
+    async def search(self, query: str, *, limit: int = 5, source: str | None = None) -> list[Any]:
+        kb = self._kb or KnowledgeBase()
+        return await kb.search(query, limit=limit, source=source)
+
+
+class InMemoryRetriever:
+    """A simple substring retriever for tests and ephemeral agents."""
+
+    def __init__(self) -> None:
+        self._chunks: list[Any] = []
+
+    def add(self, content: str, *, source: str = "") -> None:
+        from types import SimpleNamespace
+
+        self._chunks.append(
+            SimpleNamespace(content=content, source=source, seq=len(self._chunks))
+        )
+
+    async def search(self, query: str, *, limit: int = 5, source: str | None = None) -> list[Any]:
+        needle = (query or "").strip().lower()
+        if not needle:
+            return []
+        hits = [
+            chunk
+            for chunk in self._chunks
+            if (source is None or chunk.source == source) and needle in chunk.content.lower()
+        ]
+        return hits[:limit]
+
+
+class IdentityReranker:
+    """The default reranker: preserve the retriever's order."""
+
+    def rerank(self, query: str, hits: list[Any], **options: Any) -> list[Any]:
+        return list(hits)
+
+
+class LexicalReranker:
+    """A reranker scoring candidates by query-term overlap."""
+
+    def rerank(self, query: str, hits: list[Any], **options: Any) -> list[Any]:
+        terms = {term for term in (query or "").lower().split() if term}
+
+        def overlap(hit: Any) -> float:
+            content = str(getattr(hit, "content", hit) or "").lower()
+            return sum(1.0 for term in terms if term in content)
+
+        return sorted(hits, key=overlap, reverse=True)
+
+
+class ChunkerManager(Manager):
+    """Resolves the configured chunker (``chunker_driver``, default ``semantic``)."""
+
+    kind = DriverKind.CHUNKER
+    default_driver = ChunkerDriver.SEMANTIC
+
+
+class RetrieverManager(Manager):
+    """Resolves the configured retriever (``retriever_driver``, default ``repository``)."""
+
+    kind = DriverKind.RETRIEVER
+    default_driver = RetrieverDriver.REPOSITORY
+
+
+class RerankerManager(Manager):
+    """Resolves the configured reranker (``reranker_driver``, default ``identity``)."""
+
+    kind = DriverKind.RERANKER
+    default_driver = RerankerDriver.IDENTITY
+
+
+@register_driver(DriverKind.CHUNKER, ChunkerDriver.SEMANTIC)
+def _semantic_chunker_driver(app: Any) -> SemanticChunker:
+    return SemanticChunker()
+
+
+@register_driver(DriverKind.CHUNKER, ChunkerDriver.FIXED)
+def _fixed_chunker_driver(app: Any) -> FixedChunker:
+    return FixedChunker()
+
+
+@register_driver(DriverKind.RETRIEVER, RetrieverDriver.REPOSITORY)
+def _repository_retriever_driver(app: Any) -> RepositoryRetriever:
+    return RepositoryRetriever(app)
+
+
+@register_driver(DriverKind.RETRIEVER, RetrieverDriver.MEMORY)
+def _memory_retriever_driver(app: Any) -> InMemoryRetriever:
+    return InMemoryRetriever()
+
+
+@register_driver(DriverKind.RERANKER, RerankerDriver.IDENTITY)
+def _identity_reranker_driver(app: Any) -> IdentityReranker:
+    return IdentityReranker()
+
+
+@register_driver(DriverKind.RERANKER, RerankerDriver.LEXICAL)
+def _lexical_reranker_driver(app: Any) -> LexicalReranker:
+    return LexicalReranker()

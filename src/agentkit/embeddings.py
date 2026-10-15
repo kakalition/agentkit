@@ -26,8 +26,12 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
+from agentkit.support import drivers
+from agentkit.support.kinds import DriverKind, EmbeddingsDriver
+from agentkit.support.manager import Manager
+
 DEFAULT_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_EMBED_BACKEND = "sentence-transformers"
+DEFAULT_EMBED_BACKEND: EmbeddingsDriver = EmbeddingsDriver.SENTENCE_TRANSFORMERS
 DEFAULT_EMBED_DEVICE = "cpu"
 HASH_DIM = 256
 
@@ -185,6 +189,72 @@ def get_default_embedder() -> Embedder | None:
     return _default_embedder
 
 
+class _BackendShim:
+    """Fallback settings proxy that overrides only the embedding backend."""
+
+    def __init__(self, settings: Any, backend: str) -> None:
+        self._settings = settings
+        self.memory_embedding_backend = backend
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._settings, name)
+
+
+def _override_backend(settings: Any, backend: str) -> Any:
+    copy = getattr(settings, "model_copy", None)
+    if callable(copy):
+        try:
+            return copy(update={"memory_embedding_backend": backend})
+        except Exception:  # pragma: no cover - non-pydantic settings
+            pass
+    return _BackendShim(settings, backend)
+
+
+def build_embedder_for_backend(app: Any, backend: str | EmbeddingsDriver) -> Embedder | None:
+    """Build the embedder for a named ``backend`` using the app's settings."""
+    settings = getattr(app, "settings", None)
+    if settings is None:
+        from agentkit.config import get_settings
+
+        settings = get_settings()
+    try:
+        resolved: EmbeddingsDriver | str = EmbeddingsDriver(backend)
+    except ValueError:
+        resolved = backend
+    return build_embedder(_override_backend(settings, resolved))
+
+
+class EmbedderManager(Manager):
+    """Resolves the configured embedder (``memory_embedding_backend``).
+
+    The backend setting doubles as the driver name, so existing configuration
+    keeps working: ``sentence-transformers`` (default), ``fastembed``, ``hash``
+    or ``none``. Register new embedders with
+    ``app.extend("embeddings", "my-model", factory)``.
+    """
+
+    kind = DriverKind.EMBEDDINGS
+    default_driver = DEFAULT_EMBED_BACKEND
+
+    @property
+    def setting_name(self) -> str:
+        return "memory_embedding_backend"
+
+    def create(self, name: str) -> Embedder | None:
+        override = self._overrides.get(name)
+        if override is not None:
+            return override(self.app)
+        factory = drivers.resolve(self.kind, name)
+        if factory is not None:
+            return factory(self.app)
+        return build_embedder_for_backend(self.app, name)
+
+    def available(self) -> list[str]:
+        names = set(super().available())
+        names.update(str(driver) for driver in EmbeddingsDriver)
+        return sorted(names)
+
+
 def pack_vector(vector: Sequence[float]) -> str:
     """Base64-encode a float32 vector (the storage format; libSQL has no BLOB bind)."""
     data = np.asarray(vector, dtype=np.float32).tobytes()
@@ -250,10 +320,12 @@ __all__ = [
     "DEFAULT_EMBED_DEVICE",
     "DEFAULT_EMBED_MODEL",
     "Embedder",
+    "EmbedderManager",
     "FastEmbedEmbedder",
     "HashingEmbedder",
     "SentenceTransformerEmbedder",
     "build_embedder",
+    "build_embedder_for_backend",
     "configure",
     "cosine_similarity",
     "embed_documents",

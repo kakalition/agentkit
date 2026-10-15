@@ -11,7 +11,11 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from agentkit.contracts.ratelimit import RateLimiterContract
 from agentkit.errors import RateLimited
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, RateLimitDriver
+from agentkit.support.manager import Manager
 
 WINDOW_SECONDS = 60
 
@@ -110,4 +114,97 @@ def build_limiter(settings: Any, runtime: Any) -> RateLimiter | None:
     )
 
 
-__all__ = ["WINDOW_SECONDS", "RateDecision", "RateLimiter", "build_limiter"]
+class InMemoryRateLimiter:
+    """A fixed-window limiter held in process memory (no database)."""
+
+    def __init__(
+        self,
+        *,
+        per_minute: int = 60,
+        tool_per_minute: int = 0,
+        burst: int = 0,
+        owner_id: str = "owner",
+    ) -> None:
+        self.per_minute = int(per_minute)
+        self.tool_per_minute = int(tool_per_minute)
+        self.burst = int(burst)
+        self.owner_id = owner_id
+        self._windows: dict[tuple[str, str, int], int] = {}
+
+    def _effective_limit(self, limit: int | None) -> int:
+        return int(limit) if limit is not None else self.per_minute + self.burst
+
+    async def hit(
+        self, key: str, *, owner_id: str | None = None, limit: int | None = None
+    ) -> RateDecision:
+        effective = self._effective_limit(limit)
+        owner = str(owner_id or self.owner_id)
+        window = RateLimiter.window_start()
+        bucket = (owner, key, window)
+        count = self._windows.get(bucket, 0) + 1
+        self._windows[bucket] = count
+        allowed = count <= effective
+        return RateDecision(
+            allowed=allowed,
+            limit=effective,
+            remaining=max(0, effective - count),
+            retry_after=0 if allowed else window + WINDOW_SECONDS - int(time.time()),
+            count=count,
+        )
+
+    async def peek(self, key: str, *, owner_id: str | None = None) -> int:
+        return self._windows.get((str(owner_id or self.owner_id), key, RateLimiter.window_start()), 0)
+
+    async def reset(self, key: str, *, owner_id: str | None = None) -> None:
+        owner = str(owner_id or self.owner_id)
+        window = RateLimiter.window_start()
+        self._windows.pop((owner, key, window), None)
+
+    def enforce(self, decision: RateDecision) -> RateDecision:
+        if not decision.allowed:
+            raise RateLimited(
+                "rate limit exceeded",
+                detail={"retry_after": decision.retry_after, "limit": decision.limit},
+            )
+        return decision
+
+
+class RateLimitManager(Manager):
+    """Resolves the configured rate-limit driver (``rate_limit_driver``, default ``database``)."""
+
+    kind = DriverKind.RATELIMIT
+    default_driver = RateLimitDriver.DATABASE
+
+
+def _limiter_options(app: Any) -> dict[str, Any]:
+    settings = getattr(app, "settings", None)
+    return {
+        "per_minute": int(getattr(settings, "rate_limit_per_minute", 60) or 60),
+        "tool_per_minute": int(getattr(settings, "rate_limit_tool_per_minute", 0) or 0),
+        "burst": int(getattr(settings, "rate_limit_burst", 0) or 0),
+    }
+
+
+@register_driver(DriverKind.RATELIMIT, RateLimitDriver.DATABASE)
+def _database_limiter_driver(app: Any) -> RateLimiter:
+    return RateLimiter(app.runtime, **_limiter_options(app))
+
+
+@register_driver(DriverKind.RATELIMIT, RateLimitDriver.MEMORY)
+def _memory_limiter_driver(app: Any) -> InMemoryRateLimiter:
+    settings = getattr(app, "settings", None)
+    return InMemoryRateLimiter(
+        owner_id=str(getattr(settings, "owner_id", "owner") or "owner"),
+        **_limiter_options(app),
+    )
+
+
+__all__ = [
+    "WINDOW_SECONDS",
+    "InMemoryRateLimiter",
+    "RateDecision",
+    "RateLimitManager",
+    "RateLimiter",
+    "RateLimiterContract",
+    "build_limiter",
+]

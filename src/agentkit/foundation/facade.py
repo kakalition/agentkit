@@ -105,8 +105,17 @@ class Facade(metaclass=FacadeMeta):
         raise NotImplementedError(f"{cls.__name__} must define binding()")
 
     @classmethod
+    def driver_kind(cls) -> str | None:
+        """When set, resolve through ``app.manager(kind).driver()`` instead of ``binding()``."""
+        return None
+
+    @classmethod
     def _resolve(cls) -> Any:
-        return current_app().make(cls.binding())
+        app = current_app()
+        kind = cls.driver_kind()
+        if kind:
+            return app.manager(kind).driver()
+        return app.make(cls.binding())
 
     @classmethod
     def using(cls, app: Any):

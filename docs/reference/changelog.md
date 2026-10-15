@@ -7,6 +7,32 @@ agentkit follows [Semantic Versioning](https://semver.org) and
 
 ### Added
 
+- **Contracts + drivers** (`agentkit.contracts`, `agentkit.support`) — a
+  Laravel-style `contract → driver → registry → extend()` layer. Runtime-checkable
+  Protocol contracts; a global `(kind, name)` registry with
+  `@register_driver(kind, name)`; `Manager` + `App.manager`/`App.extend`/
+  `App.drivers`; typed `StrEnum` kinds and driver names (`agentkit.support.kinds`)
+  with every `<subsystem>_driver` setting validated at load. Converted: cache,
+  prompts, embeddings, memory + recall, RAG (chunker/retriever/reranker), storage
+  (+`edit_file`/`glob`/`grep`, `CompositeFileSystem`), queue, scheduler, durability,
+  database dialect, observability, pricing, rate limits, auth, vault, guardrails,
+  ingest, audio, learning, comms, channels + notification channels. `agentkit
+  inspect` and `/api/info` report the active driver per kind.
+- **New capabilities** in the same shape — an in-loop **task store** with
+  `write_todos`/`read_todos`/`add_todo`/`update_todo`/`clear_todos`
+  (`agentkit.tasks`); **subagents** with `isolated`/`shared`/`summarized` context
+  strategies and a `task(subagent, prompt)` tool (`agentkit.agents.subagent`);
+  **agent middleware** for model/tool hooks
+  (`agentkit.foundation.agent_middleware`); **graph executors**
+  (`sequential`/`parallel`/`checkpointed`, `agentkit.graph`); approval-gated
+  **code execution** (`agentkit.executors`); **eval reporters** +
+  `assert_trajectory` (`agentkit.evals`); **comms topologies**
+  (`agentkit.comms`) with groupchat speaker strategies; and first-class
+  `CommsContext` on `Deps`. `.full()` gains `todos`/`code` layers; the workspace
+  layer gains `edit_file`/`glob`/`grep`.
+- **Contracts & drivers docs** — `/guide/drivers`, `/guide/tasks`,
+  `/guide/code-execution`, and a `DriverServiceProvider` in the `agentkit new`
+  scaffold.
 - **Opt-in auth & RBAC** (`agentkit.security`) — an `Actor` identity threaded
   through repos/`Deps`, a fail-closed `Authenticator` composing API keys (static
   + DB-hashed) and JWT/JWKS, web/A2A/MCP wiring, `ToolPolicy.require_roles`,

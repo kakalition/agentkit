@@ -109,5 +109,10 @@ plugins = ["pydantic.mypy"]
 # SQLModel/SQLAlchemy column stubs (`order_by`, `.desc`) and the `list` method
 # name shadowing the builtin in class-body annotations are false positives here.
 [[tool.mypy.overrides]]
-module = ["agentkit.db.repositories", "agentkit.db.repositories.*", "agentkit.session"]
+module = [
+    "agentkit.db.repositories",
+    "agentkit.db.repositories.*",
+    "agentkit.session",
+    "agentkit.foundation.storage",
+]
 disable_error_code = ["arg-type", "attr-defined", "union-attr", "valid-type", "misc"]

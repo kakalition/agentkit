@@ -149,6 +149,11 @@ def _with_sender(ctx: Any, sender: str | None) -> Any:
     if ctx is None or sender is None:
         return ctx
     deps = getattr(ctx, "deps", None)
-    if deps is not None and hasattr(deps, "extras"):
+    if deps is None:
+        return ctx
+    comms = getattr(deps, "comms", None)
+    if comms is not None:
+        comms.sender = sender
+    if hasattr(deps, "extras"):
         deps.extras.setdefault("_mailbox_sender", sender)
     return ctx

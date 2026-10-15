@@ -21,7 +21,21 @@ from typing import Any
 from genai_prices import Usage as _Usage
 from genai_prices import calc_price as _calc_price
 
-__all__ = ["ModelPrice", "Pricing", "default_pricing", "estimate_cost", "set_default_pricing"]
+from agentkit.contracts.pricing import PriceProvider
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, PricingDriver
+from agentkit.support.manager import Manager
+
+__all__ = [
+    "ModelPrice",
+    "PriceProvider",
+    "Pricing",
+    "PricingManager",
+    "StaticPriceProvider",
+    "default_pricing",
+    "estimate_cost",
+    "set_default_pricing",
+]
 
 # Provider ids genai_prices recognises; used to route a ``provider:model`` ref.
 _KNOWN_PROVIDERS = {
@@ -135,6 +149,54 @@ def set_default_pricing(pricing: Pricing) -> Pricing:
     global _default
     _default = pricing
     return pricing
+
+
+class StaticPriceProvider:
+    """An offline ``PriceProvider`` backed by an explicit price table."""
+
+    def __init__(self, prices: dict[str, ModelPrice] | None = None) -> None:
+        self._prices: dict[str, ModelPrice] = {}
+        if prices:
+            self._prices.update({normalize_model(k).lower(): v for k, v in prices.items()})
+
+    def set(
+        self,
+        model: str,
+        price: ModelPrice | None = None,
+        *,
+        input: float | None = None,  # noqa: A002 - ergonomic kwarg name
+        output: float | None = None,
+    ) -> StaticPriceProvider:
+        if price is None:
+            price = ModelPrice(input or 0.0, output or 0.0)
+        self._prices[normalize_model(model).lower()] = price
+        return self
+
+    def cost(self, model: str, *, input_tokens: int = 0, output_tokens: int = 0) -> float:
+        price = self._prices.get(normalize_model(model).lower())
+        if price is None:
+            return 0.0
+        total = (input_tokens / 1000.0) * price.input_per_1k + (
+            output_tokens / 1000.0
+        ) * price.output_per_1k
+        return round(total, 8)
+
+
+class PricingManager(Manager):
+    """Resolves the configured price provider (``pricing_driver``, default ``genai``)."""
+
+    kind = DriverKind.PRICING
+    default_driver = PricingDriver.GENAI
+
+
+@register_driver(DriverKind.PRICING, PricingDriver.GENAI)
+def _genai_pricing_driver(app: Any) -> Pricing:
+    return Pricing()
+
+
+@register_driver(DriverKind.PRICING, PricingDriver.STATIC)
+def _static_pricing_driver(app: Any) -> StaticPriceProvider:
+    return StaticPriceProvider()
 
 
 def usage_cost(run_usage: Any, model: str) -> float:

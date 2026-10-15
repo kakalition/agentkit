@@ -38,6 +38,11 @@ def _ctx(deps: Deps) -> SimpleNamespace:
     return SimpleNamespace(deps=deps)
 
 
+# The default is now review-gated (lessons stored ``proposed``); tests that
+# exercise auto-application opt in explicitly.
+_AUTO = SimpleNamespace(learning_require_review=False)
+
+
 def _fn(agent, name):
     return agent._function_toolset.tools[name].function
 
@@ -52,7 +57,7 @@ async def test_reflect_extracts_lessons_preferences_facts(repos: Repositories):
         repos,
         ["I prefer metric units.", "Always refill the water bowl each morning.", "My name is Ada."],
     )
-    summary = await reflect(repos)
+    summary = await reflect(repos, settings=_AUTO)
 
     assert summary["skipped"] is False
     assert summary["lessons"] >= 1
@@ -82,7 +87,7 @@ async def test_reflect_uses_model_extraction(repos: Repositories):
         lambda messages, info: ModelResponse(parts=[TextPart(json.dumps(payload))])
     )
 
-    summary = await reflect(repos, model=model)
+    summary = await reflect(repos, model=model, settings=_AUTO)
 
     assert summary["lessons"] == 1
     assert summary["facts"] == 1
@@ -124,7 +129,7 @@ async def test_reflect_dedupes_near_identical_lessons(repos: Repositories):
     )
     await _seed(repos, ["Always refill the water bowl each morning."])
 
-    summary = await reflect(repos)
+    summary = await reflect(repos, settings=_AUTO)
 
     assert summary["merged"] >= 1
     assert len(await repos.memories.list(kind="procedural")) == 1
@@ -133,7 +138,7 @@ async def test_reflect_dedupes_near_identical_lessons(repos: Repositories):
 async def test_reflect_redacts_pii(repos: Repositories):
     await _seed(repos, ["Always email me at ada@example.com when you are done."])
 
-    await reflect(repos)
+    await reflect(repos, settings=_AUTO)
 
     rows = await repos.memories.list(kind="procedural")
     assert rows
@@ -148,6 +153,7 @@ async def test_reflect_redacts_pii(repos: Repositories):
 
 async def test_reflect_reports_skill_candidates(tmp_path: Path, repos: Repositories, deps: Deps):
     deps.settings.learning_skill_threshold = 2
+    deps.settings.learning_require_review = False
     await repos.memories.add(
         "Always refill the water bowl each morning.", kind="procedural", importance=0.9
     )
@@ -164,6 +170,7 @@ async def test_reflect_writes_skill_when_auto_skills(
 ):
     deps.settings.skills_dir = str(tmp_path / "skills")
     deps.settings.learning_skill_threshold = 2
+    deps.settings.learning_require_review = False
     await repos.memories.add(
         "Always refill the water bowl each morning.", kind="procedural", importance=0.9
     )
@@ -220,6 +227,7 @@ def test_attach_learning_registers_tools_and_is_idempotent():
 
 
 async def test_learning_tools_roundtrip(deps: Deps):
+    deps.settings.learning_require_review = False
     agent = Agent.make("l").instructions("x").learning().output(str).build()
     ctx = _ctx(deps)
 
@@ -233,6 +241,7 @@ async def test_learning_tools_roundtrip(deps: Deps):
 
 
 async def test_learn_tool_redacts(deps: Deps):
+    deps.settings.learning_require_review = False
     agent = Agent.make("l").instructions("x").learning().output(str).build()
     await _fn(agent, "learn")(_ctx(deps), "Always email bob@secret.com")
 
@@ -277,6 +286,7 @@ def test_cli_learning_reflect_lessons_forget(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("AGENT_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("MEMORY_EMBEDDING_BACKEND", "hash")
     monkeypatch.setenv("WEBUI_ENABLED", "false")
+    monkeypatch.setenv("LEARNING_REQUIRE_REVIEW", "false")
     get_settings.cache_clear()
     _seed_cli(tmp_path)
     runner = CliRunner()

@@ -67,6 +67,7 @@ export default defineConfig({
           items: [
             { text: "The Application", link: "/guide/application" },
             { text: "Service Providers", link: "/guide/providers" },
+            { text: "Contracts & Drivers", link: "/guide/drivers" },
             { text: "The Full Stack", link: "/guide/fullstack" },
             { text: "The Agent Builder", link: "/guide/agents" },
             { text: "Tools", link: "/guide/tools" },
@@ -98,6 +99,7 @@ export default defineConfig({
             { text: "Human-in-the-Loop", link: "/guide/hitl" },
             { text: "Orchestrator & Sub-Agents", link: "/guide/orchestrator" },
             { text: "Agent Communication", link: "/guide/agent-communication" },
+            { text: "Tasks & Todos", link: "/guide/tasks" },
             { text: "Planning & Graphs", link: "/guide/planning" },
             { text: "Multi-Agent Teams", link: "/guide/teams" },
             { text: "Model Routing & Cost", link: "/guide/routing" },
@@ -112,6 +114,7 @@ export default defineConfig({
             { text: "Authentication", link: "/guide/authentication" },
             { text: "Observability", link: "/guide/observability" },
             { text: "Scheduling & Durability", link: "/guide/scheduling" },
+            { text: "Code Execution", link: "/guide/code-execution" },
             { text: "Notifications", link: "/guide/notifications" },
             { text: "Jobs & Utilities", link: "/guide/jobs" },
             { text: "Budgets & Limits", link: "/guide/budgets" },

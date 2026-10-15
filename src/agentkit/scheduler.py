@@ -32,6 +32,9 @@ from agentkit._sync import run_sync
 from agentkit.config import AgentSettings, get_settings
 from agentkit.db.repositories import Repositories
 from agentkit.runtime import Runtime, build_runtime, repositories
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, SchedulerDriver
+from agentkit.support.manager import Manager
 
 TASKS: dict[str, Callable[..., Any]] = {}
 TICK_SCHEDULE_NAME = "agentkit-scheduler-tick"
@@ -275,3 +278,149 @@ async def run_due_now(now: datetime | None = None) -> list[str]:
             await invoke_task(item.task, item.args_json)
             await repos.schedules.record_run(item.name)
     return [item.name for item in due]
+
+
+# --------------------------------------------------------------------------
+# Drivers
+# --------------------------------------------------------------------------
+
+
+class DBOSCronScheduler:
+    """The default scheduler driver: durable DBOS cron (see the module functions)."""
+
+    def __init__(self, app: Any = None) -> None:
+        self.app = app
+
+    async def schedule_cron(
+        self,
+        name: str,
+        cron: str,
+        task_name: str,
+        *,
+        args: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> None:
+        await schedule_cron(name, cron, task_name, args=args, enabled=enabled)
+
+    async def schedule_once(
+        self,
+        name: str,
+        when: datetime | str,
+        task_name: str,
+        *,
+        args: dict[str, Any] | None = None,
+    ) -> None:
+        await schedule_once(name, when, task_name, args=args)
+
+    async def list_jobs(self) -> list[dict[str, Any]]:
+        return await list_jobs()
+
+    async def set_enabled(self, name: str, enabled: bool) -> bool:
+        return await set_enabled(name, enabled)
+
+    async def remove_job(self, name: str) -> bool:
+        return await remove_job(name)
+
+    async def run_due_now(self, now: datetime | None = None) -> list[str]:
+        return await run_due_now(now)
+
+
+class _MemoryJob:
+    def __init__(self, name: str, kind: str, schedule: str, task: str, args: str, enabled: bool) -> None:
+        self.name = name
+        self.kind = kind
+        self.schedule = schedule
+        self.task = task
+        self.args = args
+        self.enabled = enabled
+
+
+class MemoryScheduler:
+    """An in-process scheduler driver (no database, no DBOS)."""
+
+    def __init__(self, app: Any = None) -> None:
+        self.app = app
+        self._jobs: dict[str, dict[str, Any]] = {}
+        self._runs: dict[str, int] = {}
+
+    async def schedule_cron(
+        self,
+        name: str,
+        cron: str,
+        task_name: str,
+        *,
+        args: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> None:
+        croniter(cron)
+        self._jobs[name] = {
+            "name": name,
+            "kind": "cron",
+            "schedule": cron,
+            "task": task_name,
+            "args": json.dumps(args or {}),
+            "enabled": enabled,
+            "run_count": self._runs.get(name, 0),
+        }
+
+    async def schedule_once(
+        self,
+        name: str,
+        when: datetime | str,
+        task_name: str,
+        *,
+        args: dict[str, Any] | None = None,
+    ) -> None:
+        moment = when if isinstance(when, datetime) else datetime.fromisoformat(str(when))
+        self._jobs[name] = {
+            "name": name,
+            "kind": "once",
+            "schedule": moment.isoformat(),
+            "task": task_name,
+            "args": json.dumps(args or {}),
+            "enabled": True,
+            "run_count": self._runs.get(name, 0),
+        }
+
+    async def list_jobs(self) -> list[dict[str, Any]]:
+        return [dict(job) for job in self._jobs.values()]
+
+    async def set_enabled(self, name: str, enabled: bool) -> bool:
+        job = self._jobs.get(name)
+        if job is None:
+            return False
+        job["enabled"] = enabled
+        return True
+
+    async def remove_job(self, name: str) -> bool:
+        return self._jobs.pop(name, None) is not None
+
+    async def run_due_now(self, now: datetime | None = None) -> list[str]:
+        now = now or datetime.now(UTC)
+        jobs = [
+            _MemoryJob(j["name"], j["kind"], j["schedule"], j["task"], j["args"], j["enabled"])
+            for j in self._jobs.values()
+        ]
+        fired: list[str] = []
+        for item in due_jobs(jobs, now):
+            await invoke_task(item.task, item.args_json)
+            self._runs[item.name] = self._runs.get(item.name, 0) + 1
+            fired.append(item.name)
+        return fired
+
+
+class SchedulerManager(Manager):
+    """Resolves the configured scheduler driver (``scheduler_driver``, default ``dbos``)."""
+
+    kind = DriverKind.SCHEDULER
+    default_driver = SchedulerDriver.DBOS
+
+
+@register_driver(DriverKind.SCHEDULER, SchedulerDriver.DBOS)
+def _dbos_scheduler_driver(app: Any) -> DBOSCronScheduler:
+    return DBOSCronScheduler(app)
+
+
+@register_driver(DriverKind.SCHEDULER, SchedulerDriver.MEMORY)
+def _memory_scheduler_driver(app: Any) -> MemoryScheduler:
+    return MemoryScheduler(app)

@@ -13,6 +13,43 @@ from typing import Any
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from agentkit.support.kinds import (
+    AgentMiddlewareDriver,
+    AudioDriver,
+    AuthDriver,
+    CacheDriver,
+    ChannelDriver,
+    ChunkerDriver,
+    CodeExecDriver,
+    CommsDriver,
+    ContextDriver,
+    DatabaseDriver,
+    DurabilityDriver,
+    EmbeddingsDriver,
+    EvalsReporterDriver,
+    GraphDriver,
+    GuardrailDriver,
+    IngestDriver,
+    LearningExtractorDriver,
+    LearningSinkDriver,
+    LearningStrategyDriver,
+    MemoryDriver,
+    NotificationChannelDriver,
+    ObservabilityDriver,
+    PlanningDriver,
+    PricingDriver,
+    PromptsDriver,
+    QueueDriverKind,
+    RateLimitDriver,
+    RecallDriver,
+    RerankerDriver,
+    RetrieverDriver,
+    SchedulerDriver,
+    StorageDriver,
+    TaskDriver,
+    VaultDriver,
+)
+
 DEFAULT_WORKSPACE_ROOT = "~/.agentkit"
 
 
@@ -57,9 +94,9 @@ class AgentSettings(BaseSettings):
     # memory — durable facts about the owner (name, preferences, …) the agent can
     # save and recall across conversations. Recall is semantic by default.
     memory_enabled: bool = True
-    memory_embedding_backend: str = (
-        "sentence-transformers"  # sentence-transformers | fastembed | hash | none
-    )
+    memory_driver: MemoryDriver = MemoryDriver.REPOSITORY
+    memory_recall_driver: RecallDriver = RecallDriver.HYBRID
+    memory_embedding_backend: EmbeddingsDriver = EmbeddingsDriver.SENTENCE_TRANSFORMERS
     memory_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     memory_embedding_device: str = "cpu"
     # optional prefixes for instruction-aware models (e.g. Qwen3/e5); empty for MiniLM
@@ -99,9 +136,14 @@ class AgentSettings(BaseSettings):
     learning_auto_skills: bool = False
     learning_max_lessons: int = 50
     # when true, lessons are stored ``proposed`` until approved (review inbox).
-    learning_require_review: bool = False
+    # Review-gated by default: self-learning must not silently drift behavior.
+    learning_require_review: bool = True
     # optional: gate learning on captured evals passing (see ``agentkit.evals``).
     learning_eval_gate: bool = False
+    # driver selection for the learning subsystem (see ``agentkit.support.Manager``).
+    learning_extractor_driver: LearningExtractorDriver = LearningExtractorDriver.MODEL
+    learning_strategy_driver: LearningStrategyDriver = LearningStrategyDriver.REFLECT_APPLY
+    learning_sink_driver: LearningSinkDriver = LearningSinkDriver.MEMORY
 
     # auth — opt-in. ``auth_enabled=False`` (default) keeps the local single-operator
     # behavior: every request runs as the settings owner with no roles. When enabled
@@ -168,6 +210,36 @@ class AgentSettings(BaseSettings):
     queue_enabled: bool = False
     queue_default: str = "default"
 
+    # drivers — pluggable implementations selected per subsystem (see
+    # ``agentkit.support.Manager``). Existing classes are the default drivers.
+    cache_driver: CacheDriver = CacheDriver.ARRAY
+    prompts_driver: PromptsDriver = PromptsDriver.FILE
+    pricing_driver: PricingDriver = PricingDriver.GENAI
+    ingest_driver: IngestDriver = IngestDriver.DEFAULT
+    audio_driver: AudioDriver = AudioDriver.OPENAI
+    database_driver: DatabaseDriver = DatabaseDriver.SQLITE
+    queue_driver: QueueDriverKind = QueueDriverKind.DATABASE
+    scheduler_driver: SchedulerDriver = SchedulerDriver.DBOS
+    storage_driver: StorageDriver = StorageDriver.LOCAL
+    rate_limit_driver: RateLimitDriver = RateLimitDriver.DATABASE
+    durability_driver: DurabilityDriver = DurabilityDriver.DBOS
+    auth_driver: AuthDriver = AuthDriver.DEFAULT
+    vault_driver: VaultDriver = VaultDriver.FERNET
+    guardrails_driver: GuardrailDriver = GuardrailDriver.REGEX
+    chunker_driver: ChunkerDriver = ChunkerDriver.SEMANTIC
+    retriever_driver: RetrieverDriver = RetrieverDriver.REPOSITORY
+    reranker_driver: RerankerDriver = RerankerDriver.IDENTITY
+    comms_driver: CommsDriver = CommsDriver.MAILBOX
+    tasks_driver: TaskDriver = TaskDriver.MEMORY
+    planning_driver: PlanningDriver = PlanningDriver.SINGLE
+    context_driver: ContextDriver = ContextDriver.ISOLATED
+    agent_middleware_driver: AgentMiddlewareDriver = AgentMiddlewareDriver.NOOP
+    graph_driver: GraphDriver = GraphDriver.SEQUENTIAL
+    code_executor_driver: CodeExecDriver = CodeExecDriver.LOCAL
+    evals_reporter_driver: EvalsReporterDriver = EvalsReporterDriver.TEXT
+    channel_driver: ChannelDriver = ChannelDriver.LOG
+    notification_channel_driver: NotificationChannelDriver = NotificationChannelDriver.LOG
+
     # storage — agents live under ``workspace_root``; ``agent_home`` defaults to
     # ``workspace_root/<agent_name>`` and can be overridden with ``AGENT_HOME``.
     workspace_root: Path = Field(
@@ -184,7 +256,7 @@ class AgentSettings(BaseSettings):
     webui_port: int = 8787
 
     # observability — on by default with a local Phoenix UI (self-hosted, no account)
-    observability: str = "phoenix"  # phoenix | console | otlp | off
+    observability: ObservabilityDriver = ObservabilityDriver.PHOENIX
     otlp_endpoint: str | None = None
     log_level: str = "INFO"
     log_json: bool = False

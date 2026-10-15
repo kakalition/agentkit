@@ -23,10 +23,22 @@ console for exploring and operating the running agent.
 
 - **A framework front door.** An `App` container with service providers
   (`register`/`boot`), a fluent `Agent` builder, short facades
-  (`Memory`/`Schedule`/`DB`/`Events`/`Log`), lifecycle events + turn middleware,
+  (  `Memory`/`Schedule`/`DB`/`Events`/`Log`), lifecycle events + turn middleware,
   per-concern config, discoverable **skills** (`SKILL.md`), an Artisan-style
   `make:*` CLI, and a thin `Model`/`DB` layer — all additive over the building
   blocks below.
+- **Contracts + drivers.** Every subsystem — cache, memory, knowledge, storage,
+  queue, scheduler, durability, observability, pricing, rate limits, auth, vault,
+  guardrails, prompts, channels, comms topologies, and more — exposes a
+  runtime-checkable contract, a default driver (the existing class), and a typed
+  `DriverKind`/driver enum. Pick one per settings (`CACHE_DRIVER=null`), override
+  it per app (`app.extend(...)`), or ship your own (`@register_driver`).
+  `agentkit inspect` prints the active driver everywhere.
+- **Composable by default.** An in-loop **task store** (`write_todos`/`read_todos`),
+  **subagent context strategies** (`isolated`/`shared`/`summarized`), **agent
+  middleware** (model/tool hooks), **graph executors** (`sequential`/`parallel`/
+  `checkpointed`), approval-gated **code execution**, and **eval reporters** —
+  all opt-in and equally swappable.
 - **One process, one command.** `run_all(...)` supervises the worker, A2A, MCP,
   bot, and web UI in a single local process — no server to run.
 - **Durable by default.** Conversation history and background work run on DBOS

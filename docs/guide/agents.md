@@ -147,7 +147,8 @@ agent.knowledge(path="./docs")     # index a path directly
 ### `.workspace(root_or_sandbox, *, read_only=False)`
 
 Gives the agent a confined workspace with `read_file`, `list_files`, `write_file`,
-and `run_command`. Backed by PydanticAI's workspace layer.
+`edit_file`, `glob`, `grep`, and `run_command`. Backed by PydanticAI's workspace
+layer.
 
 ```python
 from agentkit import Sandbox
@@ -188,11 +189,14 @@ agent.knowledge_admin()              # index / replace / forget documents
 agent.skill_authoring()              # write SKILL.md files
 agent.native()                       # every settings-enabled toolkit
 agent.learning()                     # reflect -> learn -> apply
+agent.todos()                        # in-loop todo tools (see Tasks & Todos)
+agent.code_execution()               # approval-gated run_code (see Code Execution)
 ```
 
 `.native(enabled=None, *, models, tasks, jobs)` attaches the whole set; `.full()`
 attaches the settings-enabled toolkits plus self-learning. See
-[Native Tools](/guide/native-tools) and [Self-Learning](/guide/self-learning).
+[Native Tools](/guide/native-tools), [Self-Learning](/guide/self-learning),
+[Tasks & Todos](/guide/tasks), and [Code Execution](/guide/code-execution).
 
 ## `full(...)`
 
@@ -204,7 +208,8 @@ agent.full(models={"note": Note}, tasks=["sync_notes"], jobs={"sync": SyncNotes}
 
 Each layer is toggleable and skipped when its settings flag disables it
 (`persona`, `memory`, `skills`, `knowledge`, `hitl`, `safety`, `workspace`,
-`subagents`, `native`, `learning`). See [The Full Stack](/guide/fullstack).
+`subagents`, `native`, `learning`, `todos`, `code`). See
+[The Full Stack](/guide/fullstack).
 
 ## Models, output, and reliability
 

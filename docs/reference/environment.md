@@ -59,6 +59,22 @@ PEERS_FILE=
 # --- MCP --------------------------------------------------------------------
 MCP_HOST=127.0.0.1
 MCP_PORT=8765
+
+# --- Drivers (each subsystem resolves one; see /guide/drivers) --------------
+CACHE_DRIVER=array              # array | null
+PROMPTS_DRIVER=file             # file | memory
+MEMORY_DRIVER=repository        # repository | in_memory
+STORAGE_DRIVER=local            # local | memory
+QUEUE_DRIVER=database           # database | sync
+SCHEDULER_DRIVER=dbos           # dbos | memory
+GUARDRAILS_DRIVER=regex         # regex | moderation
+COMMS_DRIVER=mailbox            # mailbox | broadcast | pipeline | pubsub | ...
+GRAPH_DRIVER=sequential         # sequential | parallel | checkpointed
+CODE_EXECUTOR_DRIVER=local      # local | docker | jupyter | e2b (extras)
+
+# --- Self-learning ----------------------------------------------------------
+# Lessons are review-gated by default (stored ``proposed`` until approved).
+LEARNING_REQUIRE_REVIEW=true
 ```
 
 ## Precedence

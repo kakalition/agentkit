@@ -26,8 +26,16 @@ from pathlib import Path
 from typing import Any
 
 from agentkit.skills import parse_front_matter
+from agentkit.support.kinds import DriverKind, PromptsDriver
+from agentkit.support.manager import Manager
 
-__all__ = ["DEFAULT_PROMPT_DIR", "Prompt", "PromptRegistry", "load_prompt_file"]
+__all__ = [
+    "DEFAULT_PROMPT_DIR",
+    "Prompt",
+    "PromptManager",
+    "PromptRegistry",
+    "load_prompt_file",
+]
 
 DEFAULT_PROMPT_DIR = "prompts"
 
@@ -124,3 +132,21 @@ class PromptRegistry:
 
     def __contains__(self, name: object) -> bool:
         return isinstance(name, str) and name in self._prompts
+
+
+class PromptManager(Manager):
+    """Resolves the configured prompt store (``prompts_driver``, default ``file``).
+
+    Drivers are :class:`PromptRegistry` instances; ``file`` discovers
+    ``prompts/*.md`` under the configured roots, ``memory`` starts empty.
+    """
+
+    kind = DriverKind.PROMPTS
+    default_driver = PromptsDriver.FILE
+
+    def create_file_driver(self, app: Any) -> PromptRegistry:
+        settings = getattr(app, "settings", None)
+        return PromptRegistry.from_settings(settings).discover()
+
+    def create_memory_driver(self, app: Any) -> PromptRegistry:
+        return PromptRegistry([])

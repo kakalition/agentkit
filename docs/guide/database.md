@@ -150,3 +150,121 @@ repositories or SQLAlchemy directly — the session is the same.
 :::
 
 Continue to [Conversations →](/guide/conversations)
+
+## Drivers
+
+### What this is, in plain English
+
+Everything agentkit persists — conversations, memory, knowledge chunks, queued
+jobs — lives in **one database**, and this page is about which *kind* of database
+that is.
+
+"Database" can mean two different things, and it is worth separating them:
+
+- The **database engine** (SQLite, PostgreSQL, ...) is the program that actually
+  stores and retrieves the rows.
+- A **dialect** is the adapter that teaches the framework how to talk to a
+  particular engine: how to turn a connection URL into an async driver, how to
+  build the engine, and so on.
+
+agentkit ships two dialects. The default uses SQLite (through libSQL): a single
+local file with no server to install, ideal for a laptop or a small deployment.
+The other targets PostgreSQL, a client/server database you would choose when
+several processes share one database or you need its concurrency and operational
+features.
+
+::: tip The travel-adapter analogy
+The engine is a wall socket in another country; the dialect is the travel adapter
+that makes your plug fit. Same appliance (your code), different socket, different
+adapter — you do not rebuild the appliance.
+:::
+
+### A runnable example
+
+```python
+import asyncio
+from agentkit import App, DriverKind
+
+async def main():
+    # The engine is chosen by DATABASE_DRIVER; sqlite is the default.
+    app = App()                       # DATABASE_DRIVER=sqlite (no server needed)
+    print(app.manager(DriverKind.DATABASE).available())   # ['postgres', 'sqlite']
+
+    # The dialect turns a URL into an async engine and a session factory.
+    dialect = app.dialect             # == app.manager("database").driver()
+    print(dialect.async_url("sqlite:///./app.db"))         # sqlite+aiosqlite:///./app.db
+    print(dialect.async_url("postgresql://u:p@host/db"))   # postgresql+asyncpg://u:p@host/db
+
+    # Tables are created from your models on startup.
+    async with app.repositories() as repos:
+        await repos.conversations.get_or_create("cli:default")
+
+asyncio.run(main())
+```
+
+Switch the whole application by changing the environment variable:
+
+```bash
+DATABASE_DRIVER=sqlite     # a local file (default)
+DATABASE_DRIVER=postgres   # a PostgreSQL server
+```
+
+### Built-in drivers
+
+**Dialects — setting `DATABASE_DRIVER`**
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `sqlite` | Uses a local file via libSQL/SQLite with the async `aiosqlite` driver; enables WAL and a busy timeout | Default; local development and single-process deployments |
+| `postgres` | Maps the URL to `asyncpg` and builds a PostgreSQL engine | Multiple processes sharing one database; production scale |
+
+A dialect provides `async_url(url)` and `create_engine(url, *, auth_token=None,
+echo=False)`. For remote libSQL URLs, pass an `auth_token`; for Postgres, use a
+full `postgresql://` URL.
+
+### How to select it
+
+Selection follows the same precedence everywhere in agentkit:
+
+1. **An explicit name in code** — `app.manager(DriverKind.DATABASE).driver("postgres")`.
+2. **The setting** — `DATABASE_DRIVER`, read from the environment or a `.env` file.
+3. **The default** — `sqlite`, listed first in the table above.
+
+**Accessors:** `app.dialect` returns the configured dialect;
+`app.manager(DriverKind.DATABASE)` gives the manager (`.driver()`, `.available()`,
+`.configured_driver()`, `.forget()`).
+
+Override a dialect for one app only (this never leaks into other apps or the
+global registry):
+
+```python
+from agentkit import DriverKind
+
+app.extend(DriverKind.DATABASE, "cockroach", lambda app: MyDialect())
+# then select it: DATABASE_DRIVER=cockroach
+```
+
+Ship a reusable dialect to every app that imports your package with
+`@register_driver`:
+
+```python
+from agentkit import DriverKind, register_driver
+
+@register_driver(DriverKind.DATABASE, "cockroach")
+def _cockroach(app):
+    return MyDialect()
+```
+
+A dialect needs no base class — only the contract's methods. See
+[Contracts & Drivers](/guide/drivers) for the full catalog, precedence, and the
+conformance tests every driver must pass.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| `database is locked` | Two writers contend on SQLite; WAL and the busy timeout usually absorb this, but prefer one writer or move to Postgres |
+| `ModuleNotFoundError: asyncpg` | `DATABASE_DRIVER=postgres` without the Postgres dependency installed |
+| A remote URL is rejected | Pass the `auth_token` for a remote libSQL URL, or use a full `postgresql://` URL |
+| `ValidationError` when settings load | `DATABASE_DRIVER` is not `sqlite` or `postgres` |
+| Tables miss columns after an upgrade | Run `sync_missing_columns(engine)` to repair the drift |

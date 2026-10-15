@@ -37,6 +37,8 @@ agent = (
 | `native=True` | native toolkits ([Native Tools](/guide/native-tools)) | each `*_TOOLS_ENABLED` flag |
 | `models`/`tasks`/`jobs` | native allow-lists | argument omitted |
 | `learning=True` | self-learning ([Self-Learning](/guide/self-learning)) | `LEARNING_ENABLED=false` |
+| `todos=True` | in-loop todo tools ([Tasks & Todos](/guide/tasks)) | — |
+| `code=False` | approval-gated `run_code` ([Code Execution](/guide/code-execution)) | off by default |
 
 Calling `full()` twice is safe: each layer is applied once and tools are never
 double-registered.
@@ -67,9 +69,10 @@ Nothing raises when the stack is empty.
 ## Scaffold
 
 `agentkit new <name>` writes the **full-stack** project by default:
-`bootstrap.py` registers `FullStackProvider`, `app/Agents/assistant.py` builds
-with `.full()`, `app/Channels/` shows a channel factory, and `config/memory.py`
-+ `config/channels.py` layer the sections.
+`bootstrap.py` registers `FullStackProvider` (and
+`DriverServiceProvider`, which reports/overrides drivers), `app/Agents/assistant.py`
+builds with `.full()`, `app/Channels/` shows a channel factory, and
+`config/memory.py` + `config/channels.py` layer the sections.
 
 ```bash
 agentkit new my-agent          # full stack (default)

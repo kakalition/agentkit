@@ -100,3 +100,89 @@ nesting multiplies latency and token cost without improving quality.
 :::
 
 Continue to [Model Routing & Cost →](/guide/routing)
+
+## Subagent context in a team
+
+### What this is
+
+Every team member you delegate to is a **subagent** — a helper agent — and every
+way of delegating eventually asks the same question: **what can that helper
+see?**
+
+The helper's **context** is the parent's dependencies (`deps`: the shared objects
+such as the database and settings), its conversation so far, and its model. In
+this page, spawning is the delegated `task(subagent, prompt)` tool: `spawn_tool`
+and `Supervisor` expose each roster member as a tool, `run_all_agents` runs them
+directly from your code, and all of them run the child through the **context
+driver** (built on `agentkit.agents.subagent.subagent_tool`).
+
+Think of emailing a team. You can cc everyone on the entire thread (**shared**),
+send each person only the paragraph relevant to their job (**isolated**, the
+default), or forward a short recap (**summarized**).
+
+### End-to-end example
+
+```python
+from agentkit import Agent, App, DriverKind, spawn_tool, team_tools
+from agentkit.agents.registry import AgentRegistry
+from agentkit.agents.subagent import SharedContext, subagent_tool
+
+app = App(name="lead")
+roster = {"writer": writer_agent, "researcher": researcher_agent}
+
+# Default: CONTEXT_DRIVER unset -> "isolated"; spawn_tool gives the model a
+# spawn(agent, task) tool and each child sees only the task string.
+lead = Agent.make("lead").tool(spawn_tool(roster)).build()
+tools = team_tools(roster)          # convenience: [spawn_tool(roster)]
+
+# The same thing at a lower level: a registry plus an explicit strategy.
+registry = AgentRegistry()
+for name, agent in roster.items():
+    registry.register_local(agent, name=name)
+strategy = app.manager(DriverKind.CONTEXT).driver()   # isolated by default
+task_tool = subagent_tool(registry, strategy=strategy)
+
+# A Supervisor and run_all_agents delegate through the same driver:
+#   Supervisor(roster, name="lead").build()
+#   await run_all_agents(roster, "Summarise the incident.")
+
+# Switch driver: CONTEXT_DRIVER=shared in .env, or override it just for this app:
+app.extend(DriverKind.CONTEXT, "shared", lambda app: SharedContext())
+```
+
+### Drivers
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `isolated` | Each helper starts blank: it inherits none of the parent's dependencies, conversation, or history, so the task string must be self-contained. | Default. Use it for clean, independent sub-tasks and when one helper must not see another team's data. |
+| `shared` | Each helper reuses the parent's context: the same dependencies and the same conversation as the parent run. | Use it when helpers need the ongoing conversation or the parent's resources, and sharing that data is fine. |
+| `summarized` | Like `isolated`, but the tool wraps the prompt as a summary of prior context. | Use it when a helper needs the gist of the parent's context without receiving it verbatim. |
+
+### Selecting a driver
+
+- **Setting** — one line in the environment or `.env`: `CONTEXT_DRIVER=shared`.
+- **Precedence** — an explicit name passed in code wins, then the setting, then
+  the default (`isolated`).
+- **Per app** — `app.extend(DriverKind.CONTEXT, "brief", lambda app: MyContextStrategy())`.
+- **Reusable** — ship one for everyone with `@register_driver`:
+
+```python
+from agentkit import DriverKind, register_driver
+
+@register_driver(DriverKind.CONTEXT, "brief")
+def _brief_context(app):
+    return MyContextStrategy()      # any object with .context(ctx, task)
+```
+
+Then select it with `CONTEXT_DRIVER=brief`. See
+[Contracts & Drivers](/guide/drivers) for the full picture.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| A helper misses context the parent had | context is `isolated` (the default); pass the detail in the task or switch to `shared`. |
+| One helper sees another team's conversation | context is `shared`; switch to `isolated` or `summarized`. |
+| `unknown agent` in the `spawn` tool | the name is not in the roster you passed to `spawn_tool`/`team_tools`. |
+| `unknown context driver` | the `CONTEXT_DRIVER` value is misspelled or not registered; fix the name or `app.extend(...)` it. |
+| Changing `CONTEXT_DRIVER` had no effect | the strategy is resolved once per app; call `app.manager(DriverKind.CONTEXT).forget()` or rebuild the app. |

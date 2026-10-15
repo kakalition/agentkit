@@ -12,9 +12,16 @@ to keyword matching. See :mod:`agentkit.embeddings` and :mod:`agentkit.consolida
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 from pydantic_ai import Agent, RunContext
+
+from agentkit.contracts.memory import MemoryStore, RecallStrategy
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, MemoryDriver, RecallDriver
+from agentkit.support.manager import Manager
 
 DEFAULT_DIGEST_LIMIT = 50
 
@@ -212,4 +219,156 @@ def attach_memory(agent: Agent[Any, Any]) -> Agent[Any, Any]:
     return agent
 
 
-__all__ = ["DEFAULT_DIGEST_LIMIT", "MEMORY_GUIDE", "attach_memory", "memory_digest"]
+# --------------------------------------------------------------------------
+# Drivers
+# --------------------------------------------------------------------------
+
+
+class InMemoryStore:
+    """An in-process memory store (no database); useful for ephemeral agents/tests."""
+
+    def __init__(self) -> None:
+        self._rows: dict[int, SimpleNamespace] = {}
+        self._next = 1
+
+    async def remember(self, content: str, *, kind: str = "fact") -> int:
+        memory_id = self._next
+        self._next += 1
+        self._rows[memory_id] = SimpleNamespace(
+            id=memory_id, content=content.strip(), kind=kind
+        )
+        return memory_id
+
+    async def search(self, query: str, *, limit: int = 5) -> list[Any]:
+        needle = (query or "").strip().lower()
+        if not needle:
+            return []
+        hits = [
+            row
+            for row in self._rows.values()
+            if needle in row.content.lower() or needle in row.kind.lower()
+        ]
+        return hits[:limit]
+
+    async def all(self, limit: int | None = None) -> list[Any]:
+        rows = list(self._rows.values())
+        return rows[:limit] if limit is not None else rows
+
+    async def forget(self, memory_id: int) -> bool:
+        return self._rows.pop(memory_id, None) is not None
+
+    async def digest(self, *, limit: int = DEFAULT_DIGEST_LIMIT) -> str | None:
+        rows = await self.all(limit)
+        if not rows:
+            return None
+        return "\n".join(f"- #{row.id} {row.content}" for row in rows)
+
+
+class MemoryManager(Manager):
+    """Resolves the configured memory store (``memory_driver``, default ``repository``)."""
+
+    kind = DriverKind.MEMORY
+    default_driver = MemoryDriver.REPOSITORY
+
+
+@register_driver(DriverKind.MEMORY, MemoryDriver.REPOSITORY)
+def _repository_memory_driver(app: Any) -> Any:
+    from agentkit.foundation.facades import MemoryService
+
+    return MemoryService(app)
+
+
+@register_driver(DriverKind.MEMORY, MemoryDriver.IN_MEMORY)
+def _in_memory_memory_driver(app: Any) -> InMemoryStore:
+    return InMemoryStore()
+
+
+def _recency(memory: Any, now: datetime, half_life_days: float) -> float:
+    anchor = (
+        getattr(memory, "last_used_at", None)
+        or getattr(memory, "updated_at", None)
+        or getattr(memory, "created_at", None)
+    )
+    if anchor is None:
+        return 0.0
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=UTC)
+    age_days = max((now - anchor).total_seconds(), 0.0) / 86400.0
+    if half_life_days <= 0:
+        return 1.0
+    return float(2.0 ** (-age_days / half_life_days))
+
+
+class HybridRecall:
+    """The default recall: weighted similarity + recency + importance."""
+
+    def __init__(self, settings: Any = None) -> None:
+        self.settings = settings
+
+    def score(self, query: str, similarity: float, memory: Any, now: Any) -> float:
+        settings = self.settings
+        w_sim = float(getattr(settings, "memory_recall_similarity_weight", 0.6))
+        w_rec = float(getattr(settings, "memory_recall_recency_weight", 0.2))
+        w_imp = float(getattr(settings, "memory_recall_importance_weight", 0.2))
+        half_life = float(getattr(settings, "memory_recall_half_life_days", 30.0))
+        return (
+            w_sim * similarity
+            + w_rec * _recency(memory, now, half_life)
+            + w_imp * float(getattr(memory, "importance", 0.0) or 0.0)
+        )
+
+
+class KeywordRecall:
+    """Ranks purely on keyword (substring) match."""
+
+    def score(self, query: str, similarity: float, memory: Any, now: Any) -> float:
+        return float(similarity)
+
+
+class RecencyRecall:
+    """Ranks purely on recency."""
+
+    def __init__(self, settings: Any = None) -> None:
+        self.settings = settings
+
+    def score(self, query: str, similarity: float, memory: Any, now: Any) -> float:
+        half_life = float(getattr(self.settings, "memory_recall_half_life_days", 30.0))
+        return _recency(memory, now, half_life)
+
+
+class MemoryRecallManager(Manager):
+    """Resolves the configured recall strategy (``memory_recall_driver``, default ``hybrid``)."""
+
+    kind = DriverKind.MEMORY_RECALL
+    default_driver = RecallDriver.HYBRID
+
+
+@register_driver(DriverKind.MEMORY_RECALL, RecallDriver.HYBRID)
+def _hybrid_recall_driver(app: Any) -> HybridRecall:
+    return HybridRecall(getattr(app, "settings", None))
+
+
+@register_driver(DriverKind.MEMORY_RECALL, RecallDriver.KEYWORD)
+def _keyword_recall_driver(app: Any) -> KeywordRecall:
+    return KeywordRecall()
+
+
+@register_driver(DriverKind.MEMORY_RECALL, RecallDriver.RECENCY)
+def _recency_recall_driver(app: Any) -> RecencyRecall:
+    return RecencyRecall(getattr(app, "settings", None))
+
+
+__all__ = [
+    "DEFAULT_DIGEST_LIMIT",
+    "MEMORY_GUIDE",
+    "HybridRecall",
+    "InMemoryStore",
+    "KeywordRecall",
+    "MemoryManager",
+    "MemoryRecallManager",
+    "MemoryStore",
+    "RecallStrategy",
+    "RecencyRecall",
+    "attach_memory",
+    "memory_digest",
+]

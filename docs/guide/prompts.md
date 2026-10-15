@@ -93,3 +93,10 @@ def test_greeting():
 ```
 
 Continue to [MCP & A2A →](/guide/protocols)
+
+## Drivers
+
+The prompt store is a driver (`PROMPTS_DRIVER`): `file` (default, discovers
+`prompts/*.md`) or `memory` (empty, for programmatic use). Override with
+`app.extend(DriverKind.PROMPTS, "name", factory)`. See
+[Contracts & Drivers](/guide/drivers).

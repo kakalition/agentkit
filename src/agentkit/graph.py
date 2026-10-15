@@ -25,13 +25,28 @@ mutable mapping falls back to a built-in async loop.
 
 from __future__ import annotations
 
+import copy
 import inspect
 from collections.abc import Callable, Mapping, MutableMapping
 from typing import Any
 
 from pydantic_graph import GraphBuilder
 
-__all__ = ["END", "StateGraph", "GraphError"]
+from agentkit.contracts.graph import GraphExecutor
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, GraphDriver
+from agentkit.support.manager import Manager
+
+__all__ = [
+    "END",
+    "CheckpointedGraphExecutor",
+    "GraphError",
+    "GraphExecutor",
+    "GraphManager",
+    "ParallelGraphExecutor",
+    "SequentialGraphExecutor",
+    "StateGraph",
+]
 
 END = "__end__"
 NodeFn = Callable[[Any], Any]
@@ -172,7 +187,11 @@ class StateGraph:
         return state
 
     # -- built-in fallback ----------------------------------------------
-    async def _run_internal(self, state: Any) -> Any:
+    async def run_steps(self, state: Any, *, on_step: Callable[[str, Any], Any] | None = None) -> Any:
+        """Run the node loop, optionally invoking ``on_step(node_name, state)`` after each."""
+        if self._entry is None:
+            raise GraphError("no entry node set")
+        self._validate()
         current = self._entry
         steps = 0
         while current != END:
@@ -186,8 +205,15 @@ class StateGraph:
             if inspect.isawaitable(result):
                 result = await result
             state = _merge(state, result)
+            if on_step is not None:
+                outcome = on_step(current, state)
+                if inspect.isawaitable(outcome):
+                    await outcome
             current = self._next(current, state)  # type: ignore[arg-type]
         return state
+
+    async def _run_internal(self, state: Any) -> Any:
+        return await self.run_steps(state)
 
     def _next(self, current: str, state: Any) -> str:
         router = self._routers.get(current)
@@ -219,3 +245,77 @@ def _merge(state: Any, result: Any) -> Any:
         merged.update(result)
         return merged
     return result
+
+
+class SequentialGraphExecutor:
+    """The default graph executor: nodes run in order (``StateGraph.run``)."""
+
+    async def run(self, graph: Any, state: Any, **options: Any) -> Any:
+        return await graph.run(state)
+
+
+class ParallelGraphExecutor:
+    """Fan-out: run named nodes concurrently and merge their partial results.
+
+    ``run(graph, state, fan_out=["a", "b"])`` runs ``a`` and ``b`` on copies of
+    ``state`` at the same time and merges the results back (a join).
+    """
+
+    async def run(self, graph: Any, state: Any, **options: Any) -> Any:
+        import asyncio
+
+        names = list(options.get("fan_out") or [])
+        if not names:
+            return await graph.run(state)
+
+        async def branch(name: str) -> Any:
+            node = graph._nodes[name]
+            local = copy.deepcopy(state)
+            result = node(local)
+            if inspect.isawaitable(result):
+                result = await result
+            return _merge(local, result)
+
+        results = await asyncio.gather(*(branch(name) for name in names))
+        merged = state
+        for partial in results:
+            if isinstance(merged, MutableMapping) and isinstance(partial, Mapping):
+                merged.update(partial)
+            else:  # pragma: no cover - non-mapping state
+                merged = partial
+        return merged
+
+
+class CheckpointedGraphExecutor:
+    """Records a state snapshot after every node (in-process checkpointing)."""
+
+    def __init__(self) -> None:
+        self.checkpoints: dict[str, Any] = {}
+
+    async def run(self, graph: Any, state: Any, **options: Any) -> Any:
+        async def save(node: str, current: Any) -> None:
+            self.checkpoints[node] = copy.deepcopy(current)
+
+        return await graph.run_steps(state, on_step=save)
+
+
+class GraphManager(Manager):
+    """Resolves the configured graph executor (``graph_driver``, default ``sequential``)."""
+
+    kind = DriverKind.GRAPH
+    default_driver = GraphDriver.SEQUENTIAL
+
+
+@register_driver(DriverKind.GRAPH, GraphDriver.SEQUENTIAL)
+def _sequential_graph_driver(app: Any) -> SequentialGraphExecutor:
+    return SequentialGraphExecutor()
+
+
+@register_driver(DriverKind.GRAPH, GraphDriver.PARALLEL)
+def _parallel_graph_driver(app: Any) -> ParallelGraphExecutor:
+    return ParallelGraphExecutor()
+
+
+@register_driver(DriverKind.GRAPH, GraphDriver.CHECKPOINTED)
+def _checkpointed_graph_driver(app: Any) -> CheckpointedGraphExecutor:
+    return CheckpointedGraphExecutor()

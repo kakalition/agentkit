@@ -32,9 +32,26 @@ from pydantic_evals import Dataset
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 from pydantic_evals.reporting import EvaluationReport
 
+from agentkit.contracts.evals import Reporter
 from agentkit.session import ChatResult
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, EvalsReporterDriver
+from agentkit.support.manager import Manager
 
-__all__ = ["Case", "CaseResult", "EvalSuite", "Report", "capture_turns", "load_captured"]
+__all__ = [
+    "Case",
+    "CaseResult",
+    "EvalReporterManager",
+    "EvalSuite",
+    "JsonReporter",
+    "PydanticReporter",
+    "Report",
+    "Reporter",
+    "TextReporter",
+    "assert_trajectory",
+    "capture_turns",
+    "load_captured",
+]
 
 
 def _as_list(value: Any) -> list[str]:
@@ -344,3 +361,93 @@ class EvalSuite:
                 outcome = await outcome
             return outcome
         raise TypeError(f"cannot run evals against {type(target)!r}")
+
+
+# ---------------------------------------------------------------------------
+# Reporters + trajectory assertions
+# ---------------------------------------------------------------------------
+
+
+class TextReporter:
+    """The default reporter: a compact pass/fail summary."""
+
+    def render(self, report: Report) -> str:
+        return report.summary()
+
+
+class JsonReporter:
+    """Render a report as JSON (machine-readable CI output)."""
+
+    def render(self, report: Report) -> str:
+        return json.dumps(
+            {
+                "name": report.name,
+                "passed": report.passed,
+                "passed_count": report.passed_count,
+                "failed_count": report.failed_count,
+                "cases": [
+                    {
+                        "name": result.case.name,
+                        "passed": result.passed,
+                        "failures": result.failures,
+                        "tool_calls": result.tool_calls,
+                    }
+                    for result in report.results
+                ],
+            },
+            default=str,
+        )
+
+
+class PydanticReporter:
+    """Use ``pydantic_evals``' own rich table renderer when available."""
+
+    def render(self, report: Report) -> str:
+        return report.render()
+
+
+class EvalReporterManager(Manager):
+    """Resolves the configured eval reporter (``evals_reporter_driver``, default ``text``)."""
+
+    kind = DriverKind.EVALS_REPORTER
+    default_driver = EvalsReporterDriver.TEXT
+
+
+@register_driver(DriverKind.EVALS_REPORTER, EvalsReporterDriver.TEXT)
+def _text_reporter_driver(app: Any) -> TextReporter:
+    return TextReporter()
+
+
+@register_driver(DriverKind.EVALS_REPORTER, EvalsReporterDriver.JSON)
+def _json_reporter_driver(app: Any) -> JsonReporter:
+    return JsonReporter()
+
+
+@register_driver(DriverKind.EVALS_REPORTER, EvalsReporterDriver.PYDANTIC)
+def _pydantic_reporter_driver(app: Any) -> PydanticReporter:
+    return PydanticReporter()
+
+
+def assert_trajectory(
+    result: Any,
+    *,
+    calls: list[str] | None = None,
+    forbid: list[str] | None = None,
+    order: list[str] | None = None,
+) -> None:
+    """Assert a :class:`ChatResult`'s tool-call trajectory.
+
+    ``calls``/``forbid`` check membership; ``order`` checks that the listed tools
+    appear in that relative order.
+    """
+    trajectory = list(getattr(result, "tool_calls", None) or [])
+    for tool in calls or []:
+        if tool not in trajectory:
+            raise AssertionError(f"tool {tool!r} was not called (called: {trajectory})")
+    for tool in forbid or []:
+        if tool in trajectory:
+            raise AssertionError(f"tool {tool!r} should not have been called")
+    if order:
+        positions = [trajectory.index(tool) for tool in order if tool in trajectory]
+        if len(positions) != len(order) or positions != sorted(positions):
+            raise AssertionError(f"tools {order} were not called in order (called: {trajectory})")

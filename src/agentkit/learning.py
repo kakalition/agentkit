@@ -30,14 +30,31 @@ from typing import Any
 
 from pydantic_ai import RunContext
 
+from agentkit.contracts.learning import Extractor, LearningSink, LearningStrategy
 from agentkit.deps import Deps
 from agentkit.guardrails import redact, redact_pii
+from agentkit.support import register_driver
+from agentkit.support.kinds import (
+    DriverKind,
+    LearningExtractorDriver,
+    LearningSinkDriver,
+    LearningStrategyDriver,
+)
+from agentkit.support.manager import Manager
 
 __all__ = [
     "LESSON_GUIDE",
     "LESSON_KIND",
     "LESSON_TASK",
+    "Extractor",
+    "HeuristicExtractor",
     "LearningSignals",
+    "LearningSink",
+    "LearningStrategy",
+    "MemorySink",
+    "ModelExtractor",
+    "NoopStrategy",
+    "ReflectApplyStrategy",
     "approve_lesson",
     "attach_learning",
     "lessons_digest",
@@ -291,6 +308,10 @@ async def reflect(
     Idempotent per conversation + window (re-running is cheap and non-duplicating).
     Returns a summary dict (counts, merged, skill candidates/written).
     """
+    if settings is None:
+        from agentkit.config import get_settings
+
+        settings = get_settings()
     window = int(window or getattr(settings, "learning_window", DEFAULT_WINDOW) or DEFAULT_WINDOW)
     threshold = int(
         skill_threshold
@@ -303,7 +324,7 @@ async def reflect(
     max_lessons = int(
         getattr(settings, "learning_max_lessons", DEFAULT_MAX_LESSONS) or DEFAULT_MAX_LESSONS
     )
-    require_review = bool(getattr(settings, "learning_require_review", False))
+    require_review = bool(getattr(settings, "learning_require_review", True))
     lesson_status = "proposed" if require_review else "active"
 
     result: dict[str, Any] = {
@@ -482,7 +503,7 @@ def attach_learning(agent: Any, *, settings: Any = None) -> Any:
         if not text:
             return "nothing to learn"
         deps_settings = getattr(ctx.deps, "settings", settings)
-        require_review = bool(getattr(deps_settings, "learning_require_review", False))
+        require_review = bool(getattr(deps_settings, "learning_require_review", True))
         status = "proposed" if require_review and memory_kind == LESSON_KIND else "active"
         row = await store.add(
             text,
@@ -556,3 +577,117 @@ def register_reflect_task() -> str:
             return await reflect(repos, settings=runtime.settings)
 
     return LESSON_TASK
+
+
+# ---------------------------------------------------------------------------
+# Drivers
+# ---------------------------------------------------------------------------
+
+
+class HeuristicExtractor:
+    """An offline extractor: keyword/template heuristics, no model call."""
+
+    async def extract(self, messages: list[Any], model: Any = None) -> dict[str, list[str]]:
+        return _heuristic_extract(messages)
+
+
+class ModelExtractor:
+    """The default extractor: a JSON model call, falling back to heuristics."""
+
+    async def extract(self, messages: list[Any], model: Any = None) -> dict[str, list[str]]:
+        return await _extract(messages, model)
+
+
+class ReflectApplyStrategy:
+    """The default strategy: the full ``reflect`` pass (extract → store → digest)."""
+
+    async def run(self, repos: Any, **options: Any) -> dict[str, Any]:
+        return await reflect(repos, **options)
+
+
+class NoopStrategy:
+    """A strategy that never learns (for deterministic, specialized agents)."""
+
+    async def run(self, repos: Any, **options: Any) -> dict[str, Any]:
+        return {"skipped": True, "lessons": 0, "preferences": 0, "facts": 0, "strategy": "none"}
+
+
+class MemorySink:
+    """The default sink: lessons/facts/preferences into owner memories."""
+
+    async def store(self, repos: Any, items: dict[str, list[str]], **options: Any) -> int:
+        store = getattr(repos, "memories", None)
+        if store is None:
+            return 0
+        settings = options.get("settings")
+        conversation_id = options.get("conversation_id")
+        require_review = bool(getattr(settings, "learning_require_review", True))
+        lesson_status = "proposed" if require_review else "active"
+        added = 0
+        for lesson in items.get("lessons", []):
+            await store.add(
+                lesson,
+                kind=LESSON_KIND,
+                importance=_importance(lesson),
+                source_conversation_id=conversation_id,
+                status=lesson_status,
+            )
+            added += 1
+        for fact in items.get("facts", []):
+            await store.add(fact, kind="fact", source_conversation_id=conversation_id)
+            added += 1
+        for preference in items.get("preferences", []):
+            await store.add(
+                preference,
+                kind="preference",
+                importance=0.6,
+                source_conversation_id=conversation_id,
+            )
+            added += 1
+        return added
+
+
+class LearningExtractorManager(Manager):
+    """Resolves the configured extractor (``learning_extractor_driver``, default ``model``)."""
+
+    kind = DriverKind.LEARNING_EXTRACTOR
+    default_driver = LearningExtractorDriver.MODEL
+
+
+class LearningStrategyManager(Manager):
+    """Resolves the learning strategy (``learning_strategy_driver``, default ``reflect_apply``)."""
+
+    kind = DriverKind.LEARNING_STRATEGY
+    default_driver = LearningStrategyDriver.REFLECT_APPLY
+
+
+class LearningSinkManager(Manager):
+    """Resolves the learning sink (``learning_sink_driver``, default ``memory``)."""
+
+    kind = DriverKind.LEARNING_SINK
+    default_driver = LearningSinkDriver.MEMORY
+
+
+@register_driver(DriverKind.LEARNING_EXTRACTOR, LearningExtractorDriver.MODEL)
+def _model_extractor_driver(app: Any) -> ModelExtractor:
+    return ModelExtractor()
+
+
+@register_driver(DriverKind.LEARNING_EXTRACTOR, LearningExtractorDriver.HEURISTIC)
+def _heuristic_extractor_driver(app: Any) -> HeuristicExtractor:
+    return HeuristicExtractor()
+
+
+@register_driver(DriverKind.LEARNING_STRATEGY, LearningStrategyDriver.REFLECT_APPLY)
+def _reflect_apply_strategy_driver(app: Any) -> ReflectApplyStrategy:
+    return ReflectApplyStrategy()
+
+
+@register_driver(DriverKind.LEARNING_STRATEGY, LearningStrategyDriver.NONE)
+def _noop_strategy_driver(app: Any) -> NoopStrategy:
+    return NoopStrategy()
+
+
+@register_driver(DriverKind.LEARNING_SINK, LearningSinkDriver.MEMORY)
+def _memory_sink_driver(app: Any) -> MemorySink:
+    return MemorySink()

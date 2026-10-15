@@ -11,9 +11,14 @@ from __future__ import annotations
 import ipaddress
 import re
 import sys
+from typing import Any
 from urllib.parse import urlparse
 
+from agentkit.contracts.guardrails import Scanner
 from agentkit.logging import redact as redact_secrets
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, GuardrailDriver
+from agentkit.support.manager import Manager
 
 INJECTION_PATTERNS = [
     r"ignore (all )?(previous|prior|above) instructions",
@@ -110,3 +115,64 @@ def check_egress(url: str, *, allow_hosts: set[str] | None = None) -> bool:
     except ValueError:
         return True  # a DNS name; resolved at connect time
     return not (address.is_private or address.is_reserved or address.is_link_local)
+
+
+class RegexGuard:
+    """The default guardrail scanner: injection heuristics + PII regexes."""
+
+    def scan(self, text: str) -> list[str]:
+        return scan_injection(text) + [f"pii:{kind}" for kind in scan_pii(text)]
+
+    def redact(self, text: str) -> str:
+        return redact_pii(redact(text), replacement="[redacted]")
+
+
+class ModerationScanner:
+    """A guardrail scanner backed by a :class:`~agentkit.moderation.ModerationPolicy`."""
+
+    def __init__(self, policy: Any = None) -> None:
+        from agentkit.moderation import ModerationPolicy
+
+        self.policy = policy or ModerationPolicy()
+
+    def scan(self, text: str) -> list[str]:
+        return list(self.policy.check(text).reasons) + [
+            f"pii:{kind}" for kind in scan_pii(text)
+        ]
+
+    def redact(self, text: str) -> str:
+        return redact_pii(redact(text), replacement="[redacted]")
+
+
+class GuardrailManager(Manager):
+    """Resolves the configured scanner (``guardrails_driver``, default ``regex``)."""
+
+    kind = DriverKind.GUARDRAILS
+    default_driver = GuardrailDriver.REGEX
+
+
+@register_driver(DriverKind.GUARDRAILS, GuardrailDriver.REGEX)
+def _regex_guard_driver(app: Any) -> RegexGuard:
+    return RegexGuard()
+
+
+@register_driver(DriverKind.GUARDRAILS, GuardrailDriver.MODERATION)
+def _moderation_guard_driver(app: Any) -> ModerationScanner:
+    return ModerationScanner()
+
+
+__all__ = [
+    "GuardrailManager",
+    "ModerationScanner",
+    "RegexGuard",
+    "Scanner",
+    "check_egress",
+    "is_loopback",
+    "is_suspicious",
+    "redact",
+    "redact_pii",
+    "scan_injection",
+    "scan_pii",
+    "warn_if_exposed",
+    "wrap_untrusted",
+]

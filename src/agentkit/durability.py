@@ -13,10 +13,18 @@ from typing import Any
 from dbos import DBOS, DBOSClient, DBOSConfig, SetWorkflowID
 
 from agentkit.config import AgentSettings, get_settings
+from agentkit.contracts.durability import Durability
+from agentkit.errors import ConfigurationError
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, DurabilityDriver
+from agentkit.support.manager import Manager
 
 __all__ = [
     "DBOS",
     "DBOSClient",
+    "DBOSDurability",
+    "Durability",
+    "DurabilityManager",
     "SetWorkflowID",
     "workflow",
     "step",
@@ -151,6 +159,55 @@ def enqueue(queue: str, func: Any, *args: Any, **kwargs: Any) -> str:
 
 def apply_schedules(schedules: list[dict[str, Any]]) -> None:
     DBOS.apply_schedules(schedules)  # type: ignore[arg-type]
+
+
+class DBOSDurability:
+    """The default durability driver: DBOS Transact (see the module functions)."""
+
+    def __init__(self, app: Any = None) -> None:
+        self.app = app
+
+    def init(
+        self,
+        settings: AgentSettings | None = None,
+        *,
+        launch: bool = True,
+        queues: Any = None,
+    ) -> Any:
+        return init(settings, launch=launch, queues=queues)
+
+    def register_queue(self, name: str, **options: Any) -> Any:
+        return register_queue(name, **options)
+
+    def enqueue(self, queue: str, func: Any, *args: Any, **kwargs: Any) -> str:
+        return enqueue(queue, func, *args, **kwargs)
+
+    def apply_schedules(self, schedules: list[dict[str, Any]]) -> None:
+        apply_schedules(schedules)
+
+
+class DurabilityManager(Manager):
+    """Resolves the configured durability driver (``durability_driver``, default ``dbos``)."""
+
+    kind = DriverKind.DURABILITY
+    default_driver = DurabilityDriver.DBOS
+
+
+@register_driver(DriverKind.DURABILITY, DurabilityDriver.DBOS)
+def _dbos_durability_driver(app: Any) -> DBOSDurability:
+    return DBOSDurability(app)
+
+
+@register_driver(DriverKind.DURABILITY, DurabilityDriver.TEMPORAL)
+def _temporal_durability_driver(app: Any) -> Any:
+    try:
+        import temporalio  # noqa: F401
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ConfigurationError(
+            "the temporal durability driver needs the 'temporalio' package "
+            "(pip install agentkit[temporal])"
+        ) from exc
+    raise ConfigurationError("the temporal durability driver is not implemented yet")
 
 
 def list_schedules() -> list[dict[str, Any]]:

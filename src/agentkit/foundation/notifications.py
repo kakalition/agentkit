@@ -26,9 +26,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from agentkit.contracts.channels import NotificationChannel
 from agentkit.logging import get_logger
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, NotificationChannelDriver
+from agentkit.support.manager import Manager
 
-__all__ = ["Notification", "Notifier", "SentNotification"]
+__all__ = [
+    "ConversationNotificationChannel",
+    "LogNotificationChannel",
+    "Notification",
+    "NotificationChannel",
+    "NotificationChannelManager",
+    "Notifier",
+    "SentNotification",
+    "TelegramNotificationChannel",
+]
 
 _log = get_logger("agentkit.notifications")
 
@@ -152,3 +165,60 @@ def _as_list(value: str | list[str] | None) -> list[str]:
     if value is None:
         return []
     return [value] if isinstance(value, str) else list(value)
+
+
+# ---------------------------------------------------------------------------
+# Notification-channel drivers
+# ---------------------------------------------------------------------------
+
+
+class LogNotificationChannel:
+    """Write the notification to the structured log."""
+
+    def __init__(self, notifier: Notifier | None = None) -> None:
+        self.notifier = notifier
+
+    def send(self, notification: Notification, *, conversation_id: str | None = None) -> str:
+        return Notifier._send_log(notification, conversation_id=conversation_id)
+
+
+class ConversationNotificationChannel:
+    """Append the notification into the conversation history (web UI visible)."""
+
+    def __init__(self, notifier: Notifier) -> None:
+        self.notifier = notifier
+
+    def send(self, notification: Notification, *, conversation_id: str | None = None) -> str:
+        return self.notifier._send_conversation(notification, conversation_id=conversation_id)
+
+
+class TelegramNotificationChannel:
+    """Deliver to a plugged-in Telegram sender, else log."""
+
+    def __init__(self, notifier: Notifier) -> None:
+        self.notifier = notifier
+
+    def send(self, notification: Notification, *, conversation_id: str | None = None) -> str:
+        return self.notifier._send_telegram(notification, conversation_id=conversation_id)
+
+
+class NotificationChannelManager(Manager):
+    """Resolves the configured notification channel (``notification_channel_driver``, default ``log``)."""
+
+    kind = DriverKind.NOTIFICATION_CHANNEL
+    default_driver = NotificationChannelDriver.LOG
+
+
+@register_driver(DriverKind.NOTIFICATION_CHANNEL, NotificationChannelDriver.LOG)
+def _log_notification_channel_driver(app: Any) -> LogNotificationChannel:
+    return LogNotificationChannel(getattr(app, "notifier", None))
+
+
+@register_driver(DriverKind.NOTIFICATION_CHANNEL, NotificationChannelDriver.CONVERSATION)
+def _conversation_notification_channel_driver(app: Any) -> ConversationNotificationChannel:
+    return ConversationNotificationChannel(app.notifier)
+
+
+@register_driver(DriverKind.NOTIFICATION_CHANNEL, NotificationChannelDriver.TELEGRAM)
+def _telegram_notification_channel_driver(app: Any) -> TelegramNotificationChannel:
+    return TelegramNotificationChannel(app.notifier)

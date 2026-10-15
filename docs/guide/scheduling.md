@@ -135,3 +135,138 @@ Schedules guarantee *at-least-once* execution. Make a task safe to run twice
 :::
 
 Continue to [Budgets & Limits →](/guide/budgets)
+
+## Drivers
+
+### What a scheduler and durability driver are, in plain English
+
+Two related ideas run this page, and neither needs any background:
+
+- A **scheduler** is the thing that decides *when* your code runs. Think of it as
+  an alarm clock: you say "run the digest every Monday at 08:00", and the clock
+  wakes the task up at the right moment.
+- **Durability** (often called **durable execution**) means the work *survives a
+  crash or restart*. Imagine a board game with a "save game" button: if the
+  power goes out mid-turn, you reload and continue instead of starting over. A
+  durable system records each step, so a multi-step job that is interrupted
+  resumes where it stopped rather than repeating everything or losing progress.
+
+A plane analogy helps separate them: the scheduler is the **departure board**
+(it knows what leaves and when), and durability is the **flight recorder plus
+checkpoint system** (it makes sure a flight that was interrupted can be picked
+up again). You can use either one on its own, but together they are how an agent
+keeps running jobs on a real server.
+
+Both are **drivers**: pluggable implementations you pick with one setting. The
+rest of this page is about the built-in ones, how to choose, and how to add your
+own.
+
+### A runnable example
+
+```python
+from agentkit import App, DriverKind, Schedule
+
+app = App()   # reads SCHEDULER_DRIVER / DURABILITY_DRIVER from the env / .env
+
+@Schedule.task("digest")               # 1. register a plain callable under a name
+def digest(period: str = "week") -> None:
+    print(f"sending the {period} digest")
+
+# 2. schedule it with the fluent scheduler (default driver: dbos)
+app.schedule("digest").name("weekly-digest").weekly_on("mon", "08:00").args(period="week")
+
+# 3. inspect which driver the app actually resolved, and what else is available
+print(app.manager(DriverKind.SCHEDULER).configured_driver())   # -> "dbos"
+print(app.manager(DriverKind.SCHEDULER).available())          # -> ["dbos", "memory"]
+print(app.manager(DriverKind.DURABILITY).configured_driver()) # -> "dbos"
+
+# 4. switch drivers without touching code — set an env var and rebuild the app
+#    SCHEDULER_DRIVER=memory   (in-process, for tests / ephemeral runs)
+#    DURABILITY_DRIVER=temporal (needs the optional extra; see the warning below)
+```
+
+### Built-in drivers
+
+**Scheduler** (`SCHEDULER_DRIVER`):
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `dbos` (default) | Stores jobs in the database and runs them through a DBOS cron workflow that ticks every minute, giving each run a deterministic id so it fires at most once per due minute, even across restarts. | Anything real: production, or any job you do not want to lose when the process restarts. |
+| `memory` | Keeps jobs in a Python dictionary inside the running process; nothing is written to the database. | Tests, notebooks, and throwaway runs where persistence does not matter. |
+
+**Durability** (`DURABILITY_DRIVER`):
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `dbos` (default) | DBOS Transact: durable workflows and steps, queues, and schedules, backed by a local SQLite system database. Steps are retried and a workflow interrupted by a crash resumes from its last completed step. | Multi-step processes (`@durability.workflow()`) that must not lose progress. |
+| `temporal` | An optional driver that requires the `agentkit[temporal]` extra. It is **not implemented yet**: selecting it (or missing `temporalio`) raises a `ConfigurationError`. | Not yet — pick `dbos` today. |
+
+The durability driver is reached through `app.durability`. The DBOS driver is
+what keeps the exactly-once guarantees described above; the scheduler's tick
+workflow is itself a durable DBOS workflow.
+
+::: warning `temporal` is not a working alternative yet
+Selecting `DURABILITY_DRIVER=temporal` will raise: without the `temporalio`
+package it names the missing extra, and with it the driver still reports that it
+is not implemented. Use `DURABILITY_DRIVER=dbos`.
+:::
+
+### How to select a driver
+
+Set the environment variable (in the shell, `.env`, or your process manager):
+
+```bash
+SCHEDULER_DRIVER=dbos      # dbos | memory
+DURABILITY_DRIVER=dbos     # dbos | temporal (needs an extra; not implemented)
+```
+
+Selection follows the standard driver precedence:
+
+1. An **explicit name passed in code** — `app.manager(DriverKind.SCHEDULER).driver("memory")`.
+2. The **setting** — `SCHEDULER_DRIVER` / `DURABILITY_DRIVER` from the environment or `.env`.
+3. The **default** — `dbos` for both.
+
+You can confirm what is active with `agentkit inspect` (it prints a
+`drivers: scheduler=…, durability=…` line) or by reading
+`app.manager(kind).configured_driver()`.
+
+### Override it just for your app
+
+Use `app.extend(...)` to register a driver that is scoped to this application
+only (it never leaks into other apps or the global registry):
+
+```python
+from agentkit import DriverKind
+
+app.extend(DriverKind.SCHEDULER, "memory", lambda app: MemoryScheduler(app))
+app.extend(DriverKind.DURABILITY, "custom", lambda app: MyDurability(app))
+```
+
+Then select it with `SCHEDULER_DRIVER=memory` (or `DURABILITY_DRIVER=custom`).
+
+### Ship a reusable driver
+
+To publish a driver for everyone, register it in the global registry. A driver
+needs no base class — it only needs the contract's methods:
+
+```python
+from agentkit import DriverKind, register_driver
+
+@register_driver(DriverKind.SCHEDULER, "database")
+def _database_scheduler(app):
+    return DatabaseScheduler(app)
+```
+
+If your driver needs a heavy package, import it *inside* the factory and raise a
+`ConfigurationError` naming the extra, so an unconfigured install still starts.
+See [Contracts & Drivers](/guide/drivers) for the full contract and the
+conformance-test approach.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| `ConfigurationError` naming `temporalio` or an extra | You selected `DURABILITY_DRIVER=temporal`; it needs `pip install agentkit[temporal]` and is not implemented yet. |
+| Jobs silently disappear after a restart | You selected `SCHEDULER_DRIVER=memory`, which is in-process only. |
+| `ConfigurationError: unknown scheduler driver 'x'` | The driver name is misspelled or not registered — register it with `app.extend(...)` or `@register_driver` first. |
+| A changed setting had no effect | The manager caches drivers per app; call `app.manager(DriverKind.SCHEDULER).forget()` or restart the process. |

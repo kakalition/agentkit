@@ -105,3 +105,141 @@ attached to the same agent.
 :::
 
 Continue to [Context Compaction →](/guide/compaction)
+
+## Drivers
+
+### What this is, in plain English
+
+"RAG" (retrieval-augmented generation) is a grand name for a simple idea: before
+the model answers, look up the parts of your own documents that are relevant and
+put them in front of it, so it answers from your material instead of guessing. A
+**knowledge base** is the searchable index of those documents.
+
+Three steps happen, and each is a separate, swappable driver:
+
+1. **Chunking** — documents are long and the model can only read so much at once,
+   so each document is cut into smaller passages ("chunks"). The *chunker* decides
+   where the cuts go.
+2. **Retrieval** — given the user's question, the *retriever* finds the chunks that
+   look most relevant, usually by comparing embeddings (the meaning-numbers from
+   the [Memory](/guide/memory) page).
+3. **Reranking** — the *reranker* takes those candidates and may reorder them by a
+   finer signal before they are shown to the model.
+
+::: tip The book-search analogy
+Chunking is tearing a textbook into index cards. Retrieval is pulling the cards
+whose topics match your question. Reranking is skimming those cards and putting
+the single most useful one on top before you read it out.
+:::
+
+Retrieval ranks by cosine similarity of embeddings and also appends keyword
+matches, so it still works — less precisely — when no embedder is configured.
+
+### A runnable example
+
+```python
+import asyncio
+from agentkit import App, DriverKind, KnowledgeBase
+
+async def main():
+    # Build the knowledge base; it uses the app's default runtime.
+    app = App()                       # CHUNKER/RETRIEVER/RERANKER_DRIVER read here
+    kb = KnowledgeBase(app)
+    print(app.chunker, app.retriever, app.reranker)   # the three configured drivers
+
+    # Index a folder of Markdown documents (chunked, embedded, stored).
+    await kb.add_directory("./docs")
+
+    # Retrieve the passages most relevant to a question.
+    hits = await kb.search("how do refunds work", limit=5)
+    print(kb.format_hits(hits))       # a citation-style block for the prompt
+
+    # Use a different chunker for one call by naming it explicitly.
+    fixed = app.manager(DriverKind.CHUNKER).driver("fixed")
+    print(fixed.chunk("a long document ..."))
+
+asyncio.run(main())
+```
+
+Switch the whole pipeline by changing the environment variables:
+
+```bash
+CHUNKER_DRIVER=fixed        # cut on length instead of meaning
+RETRIEVER_DRIVER=memory     # a lightweight in-process substring retriever
+RERANKER_DRIVER=lexical     # reorder candidates by query-word overlap
+```
+
+### Built-in drivers
+
+**Chunkers — setting `CHUNKER_DRIVER`**
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `semantic` | Splits on semantic boundaries (paragraphs, sentences, words) using `semantic-text-splitter` | Default; prose and documentation |
+| `fixed` | Slices every N characters with overlap; no extra dependency | When you cannot ship the Rust splitter, or want uniform windows |
+
+**Retrievers — setting `RETRIEVER_DRIVER`**
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `repository` | Searches the indexed chunks stored in the agent database | Default; a durable, persistent index |
+| `memory` | Simple substring search over chunks held in the process | Tests, ephemeral agents, no database |
+
+**Rerankers — setting `RERANKER_DRIVER`**
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `identity` | Leaves the retriever's order unchanged | Default; retrieval ordering is already good |
+| `lexical` | Reorders candidates by how many query words appear in each chunk | A quick keyword boost without a model |
+
+The contracts are small: a chunker provides `chunk(text, **options)`, a retriever
+provides `search(query, *, limit=5, source=None)` (async), and a reranker provides
+`rerank(query, hits, **options)`.
+
+### How to select it
+
+Selection follows the same precedence everywhere in agentkit:
+
+1. **An explicit name in code** — `app.manager(DriverKind.CHUNKER).driver("fixed")`.
+2. **The setting** — `CHUNKER_DRIVER`, `RETRIEVER_DRIVER`, or `RERANKER_DRIVER`,
+   read from the environment or a `.env` file.
+3. **The default** — `semantic`, `repository`, and `identity`, listed first above.
+
+**Accessors:** `app.chunker`, `app.retriever`, and `app.reranker` return the
+configured drivers; the managers are `DriverKind.CHUNKER`, `DriverKind.RETRIEVER`,
+and `DriverKind.RERANKER`.
+
+Override a driver for one app only (this never leaks into other apps or the global
+registry):
+
+```python
+from agentkit import DriverKind
+
+app.extend(DriverKind.CHUNKER, "paragraph", lambda app: MyChunker(app))
+# then select it: CHUNKER_DRIVER=paragraph
+```
+
+Ship a reusable driver to every app that imports your package with
+`@register_driver`:
+
+```python
+from agentkit import DriverKind, register_driver
+
+@register_driver(DriverKind.CHUNKER, "paragraph")
+def _paragraph(app):
+    return MyChunker(app)
+```
+
+A driver needs no base class — only the contract's methods. See
+[Contracts & Drivers](/guide/drivers) for the full catalog, precedence, and the
+conformance tests every driver must pass.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| Search returns nothing | Nothing indexed for that source, or no embedder and no literal keyword match |
+| Results ignore meaning | No embedder configured, so retrieval fell back to keyword matching |
+| Re-indexing duplicates content | Use `kb.replace(source)` instead of adding the source again |
+| `ValidationError` when settings load | A `*_DRIVER` value is not a valid driver name |
+| `ConfigurationError: unknown chunker driver` | The selected driver is not registered — check spelling, or `app.extend(...)` it first |

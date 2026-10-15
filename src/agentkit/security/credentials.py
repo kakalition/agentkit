@@ -12,7 +12,11 @@ import base64
 import hashlib
 from typing import Any
 
+from agentkit.contracts.vault import Vault
 from agentkit.errors import ConfigurationError
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, VaultDriver
+from agentkit.support.manager import Manager
 
 SECRET_SETTINGS = (
     "telegram_bot_token",
@@ -138,4 +142,49 @@ def hydrate_credentials(settings: Any, runtime: Any) -> list[str]:
     return sorted(values)
 
 
-__all__ = ["Credentials", "SECRET_SETTINGS", "VaultError", "build_cipher", "hydrate_credentials"]
+class EnvVault:
+    """A read-only vault backed by the settings/environment (no persistence)."""
+
+    def __init__(self, settings: Any) -> None:
+        self.settings = settings
+
+    async def set(self, name: str, value: str, **options: Any) -> Any:
+        raise VaultError("the env vault is read-only; set the value in the environment")
+
+    async def get(self, name: str, **options: Any) -> str | None:
+        return getattr(self.settings, name, None)
+
+    async def names(self, **options: Any) -> list[str]:
+        return [name for name in SECRET_SETTINGS if getattr(self.settings, name, None)]
+
+    async def delete(self, name: str, **options: Any) -> bool:
+        return False
+
+
+class VaultManager(Manager):
+    """Resolves the configured secret vault (``vault_driver``, default ``fernet``)."""
+
+    kind = DriverKind.VAULT
+    default_driver = VaultDriver.FERNET
+
+
+@register_driver(DriverKind.VAULT, VaultDriver.FERNET)
+def _fernet_vault_driver(app: Any) -> Credentials:
+    return Credentials(app.runtime)
+
+
+@register_driver(DriverKind.VAULT, VaultDriver.ENV)
+def _env_vault_driver(app: Any) -> EnvVault:
+    return EnvVault(app.settings)
+
+
+__all__ = [
+    "Credentials",
+    "EnvVault",
+    "SECRET_SETTINGS",
+    "Vault",
+    "VaultError",
+    "VaultManager",
+    "build_cipher",
+    "hydrate_credentials",
+]

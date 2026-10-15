@@ -26,6 +26,18 @@ class ApprovalRequest:
 ApprovalCallback = Callable[[list[ApprovalRequest]], Awaitable[dict[str, bool]]]
 
 
+@dataclass(slots=True)
+class CommsContext:
+    """First-class agent-comms state carried on :class:`Deps`.
+
+    Replaces the ad-hoc ``extras["_mailbox_sender"]`` / ``extras["_handoff_depth"]``
+    flags; the legacy ``extras`` keys are still honored for compatibility.
+    """
+
+    sender: str | None = None
+    handoff_depth: int = 0
+
+
 @dataclass
 class Deps:
     """Everything an agent tool might need. Extend via ``extras``.
@@ -45,6 +57,7 @@ class Deps:
     clock: Any = field(default=_now)
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     extras: dict[str, Any] = field(default_factory=dict)
+    comms: CommsContext = field(default_factory=CommsContext)
 
     def now(self) -> datetime:
         return self.clock()

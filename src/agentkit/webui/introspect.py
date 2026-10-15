@@ -13,6 +13,19 @@ from agentkit.webui.context import WebUIContext, get_context
 router = APIRouter(tags=["introspect"])
 
 
+def _drivers_view(app: Any) -> dict[str, Any]:
+    """Active driver per subsystem kind (empty when no app is bound)."""
+    if app is None:
+        return {}
+    drivers = getattr(app, "drivers", None)
+    if not callable(drivers):
+        return {}
+    try:
+        return drivers()
+    except Exception:  # pragma: no cover - never break introspection
+        return {}
+
+
 def stack_view(settings: Any, app: Any = None) -> dict[str, Any]:
     """A read-only summary of the enabled capability stack (".full()" observability)."""
     from agentkit.model_providers import supported_prefixes
@@ -21,6 +34,7 @@ def stack_view(settings: Any, app: Any = None) -> dict[str, Any]:
     return {
         "model_name": settings.model_name,
         "model_providers": supported_prefixes(),
+        "drivers": _drivers_view(app),
         "memory": {
             "enabled": settings.memory_enabled,
             "embedding_backend": settings.memory_embedding_backend,
@@ -57,7 +71,7 @@ def stack_view(settings: Any, app: Any = None) -> dict[str, Any]:
             "skill_threshold": getattr(settings, "learning_skill_threshold", 3),
             "auto_skills": getattr(settings, "learning_auto_skills", False),
             "max_lessons": getattr(settings, "learning_max_lessons", 50),
-            "require_review": getattr(settings, "learning_require_review", False),
+            "require_review": getattr(settings, "learning_require_review", True),
             "eval_gate": getattr(settings, "learning_eval_gate", False),
         },
         "auth": {

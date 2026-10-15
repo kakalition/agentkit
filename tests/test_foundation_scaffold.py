@@ -31,6 +31,7 @@ EXPECTED = [
     "app/Notifications/NoteSaved.py",
     "app/Policies/AssistantPolicy.py",
     "app/Providers/AppServiceProvider.py",
+    "app/Providers/DriverServiceProvider.py",
     "app/Providers/EventServiceProvider.py",
     "app/Repositories/NoteRepository.py",
     "app/Repositories/__init__.py",

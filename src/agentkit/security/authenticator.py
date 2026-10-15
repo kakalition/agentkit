@@ -11,10 +11,14 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from agentkit.contracts.auth import AuthStrategy
 from agentkit.errors import PermissionDenied
 from agentkit.security import API_KEY, Actor, system_actor
 from agentkit.security.jwt import JWKSVerifier, JWTError
 from agentkit.security.keys import hash_key, parse_api_keys
+from agentkit.support import register_driver
+from agentkit.support.kinds import AuthDriver, DriverKind
+from agentkit.support.manager import Manager
 
 
 class AuthError(PermissionDenied):
@@ -140,4 +144,48 @@ def require_roles(*roles: str) -> Callable[[Any], Awaitable[Actor]]:
     return dependency
 
 
-__all__ = ["AuthError", "Authenticator", "ForbiddenError", "ensure_roles", "require_roles"]
+class AnonymousAuth:
+    """An auth driver that never authenticates; always the default actor."""
+
+    def __init__(self, settings: Any) -> None:
+        self.settings = settings
+
+    def default_actor(self) -> Actor:
+        return system_actor(self.settings)
+
+    async def resolve_token(self, token: str) -> Actor | None:
+        return None
+
+    async def authenticate(
+        self, *, authorization: str | None = None, query_token: str | None = None
+    ) -> Actor | None:
+        return None
+
+
+class AuthManager(Manager):
+    """Resolves the configured auth driver (``auth_driver``, default ``default``)."""
+
+    kind = DriverKind.AUTH
+    default_driver = AuthDriver.DEFAULT
+
+
+@register_driver(DriverKind.AUTH, AuthDriver.DEFAULT)
+def _default_auth_driver(app: Any) -> Authenticator:
+    return Authenticator(app.settings)
+
+
+@register_driver(DriverKind.AUTH, AuthDriver.ANONYMOUS)
+def _anonymous_auth_driver(app: Any) -> AnonymousAuth:
+    return AnonymousAuth(app.settings)
+
+
+__all__ = [
+    "AnonymousAuth",
+    "AuthError",
+    "AuthManager",
+    "AuthStrategy",
+    "Authenticator",
+    "ForbiddenError",
+    "ensure_roles",
+    "require_roles",
+]

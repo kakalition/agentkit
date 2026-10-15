@@ -113,3 +113,23 @@ differently; reserve `expect` for deterministic or JSON outputs.
 :::
 
 Continue to [Testing →](/guide/testing)
+
+## Reporters & trajectory assertions
+
+Reports render through a **reporter** driver (`EVALS_REPORTER_DRIVER`): `text`
+(default), `json` (machine-readable), or `pydantic` (the rich table).
+
+```python
+report = await suite.run(app)
+print(app.eval_reporter.render(report))
+```
+
+Assert a run's tool-call trajectory directly:
+
+```python
+from agentkit.evals import assert_trajectory
+
+assert_trajectory(result, calls=["search"], forbid=["delete"], order=["search", "publish"])
+```
+
+See [Contracts & Drivers](/guide/drivers).

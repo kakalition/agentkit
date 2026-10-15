@@ -21,9 +21,14 @@ DEFAULT_MAX_HANDOFFS = 3
 
 
 def _depth(deps: Any) -> int:
-    if deps is None or not hasattr(deps, "extras"):
+    if deps is None:
         return 0
-    return int(deps.extras.get("_handoff_depth", 0))
+    comms = getattr(deps, "comms", None)
+    depth = int(getattr(comms, "handoff_depth", 0) or 0)
+    extras = getattr(deps, "extras", None)
+    if isinstance(extras, dict):
+        depth = max(depth, int(extras.get("_handoff_depth", 0) or 0))
+    return depth
 
 
 def _max_handoffs(deps: Any, override: int | None) -> int:
@@ -94,8 +99,12 @@ async def handoff(
             )
         return f"handoff limit reached (max {limit})"
 
-    if deps is not None and hasattr(deps, "extras"):
-        deps.extras["_handoff_depth"] = depth
+    if deps is not None:
+        comms = getattr(deps, "comms", None)
+        if comms is not None:
+            comms.handoff_depth = depth
+        if hasattr(deps, "extras"):
+            deps.extras["_handoff_depth"] = depth
 
     if events is not None and hasattr(events, "dispatch_async"):
         await events.dispatch_async(

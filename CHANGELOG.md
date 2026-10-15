@@ -7,6 +7,50 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased] — full-stack agent
 
 ### Added
+- **Contracts + drivers substrate** (`agentkit.contracts`, `agentkit.support`):
+  the Laravel-style `contract → driver → registry → extend()` shape applied across
+  the framework. Contracts are runtime-checkable Protocols; `agentkit.support.Manager`
+  resolves a settings-selected driver per subsystem and caches it as a singleton;
+  `agentkit.support.drivers` is a global `(kind, name)` registry with a
+  `@register_driver(kind, name)` decorator; `App.manager(kind)`,
+  `App.extend(kind, name, factory)` and `App.drivers()` expose it. Kinds and
+  built-in driver names are typed `StrEnum`s (`agentkit.support.kinds`:
+  `DriverKind`, `CacheDriver`, `EmbeddingsDriver`, …) rather than bare strings,
+  and every `<subsystem>_driver` setting is typed with its enum, so an invalid
+  value is rejected at settings load. The container
+  gains tagged (`tag`/`tagged`) and contextual (`when().needs().give()`) bindings.
+  Conversion for every subsystem (existing class = default driver): cache, prompts,
+  embeddings, memory + recall strategy, RAG (chunker/retriever/reranker), storage
+  (with `edit_file`/`glob`/`grep` + `CompositeFileSystem`), queue, scheduler,
+  durability, database dialect, observability, pricing, rate limiting, auth, vault,
+  guardrails, ingest, audio, learning (extractor/strategy/sink), comms topologies,
+  tasks + planning, subagent context strategies, agent middleware, graph executors,
+  code executors, eval reporters, chat channels + notification channels, and the
+  first-class `CommsContext` on `Deps`. `inspect`/`/api/info` report the active
+  driver per kind; `/guide/drivers` documents them; conformance suites live under
+  `tests/contracts`.
+- **New capabilities** in the same contract+driver shape: an in-loop **todo store**
+  with `write_todos`/`read_todos`/`add_todo`/`update_todo`/`clear_todos`
+  (`agentkit.tasks`), **subagents** with `isolated`/`shared`/`summarized` context
+  strategies and a `task(subagent, prompt)` tool (`agentkit.agents.subagent`),
+  **agent middleware** for model/tool hooks (`agentkit.foundation.agent_middleware`),
+  **graph executors** (`sequential`/`parallel`/`checkpointed`, `agentkit.graph`),
+  **code execution** with an approval-gated `run_code` tool (`agentkit.executors`),
+  **eval reporters** + `assert_trajectory` (`agentkit.evals`), and **comms
+  topologies** (`agentkit.comms`) with `round_robin`/`moderator`/`all` groupchat
+  speaker strategies. `.full()` gains `todos` (on) and `code` (off) layers. The
+  workspace layer gains `edit_file`/`glob`/`grep` agent tools. The **scaffold**
+  (`agentkit new`) ships a `app/Providers/DriverServiceProvider.py` showing
+  `app.extend(DriverKind.X, …)`, a `# -- Drivers --` block in `.env.example`
+  (typed `<X>_DRIVER` settings), and a "Swapping a driver" README section.
+
+### Changed
+- **Self-learning is now review-gated by default** (`learning_require_review=true`):
+  learned lessons are stored `proposed` and do not affect turns until approved (or an
+  eval gate passes). Auto-apply is an explicit opt-in; `learning_strategy=none` keeps
+  a deterministic agent. `reflect()` now reads settings by default.
+
+### Added
 - **Opt-in authentication & RBAC** (`agentkit.security`): a framework-neutral
   `Actor` (owner + subject + roles + method) that becomes the tenant key for every
   repository and `Deps`. Auth is off by default and byte-for-byte compatible with

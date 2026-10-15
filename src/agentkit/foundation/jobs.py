@@ -2,6 +2,10 @@
 
 ``Job``/``Queue`` now live in :mod:`agentkit.foundation.queue`; ``Job`` is
 re-exported here for convenience.
+
+``CacheStore`` is the *default driver* of the ``cache`` subsystem. Select a
+different driver with ``cache_driver`` (``array`` | ``null``) or register your
+own with ``app.extend("cache", "redis", factory)``.
 """
 
 from __future__ import annotations
@@ -11,8 +15,10 @@ from collections import OrderedDict
 from typing import Any
 
 from agentkit.foundation.queue import Job
+from agentkit.support.kinds import CacheDriver, DriverKind
+from agentkit.support.manager import Manager
 
-__all__ = ["CacheStore", "Job"]
+__all__ = ["CacheManager", "CacheStore", "Job", "NullCacheStore"]
 
 
 class CacheStore:
@@ -54,6 +60,41 @@ class CacheStore:
 
     def flush(self) -> None:
         self._store.clear()
+
+
+class NullCacheStore:
+    """A no-op cache: nothing is stored, ``remember`` still resolves its factory."""
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return default
+
+    def has(self, key: str) -> bool:
+        return False
+
+    def put(self, key: str, value: Any, ttl: float | None = None) -> Any:
+        return value
+
+    def remember(self, key: str, factory: Any, ttl: float | None = None) -> Any:
+        return factory() if callable(factory) else factory
+
+    def forget(self, key: str) -> None:
+        return None
+
+    def flush(self) -> None:
+        return None
+
+
+class CacheManager(Manager):
+    """Resolves the configured cache driver (``cache_driver``, default ``array``)."""
+
+    kind = DriverKind.CACHE
+    default_driver = CacheDriver.ARRAY
+
+    def create_array_driver(self, app: Any) -> CacheStore:
+        return CacheStore()
+
+    def create_null_driver(self, app: Any) -> NullCacheStore:
+        return NullCacheStore()
 
 
 _MISSING = object()

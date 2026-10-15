@@ -22,7 +22,15 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
+from agentkit.contracts.database import Dialect
+from agentkit.support import register_driver
+from agentkit.support.kinds import DatabaseDriver, DriverKind
+from agentkit.support.manager import Manager
+
 __all__ = [
+    "DatabaseManager",
+    "Dialect",
+    "SQLiteDialect",
     "async_database_url",
     "create_async_db_engine",
     "make_async_session_factory",
@@ -98,3 +106,36 @@ async def session_scope(factory: async_sessionmaker[AsyncSession]) -> AsyncItera
         raise
     finally:
         await session.close()
+
+
+class SQLiteDialect:
+    """The default dialect: libSQL/SQLite (and passthrough for other URLs)."""
+
+    def async_url(self, url: str) -> str:
+        return async_database_url(url)
+
+    def create_engine(
+        self, url: str, *, auth_token: str | None = None, echo: bool = False
+    ) -> AsyncEngine:
+        return create_async_db_engine(url, auth_token=auth_token, echo=echo)
+
+
+class PostgresDialect(SQLiteDialect):
+    """A Postgres-flavoured dialect (``asyncpg`` URL mapping + engine)."""
+
+
+class DatabaseManager(Manager):
+    """Resolves the configured DB dialect (``database_driver``, default ``sqlite``)."""
+
+    kind = DriverKind.DATABASE
+    default_driver = DatabaseDriver.SQLITE
+
+
+@register_driver(DriverKind.DATABASE, DatabaseDriver.SQLITE)
+def _sqlite_dialect_driver(app: Any) -> SQLiteDialect:
+    return SQLiteDialect()
+
+
+@register_driver(DriverKind.DATABASE, DatabaseDriver.POSTGRES)
+def _postgres_dialect_driver(app: Any) -> PostgresDialect:
+    return PostgresDialect()

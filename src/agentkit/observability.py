@@ -21,8 +21,21 @@ Requires the optional ``observability`` extra (OpenTelemetry OTLP HTTP exporter)
 from __future__ import annotations
 
 import os
+from typing import Any
 
 from agentkit.config import AgentSettings, get_settings
+from agentkit.contracts.observability import Tracer
+from agentkit.support import register_driver
+from agentkit.support.kinds import DriverKind, ObservabilityDriver
+from agentkit.support.manager import Manager
+
+__all__ = [
+    "ObservabilityManager",
+    "Tracer",
+    "setup_observability",
+    "setup_logfire",
+    "start_phoenix",
+]
 
 _phoenix_started = False
 
@@ -131,3 +144,52 @@ def _otlp_processor(settings: AgentSettings):  # pragma: no cover - needs OTEL d
 
 # Backwards-compatible aliases.
 setup_logfire = setup_observability
+
+
+class _ModeTracer:
+    """A tracer driver that force-selects one ``OBSERVABILITY`` mode."""
+
+    def __init__(self, mode: ObservabilityDriver) -> None:
+        self.mode = mode
+
+    def setup(self, settings: AgentSettings | None = None) -> bool:
+        settings = settings or get_settings()
+        override = settings
+        copy = getattr(settings, "model_copy", None)
+        if callable(copy):
+            try:
+                override = copy(update={"observability": self.mode})
+            except Exception:  # pragma: no cover - non-pydantic settings
+                override = settings
+        return setup_observability(override)
+
+
+class ObservabilityManager(Manager):
+    """Resolves the configured tracer (the ``observability`` setting, default ``phoenix``)."""
+
+    kind = DriverKind.OBSERVABILITY
+    default_driver = ObservabilityDriver.PHOENIX
+
+    @property
+    def setting_name(self) -> str:
+        return "observability"
+
+
+@register_driver(DriverKind.OBSERVABILITY, ObservabilityDriver.PHOENIX)
+def _phoenix_tracer_driver(app: Any) -> _ModeTracer:
+    return _ModeTracer(ObservabilityDriver.PHOENIX)
+
+
+@register_driver(DriverKind.OBSERVABILITY, ObservabilityDriver.CONSOLE)
+def _console_tracer_driver(app: Any) -> _ModeTracer:
+    return _ModeTracer(ObservabilityDriver.CONSOLE)
+
+
+@register_driver(DriverKind.OBSERVABILITY, ObservabilityDriver.OTLP)
+def _otlp_tracer_driver(app: Any) -> _ModeTracer:
+    return _ModeTracer(ObservabilityDriver.OTLP)
+
+
+@register_driver(DriverKind.OBSERVABILITY, ObservabilityDriver.OFF)
+def _off_tracer_driver(app: Any) -> _ModeTracer:
+    return _ModeTracer(ObservabilityDriver.OFF)

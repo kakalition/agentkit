@@ -197,3 +197,83 @@ Because `make_delegate` forwards `deps`, you can run an orchestrator turn agains
 - [The Agent Builder](/guide/agents) — `.specialist()` and `.orchestrate()`.
 - [Multi-Agent Teams](/guide/teams) — `Supervisor`, `spawn_tool`, `run_all_agents`.
 - [Human-in-the-Loop](/guide/hitl) — approve or clarify before a tool runs.
+
+## Subagent context: what a helper agent can see
+
+### What this is
+
+A **subagent** is a helper agent you delegate work to. When the parent hands a
+task to that helper, one question has to be answered first: **how much of the
+parent's world does the helper get to see?** That world is called the **context**
+— the parent's dependencies (its `deps`: the shared objects such as the database,
+settings, and repositories), its conversation so far, and its model. A helper
+that sees everything is convenient but leaks information and blurs
+responsibility; a helper that sees nothing is safe but must be briefed fully.
+
+Think of hiring a translator for a meeting. You can sit them in on every call and
+hand them the whole transcript (**shared**); give them a one-paragraph brief
+written just for this job and keep them out of the room (**isolated**, the
+default); or hand them a short recap of what matters and let them work out of
+earshot (**summarized**).
+
+Which of the three happens is a **driver** — a swappable implementation chosen by
+a setting, not hard-coded. The `task(subagent, prompt)` tool that performs the
+delegation is built with `agentkit.agents.subagent.subagent_tool`.
+
+### End-to-end example
+
+```python
+from agentkit import Agent, App, DriverKind
+from agentkit.agents.registry import AgentRegistry
+from agentkit.agents.subagent import SharedContext, subagent_tool
+
+app = App(name="lead")
+registry = AgentRegistry()
+registry.register_local(researcher_agent, name="researcher")   # your own helper
+
+# Default: no CONTEXT_DRIVER set -> "isolated"; the helper inherits nothing.
+strategy = app.manager(DriverKind.CONTEXT).driver()
+lead = Agent.make("lead").tool(subagent_tool(registry, strategy=strategy)).build()
+
+# Switch driver three ways:
+app.manager(DriverKind.CONTEXT).driver("shared")                       # explicit name
+app.extend(DriverKind.CONTEXT, "shared", lambda app: SharedContext())  # per app
+# CONTEXT_DRIVER=shared                                                # env / .env
+```
+
+### Drivers
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `isolated` | The helper starts blank: it inherits none of the parent's dependencies, conversation, or history. Everything it needs must be in the prompt you pass. | Default. Use it for self-contained jobs, for repeatable inputs, or when the parent's conversation must not leak. |
+| `shared` | The helper reuses the parent's context: the same dependencies and the same conversation, so it remembers the task in progress. | Use it when the helper genuinely needs the ongoing conversation or the parent's resources, and sharing that data is acceptable. |
+| `summarized` | Like `isolated`, but the tool frames the prompt as a summary of prior context, so the helper is told "this is the gist". | Use it when the helper needs the gist rather than the full transcript — a middle ground that keeps the child's input short. |
+
+### Selecting a driver
+
+- **Setting** — one line in the environment or `.env`: `CONTEXT_DRIVER=shared`.
+- **Precedence** — an explicit name passed in code wins, then the setting, then
+  the default (`isolated`).
+- **Per app** — `app.extend(DriverKind.CONTEXT, "brief", lambda app: MyContextStrategy())`.
+- **Reusable** — ship one for everyone with `@register_driver`:
+
+```python
+from agentkit import DriverKind, register_driver
+
+@register_driver(DriverKind.CONTEXT, "brief")
+def _brief_context(app):
+    return MyContextStrategy()      # any object with .context(ctx, task)
+```
+
+Then select it with `CONTEXT_DRIVER=brief`. See
+[Contracts & Drivers](/guide/drivers) for the full picture.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| The helper does not know something the parent knew | context is `isolated` (the default); either put the detail in the prompt or switch to `shared`. |
+| The helper leaks details from another task | context is `shared`; switch to `isolated` or `summarized`. |
+| `unknown context driver` | the `CONTEXT_DRIVER` value is misspelled or not registered; fix the name or `app.extend(...)` it. |
+| Changing `CONTEXT_DRIVER` had no effect | the strategy is resolved once per app; call `app.manager(DriverKind.CONTEXT).forget()` or rebuild the app. |
+| There is no `task` tool | it only exists once you add it: `agent.tool(subagent_tool(registry, ...))`. |

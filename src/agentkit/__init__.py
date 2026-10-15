@@ -38,7 +38,7 @@ from agentkit.config import (
 )
 from agentkit.consolidation import consolidate_memories
 from agentkit.data import export_owner, forget_owner
-from agentkit.deps import ApprovalCallback, ApprovalRequest, Deps
+from agentkit.deps import ApprovalCallback, ApprovalRequest, CommsContext, Deps
 from agentkit.errors import (
     AgentKitError,
     ConfigurationError,
@@ -182,7 +182,7 @@ from agentkit.pricing import (
     set_default_pricing,
     usage_cost,
 )
-from agentkit.prompts import Prompt, PromptRegistry
+from agentkit.prompts import Prompt, PromptManager, PromptRegistry
 from agentkit.ratelimit import RateDecision, RateLimiter, build_limiter
 from agentkit.routing import ModelRouter, Route
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
@@ -209,6 +209,7 @@ from agentkit.soul import (
     soul_path,
 )
 from agentkit.supervise import Service, run_all
+from agentkit.support import DriverKind, Manager, register_driver
 from agentkit.teams import Supervisor, spawn_tool, team_tools
 from agentkit.toolkits import TOOLKITS, attach_toolkits, enabled_toolkits
 from agentkit.tools_from_openapi import (
@@ -333,6 +334,7 @@ __all__ = [
     "build_limiter",
     # agent framework
     "Deps",
+    "CommsContext",
     "ApprovalRequest",
     "ApprovalCallback",
     "Orchestrator",
@@ -429,8 +431,12 @@ __all__ = [
     "check_output",
     # ops
     "Budget",
+    "DriverKind",
+    "Manager",
+    "PromptManager",
     "PromptRegistry",
     "Prompt",
+    "register_driver",
     # multimodal + audio
     "image",
     "audio",

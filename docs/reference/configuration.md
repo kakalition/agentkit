@@ -51,6 +51,51 @@ instance built from the environment and `.env`.
 Derived paths: `settings.home`, `settings.db_path`, `settings.artifacts_dir`,
 `settings.logs_dir`. Call `settings.ensure_dirs()` to create them.
 
+## Drivers
+
+Every pluggable subsystem resolves one driver per settings field. Each field is
+typed with its driver enum (from `agentkit.support.kinds`), so an invalid value
+is rejected at settings load. See [Contracts & Drivers](/guide/drivers).
+
+| Field | Env | Default | Values |
+| --- | --- | --- | --- |
+| `cache_driver` | `CACHE_DRIVER` | `array` | `array`, `null` |
+| `prompts_driver` | `PROMPTS_DRIVER` | `file` | `file`, `memory` |
+| `memory_driver` | `MEMORY_DRIVER` | `repository` | `repository`, `in_memory` |
+| `memory_recall_driver` | `MEMORY_RECALL_DRIVER` | `hybrid` | `hybrid`, `keyword`, `recency` |
+| `chunker_driver` | `CHUNKER_DRIVER` | `semantic` | `semantic`, `fixed` |
+| `retriever_driver` | `RETRIEVER_DRIVER` | `repository` | `repository`, `memory` |
+| `reranker_driver` | `RERANKER_DRIVER` | `identity` | `identity`, `lexical` |
+| `storage_driver` | `STORAGE_DRIVER` | `local` | `local`, `memory` |
+| `queue_driver` | `QUEUE_DRIVER` | `database` | `database`, `sync` |
+| `scheduler_driver` | `SCHEDULER_DRIVER` | `dbos` | `dbos`, `memory` |
+| `durability_driver` | `DURABILITY_DRIVER` | `dbos` | `dbos`, `temporal` (extra) |
+| `database_driver` | `DATABASE_DRIVER` | `sqlite` | `sqlite`, `postgres` |
+| `observability` | `OBSERVABILITY` | `phoenix` | `phoenix`, `console`, `otlp`, `off` |
+| `pricing_driver` | `PRICING_DRIVER` | `genai` | `genai`, `static` |
+| `rate_limit_driver` | `RATE_LIMIT_DRIVER` | `database` | `database`, `memory` |
+| `auth_driver` | `AUTH_DRIVER` | `default` | `default`, `anonymous` |
+| `vault_driver` | `VAULT_DRIVER` | `fernet` | `fernet`, `env` |
+| `guardrails_driver` | `GUARDRAILS_DRIVER` | `regex` | `regex`, `moderation` |
+| `ingest_driver` | `INGEST_DRIVER` | `default` | `default`, `text` |
+| `audio_driver` | `AUDIO_DRIVER` | `openai` | `openai` |
+| `learning_extractor_driver` | `LEARNING_EXTRACTOR_DRIVER` | `model` | `model`, `heuristic` |
+| `learning_strategy_driver` | `LEARNING_STRATEGY_DRIVER` | `reflect_apply` | `reflect_apply`, `none` |
+| `learning_sink_driver` | `LEARNING_SINK_DRIVER` | `memory` | `memory` |
+| `comms_driver` | `COMMS_DRIVER` | `mailbox` | `mailbox`, `broadcast`, `swarm`, `pipeline`, `hub`, `mesh`, `hierarchy`, `outbox`, `blackboard`, `pubsub`, `groupchat`, `handoff` |
+| `context_driver` | `CONTEXT_DRIVER` | `isolated` | `isolated`, `shared`, `summarized` |
+| `tasks_driver` | `TASKS_DRIVER` | `memory` | `memory` |
+| `planning_driver` | `PLANNING_DRIVER` | `single` | `single`, `batched` |
+| `agent_middleware_driver` | `AGENT_MIDDLEWARE_DRIVER` | `noop` | `noop`, `logging` |
+| `graph_driver` | `GRAPH_DRIVER` | `sequential` | `sequential`, `parallel`, `checkpointed` |
+| `code_executor_driver` | `CODE_EXECUTOR_DRIVER` | `local` | `local`, `docker`, `jupyter`, `e2b` (extras) |
+| `evals_reporter_driver` | `EVALS_REPORTER_DRIVER` | `text` | `text`, `json`, `pydantic` |
+| `channel_driver` | `CHANNEL_DRIVER` | `log` | `log`, `telegram`, `slack`, `email`, `discord` |
+| `notification_channel_driver` | `NOTIFICATION_CHANNEL_DRIVER` | `log` | `log`, `conversation`, `telegram` |
+
+`memory_embedding_backend` doubles as the `embeddings` driver name
+(`sentence-transformers` | `fastembed` | `hash` | `none`).
+
 ## Web UI
 
 | Field | Env | Default |

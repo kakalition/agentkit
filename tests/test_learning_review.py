@@ -65,7 +65,7 @@ async def test_reject_lesson_is_never_applied(repos):
 
 async def test_active_by_default_when_review_off(repos):
     await _seed(repos, ["Always refill the water bowl each morning."])
-    await reflect(repos)
+    await reflect(repos, settings=SimpleNamespace(learning_require_review=False))
     active = await repos.memories.list(kind="procedural")
     assert active and active[0].status == "active"
     assert await proposed_lessons(repos) == []

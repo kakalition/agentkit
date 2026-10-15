@@ -279,6 +279,10 @@ class Memory(Facade):
     def binding(cls) -> str:
         return "memory"
 
+    @classmethod
+    def driver_kind(cls) -> str:
+        return "memory"
+
 
 class Schedule(Facade):
     @classmethod
@@ -315,10 +319,18 @@ class Cache(Facade):
     def binding(cls) -> str:
         return "cache"
 
+    @classmethod
+    def driver_kind(cls) -> str:
+        return "cache"
+
 
 class Storage(Facade):
     @classmethod
     def binding(cls) -> str:
+        return "storage"
+
+    @classmethod
+    def driver_kind(cls) -> str:
         return "storage"
 
 

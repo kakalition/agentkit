@@ -1,0 +1,289 @@
+"""Typed driver identifiers — no string constants.
+
+Every subsystem *kind* and every driver *name* is a :class:`enum.StrEnum`, so
+registration, selection, and settings are checked by the type system (and by
+pydantic at settings load) instead of by convention.
+
+    class CacheManager(Manager):
+        kind = DriverKind.CACHE
+        default_driver = CacheDriver.ARRAY
+
+    @register_driver(DriverKind.CACHE, CacheDriver.NULL)
+    def _null(app): ...
+
+Because ``StrEnum`` members *are* strings, ``CacheDriver.ARRAY == "array"`` and
+``f"{CacheDriver.ARRAY}" == "array"``, so existing settings/env values keep
+working while the code gains real types.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+
+__all__ = [
+    "AgentMiddlewareDriver",
+    "AudioDriver",
+    "AuthDriver",
+    "CacheDriver",
+    "ChannelDriver",
+    "ChunkerDriver",
+    "CodeExecDriver",
+    "CommsDriver",
+    "ContextDriver",
+    "DatabaseDriver",
+    "DriverKind",
+    "DurabilityDriver",
+    "EmbeddingsDriver",
+    "EvalsReporterDriver",
+    "GraphDriver",
+    "GuardrailDriver",
+    "IngestDriver",
+    "LearningExtractorDriver",
+    "LearningSinkDriver",
+    "LearningStrategyDriver",
+    "MemoryDriver",
+    "NotificationChannelDriver",
+    "ObservabilityDriver",
+    "PlanningDriver",
+    "PricingDriver",
+    "PromptsDriver",
+    "QueueDriverKind",
+    "RateLimitDriver",
+    "RecallDriver",
+    "RerankerDriver",
+    "RetrieverDriver",
+    "SchedulerDriver",
+    "StorageDriver",
+    "TaskDriver",
+    "VaultDriver",
+]
+
+
+class DriverKind(StrEnum):
+    """The subsystem a driver belongs to (the registry key prefix)."""
+
+    AGENT_MIDDLEWARE = "agent_middleware"
+    AUDIO = "audio"
+    AUTH = "auth"
+    CACHE = "cache"
+    CHANNEL = "channel"
+    CHUNKER = "chunker"
+    CODEEXEC = "codeexec"
+    COMMS = "comms"
+    CONTEXT = "context"
+    DATABASE = "database"
+    DURABILITY = "durability"
+    EMBEDDINGS = "embeddings"
+    EVALS_REPORTER = "evals_reporter"
+    GRAPH = "graph"
+    GUARDRAILS = "guardrails"
+    INGEST = "ingest"
+    LEARNING_EXTRACTOR = "learning_extractor"
+    LEARNING_SINK = "learning_sink"
+    LEARNING_STRATEGY = "learning_strategy"
+    MEMORY = "memory"
+    MEMORY_RECALL = "memory_recall"
+    NOTIFICATION_CHANNEL = "notification_channel"
+    OBSERVABILITY = "observability"
+    PLANNING = "planning"
+    PRICING = "pricing"
+    PROMPTS = "prompts"
+    QUEUE = "queue"
+    RATELIMIT = "ratelimit"
+    RERANKER = "reranker"
+    RETRIEVER = "retriever"
+    SCHEDULER = "scheduler"
+    STORAGE = "storage"
+    TASKS = "tasks"
+    VAULT = "vault"
+
+
+class CacheDriver(StrEnum):
+    ARRAY = "array"
+    NULL = "null"
+
+
+class PromptsDriver(StrEnum):
+    FILE = "file"
+    MEMORY = "memory"
+
+
+class EmbeddingsDriver(StrEnum):
+    SENTENCE_TRANSFORMERS = "sentence-transformers"
+    FASTEMBED = "fastembed"
+    HASH = "hash"
+    NONE = "none"
+
+
+class MemoryDriver(StrEnum):
+    REPOSITORY = "repository"
+    IN_MEMORY = "in_memory"
+
+
+class RecallDriver(StrEnum):
+    HYBRID = "hybrid"
+    KEYWORD = "keyword"
+    RECENCY = "recency"
+
+
+class ChunkerDriver(StrEnum):
+    SEMANTIC = "semantic"
+    FIXED = "fixed"
+
+
+class RetrieverDriver(StrEnum):
+    REPOSITORY = "repository"
+    MEMORY = "memory"
+
+
+class RerankerDriver(StrEnum):
+    IDENTITY = "identity"
+    LEXICAL = "lexical"
+
+
+class StorageDriver(StrEnum):
+    LOCAL = "local"
+    MEMORY = "memory"
+
+
+class QueueDriverKind(StrEnum):
+    DATABASE = "database"
+    SYNC = "sync"
+
+
+class SchedulerDriver(StrEnum):
+    DBOS = "dbos"
+    MEMORY = "memory"
+
+
+class DurabilityDriver(StrEnum):
+    DBOS = "dbos"
+    TEMPORAL = "temporal"
+
+
+class DatabaseDriver(StrEnum):
+    SQLITE = "sqlite"
+    POSTGRES = "postgres"
+
+
+class ObservabilityDriver(StrEnum):
+    PHOENIX = "phoenix"
+    CONSOLE = "console"
+    OTLP = "otlp"
+    OFF = "off"
+
+
+class PricingDriver(StrEnum):
+    GENAI = "genai"
+    STATIC = "static"
+
+
+class RateLimitDriver(StrEnum):
+    DATABASE = "database"
+    MEMORY = "memory"
+
+
+class AuthDriver(StrEnum):
+    DEFAULT = "default"
+    ANONYMOUS = "anonymous"
+
+
+class VaultDriver(StrEnum):
+    FERNET = "fernet"
+    ENV = "env"
+
+
+class GuardrailDriver(StrEnum):
+    REGEX = "regex"
+    MODERATION = "moderation"
+
+
+class IngestDriver(StrEnum):
+    DEFAULT = "default"
+    TEXT = "text"
+
+
+class AudioDriver(StrEnum):
+    OPENAI = "openai"
+
+
+class LearningExtractorDriver(StrEnum):
+    MODEL = "model"
+    HEURISTIC = "heuristic"
+
+
+class LearningStrategyDriver(StrEnum):
+    REFLECT_APPLY = "reflect_apply"
+    NONE = "none"
+
+
+class LearningSinkDriver(StrEnum):
+    MEMORY = "memory"
+
+
+class CommsDriver(StrEnum):
+    MAILBOX = "mailbox"
+    BROADCAST = "broadcast"
+    SWARM = "swarm"
+    PIPELINE = "pipeline"
+    HANDOFF = "handoff"
+    HUB = "hub"
+    MESH = "mesh"
+    HIERARCHY = "hierarchy"
+    OUTBOX = "outbox"
+    BLACKBOARD = "blackboard"
+    PUBSUB = "pubsub"
+    GROUPCHAT = "groupchat"
+
+
+class ContextDriver(StrEnum):
+    ISOLATED = "isolated"
+    SHARED = "shared"
+    SUMMARIZED = "summarized"
+
+
+class TaskDriver(StrEnum):
+    MEMORY = "memory"
+
+
+class PlanningDriver(StrEnum):
+    SINGLE = "single"
+    BATCHED = "batched"
+
+
+class AgentMiddlewareDriver(StrEnum):
+    NOOP = "noop"
+    LOGGING = "logging"
+
+
+class GraphDriver(StrEnum):
+    SEQUENTIAL = "sequential"
+    PARALLEL = "parallel"
+    CHECKPOINTED = "checkpointed"
+
+
+class CodeExecDriver(StrEnum):
+    LOCAL = "local"
+    DOCKER = "docker"
+    JUPYTER = "jupyter"
+    E2B = "e2b"
+
+
+class EvalsReporterDriver(StrEnum):
+    TEXT = "text"
+    JSON = "json"
+    PYDANTIC = "pydantic"
+
+
+class ChannelDriver(StrEnum):
+    LOG = "log"
+    TELEGRAM = "telegram"
+    SLACK = "slack"
+    EMAIL = "email"
+    DISCORD = "discord"
+
+
+class NotificationChannelDriver(StrEnum):
+    LOG = "log"
+    CONVERSATION = "conversation"
+    TELEGRAM = "telegram"

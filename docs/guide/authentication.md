@@ -136,3 +136,120 @@ per-tool enforcement. `agentkit inspect` / `/api/info` report the enabled flag.
 - Loopback bind + `warn_if_exposed` remain; auth is additive, not a replacement.
 - Never log tokens: `auth_api_keys` is masked in `/api/config` and secret
   redaction covers keys in logs.
+
+## Drivers
+
+### What authentication and a vault are, in plain English
+
+These are two different jobs that are easy to mix up:
+
+- **Authentication** answers *"who is this?"* It is the **bouncer at the door**:
+  a request arrives carrying a key (an API key or a signed token), and the
+  authenticator checks whether it is genuine and looks up which person and team
+  it belongs to. If the key is bad, the request is turned away. agentkit's auth
+  is **opt-in** (off by default, so local use is unchanged) and **fail-closed**
+  when enabled: a request that cannot be authenticated is rejected rather than
+  let through.
+- A **secret vault** answers *"where are the passwords kept?"* It is the **safe**
+  behind the desk: instead of leaving bot tokens and API keys lying around in
+  environment variables in plain text, the vault stores them encrypted and hands
+  them back by name when a channel or provider needs them. The vault says nothing
+  about who is calling; it only stores secrets.
+
+Both are **drivers**: pluggable implementations selected by a setting.
+
+### A runnable example
+
+```python
+from agentkit import App, DriverKind
+
+app = App()   # reads AUTH_ENABLED / AUTH_DRIVER / VAULT_DRIVER from env / .env
+
+# Default: local-first. AUTH_ENABLED is false, so every request runs as the
+# single owner named by OWNER_ID. The authenticator exists but is not enforced.
+print(app.manager(DriverKind.AUTH).driver().enabled)      # -> False
+
+# Turn it on with AUTH_ENABLED=true; requests must then present a valid API key
+# or JWT, or they are rejected (fail-closed).
+print(app.manager(DriverKind.AUTH).configured_driver())   # -> "default"
+print(app.manager(DriverKind.AUTH).available())           # -> ["anonymous", "default"]
+
+# The vault stores secrets encrypted at rest (VAULT_DRIVER=fernet by default).
+print(app.manager(DriverKind.VAULT).configured_driver())  # -> "fernet"
+
+# Switch drivers by setting env vars and rebuilding the app:
+#   AUTH_DRIVER=anonymous   (never authenticates; always the system actor)
+#   VAULT_DRIVER=env        (read-only over the environment)
+```
+
+### Built-in drivers
+
+**Authentication** (`AUTH_DRIVER`):
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `default` (default) | One authenticator that accepts static config API keys, database-backed API keys, and JWT/JWKS tokens, resolving each request into an `Actor`. Only enforced when auth is enabled. | Real multi-tenant deployments that need to identify callers. |
+| `anonymous` | Never authenticates; every request resolves to the settings owner via `system_actor`. | Local development, or to turn auth off explicitly. |
+
+**Secret vault** (`VAULT_DRIVER`):
+
+| Driver | What it does | When to pick it |
+| --- | --- | --- |
+| `fernet` (default) | Stores channel/provider secrets encrypted at rest in the `credentials` table, keyed by name. Needs `AGENTKIT_CREDENTIALS_KEY` and refuses to run without it. | Keeping secrets out of the environment and in the database. |
+| `env` | A read-only vault that reads secrets from the settings/environment; writes raise, and deletes are no-ops. | Using environment variables only, with no database secret store. |
+
+::: tip Environment wins over the vault
+At boot the vault hydrates settings **only for names that are unset**, so any
+value already present in the environment takes precedence. If a vault secret
+seems ignored, the same name is probably set in the environment too.
+:::
+
+### How to select a driver
+
+```bash
+AUTH_ENABLED=true         # opt in to multi-tenant auth (default false: local-first)
+AUTH_DRIVER=default       # default | anonymous
+VAULT_DRIVER=fernet       # fernet | env
+```
+
+Selection follows the standard precedence: an explicit name passed in code
+(`app.manager(DriverKind.AUTH).driver("anonymous")`), then the setting, then the
+default. `agentkit inspect` prints the resolved `auth` and `vault` values.
+
+### Override it just for your app
+
+`app.extend(...)` registers a driver scoped to this application only:
+
+```python
+from agentkit import DriverKind
+
+app.extend(DriverKind.AUTH, "oidc", lambda app: OIDCStrategy(app.settings))
+app.extend(DriverKind.VAULT, "aws", lambda app: AwsSecretsVault(app.settings))
+```
+
+Then select it with `AUTH_DRIVER=oidc` or `VAULT_DRIVER=aws`.
+
+### Ship a reusable driver
+
+Register it globally so any app can use it. An auth driver implements
+`authenticate(...)` / `resolve_token(...)` and a `default_actor()`; a vault driver
+implements `get` / `set` / `names` / `delete`:
+
+```python
+from agentkit import DriverKind, register_driver
+
+@register_driver(DriverKind.AUTH, "oidc")
+def _oidc(app):
+    return OIDCStrategy(app.settings)
+```
+
+See [Contracts & Drivers](/guide/drivers) for the full contracts.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+| --- | --- |
+| Every request returns `401` after enabling auth | `AUTH_ENABLED=true` is fail-closed; the request presented no valid API key or JWT (check the `Authorization: Bearer <token>` header). |
+| `VaultError: credentials_key is not set` | The vault is enabled but `AGENTKIT_CREDENTIALS_KEY` is missing; it refuses to store plaintext. |
+| A secret set in the vault seems ignored | The same name is already set in the environment, which takes precedence over the vault. |
+| A role-gated tool is denied with auth off | Role checks are fail-closed: with no actor, a tool requiring a role is denied by design. |

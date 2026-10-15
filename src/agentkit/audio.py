@@ -16,9 +16,22 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agentkit.contracts.audio import Synthesizer, Transcriber
 from agentkit.errors import ConfigurationError
+from agentkit.support import register_driver
+from agentkit.support.kinds import AudioDriver, DriverKind
+from agentkit.support.manager import Manager
 
-__all__ = ["DEFAULT_STT_MODEL", "DEFAULT_TTS_MODEL", "synthesize", "transcribe"]
+__all__ = [
+    "AudioManager",
+    "DEFAULT_STT_MODEL",
+    "DEFAULT_TTS_MODEL",
+    "OpenAISpeech",
+    "Synthesizer",
+    "Transcriber",
+    "synthesize",
+    "transcribe",
+]
 
 DEFAULT_STT_MODEL = "whisper-1"
 DEFAULT_TTS_MODEL = "tts-1"
@@ -91,3 +104,30 @@ def synthesize(
     if content is None:  # pragma: no cover - defensive
         raise ConfigurationError("speech synthesis returned no audio")
     return bytes(content)
+
+
+class OpenAISpeech:
+    """The default speech driver: OpenAI transcription and synthesis."""
+
+    def __init__(self, *, client: Any = None, api_key: str | None = None) -> None:
+        self.client = client
+        self.api_key = api_key
+
+    def transcribe(self, source: str | Path | bytes, **options: Any) -> str:
+        return transcribe(source, client=self.client, api_key=self.api_key, **options)
+
+    def synthesize(self, text: str, **options: Any) -> bytes:
+        return synthesize(text, client=self.client, api_key=self.api_key, **options)
+
+
+class AudioManager(Manager):
+    """Resolves the configured speech driver (``audio_driver``, default ``openai``)."""
+
+    kind = DriverKind.AUDIO
+    default_driver = AudioDriver.OPENAI
+
+
+@register_driver(DriverKind.AUDIO, AudioDriver.OPENAI)
+def _openai_speech_driver(app: Any) -> OpenAISpeech:
+    settings = getattr(app, "settings", None)
+    return OpenAISpeech(api_key=getattr(settings, "openai_api_key", None))
