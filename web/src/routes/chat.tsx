@@ -7,9 +7,17 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
@@ -32,10 +40,14 @@ function MessageBubble({ message }: { message: Message }) {
             }
             if (part.kind === "tool-return") {
               return (
-                <details key={index} className="text-xs">
-                  <summary className="cursor-pointer">tool result: {part.tool_name}</summary>
-                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap">{part.text}</pre>
-                </details>
+                <Collapsible key={index} className="text-xs">
+                  <CollapsibleTrigger className="cursor-pointer hover:underline">
+                    tool result: {part.tool_name}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <pre className="mt-1 overflow-x-auto whitespace-pre-wrap">{part.text}</pre>
+                  </CollapsibleContent>
+                </Collapsible>
               )
             }
             if (!part.text) return null
@@ -137,20 +149,18 @@ export default function Chat() {
           onChange={(event) => setConversationId(event.target.value)}
           placeholder="conversation id, e.g. webui:default"
         />
-        <select
-          className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-          value=""
-          onChange={(event) => {
-            if (event.target.value) setConversationId(event.target.value)
-          }}
-        >
-          <option value="">pick existing…</option>
-          {conversations.data?.conversations.map((conversation) => (
-            <option key={conversation.id} value={conversation.id}>
-              {conversation.id}
-            </option>
-          ))}
-        </select>
+        <Select value="" onValueChange={(value) => value && setConversationId(value)}>
+          <SelectTrigger className="w-[12rem]">
+            <SelectValue placeholder="pick existing…" />
+          </SelectTrigger>
+          <SelectContent>
+            {conversations.data?.conversations.map((conversation) => (
+              <SelectItem key={conversation.id} value={conversation.id}>
+                {conversation.id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button variant="outline" size="sm" onClick={() => void messages.refetch()}>
           Refresh
         </Button>
@@ -188,7 +198,7 @@ export default function Chat() {
 
       <Card>
         <CardContent className="p-4">
-          <ScrollArea className="h-[26rem] pr-4">
+          <ScrollArea className="h-[calc(100svh-22rem)] min-h-[16rem] pr-4">
             <div className="flex flex-col gap-3">
               {ephemeral ? (
                 <p className="text-muted-foreground text-sm">

@@ -1,13 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Code2, Play, Plus, Save, Trash2, Zap } from "lucide-react"
 import { useMemo, useState } from "react"
+import { toast } from "sonner"
 
-import { ErrorAlert, Page } from "@/components/page"
+import { ListItem } from "@/components/list-item"
+import { ErrorAlert, Loading, Page } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
@@ -264,7 +273,9 @@ export default function Studio() {
     onSuccess: () => {
       setSelected(draft.name)
       refresh()
+      toast.success("Team saved")
     },
+    onError: (error) => toast.error((error as Error).message),
   })
   const remove = useMutation({
     mutationFn: (name: string) => api.deleteStudioTeam(name),
@@ -272,19 +283,30 @@ export default function Studio() {
       setSelected(null)
       setDraft(EMPTY)
       refresh()
+      toast.success("Team deleted")
     },
+    onError: (error) => toast.error((error as Error).message),
   })
   const activate = useMutation({
     mutationFn: (name: string) => api.activateStudioTeam(name),
-    onSuccess: refresh,
+    onSuccess: () => {
+      refresh()
+      toast.success("Team activated")
+    },
+    onError: (error) => toast.error((error as Error).message),
   })
   const showCode = useMutation({
     mutationFn: (name: string) => api.studioTeamCode(name),
     onSuccess: (data) => setCode(data.code),
+    onError: (error) => toast.error((error as Error).message),
   })
   const runTeam = useMutation({
     mutationFn: (name: string) => api.runStudioTeam(name, prompt),
-    onSuccess: setRun,
+    onSuccess: (data) => {
+      setRun(data)
+      toast.success("Team run complete")
+    },
+    onError: (error) => toast.error((error as Error).message),
   })
 
   const patch = (values: Partial<TeamDefinition>) => setDraft((current) => ({ ...current, ...values }))
@@ -345,23 +367,23 @@ export default function Studio() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-1">
-            {teams.data?.teams.length ? (
+            {teams.isLoading ? (
+              <Loading rows={3} />
+            ) : teams.data?.teams.length ? (
               teams.data.teams.map((team) => (
-                <button
+                <ListItem
                   key={team.name}
-                  onClick={() => load(team.name)}
-                  className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent ${
-                    selected === team.name ? "bg-accent" : ""
-                  }`}
+                  active={selected === team.name}
+                  onSelect={() => load(team.name)}
                 >
-                  <span>{team.name}</span>
+                  <span className="truncate">{team.name}</span>
                   <span className="flex items-center gap-1">
                     {team.registered ? <Zap className="size-3 text-amber-500" /> : null}
                     <Badge variant="secondary" className="text-[10px]">
                       {team.kind}
                     </Badge>
                   </span>
-                </button>
+                </ListItem>
               ))
             ) : (
               <p className="text-muted-foreground text-sm">No saved teams yet.</p>
@@ -370,7 +392,7 @@ export default function Studio() {
         </Card>
 
         <Tabs defaultValue="builder">
-          <TabsList>
+          <TabsList className="w-full justify-start overflow-x-auto">
             <TabsTrigger value="builder">Builder</TabsTrigger>
             <TabsTrigger value="json">JSON</TabsTrigger>
             <TabsTrigger value="code">Python</TabsTrigger>
@@ -398,51 +420,64 @@ export default function Studio() {
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="team-kind">Kind</Label>
-                    <select
-                      id="team-kind"
-                      className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-                      value={draft.kind}
-                      onChange={(event) => patch({ kind: event.target.value })}
-                    >
-                      {(teams.data?.kinds ?? ["groupchat", "supervisor", "managed"]).map((kind) => (
-                        <option key={kind} value={kind}>
-                          {kind}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={draft.kind} onValueChange={(value) => patch({ kind: value })}>
+                      <SelectTrigger id="team-kind" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(teams.data?.kinds ?? ["groupchat", "supervisor", "managed"]).map(
+                          (kind) => (
+                            <SelectItem key={kind} value={kind}>
+                              {kind}
+                            </SelectItem>
+                          ),
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="team-speaker">Speaker</Label>
-                    <select
-                      id="team-speaker"
-                      className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-                      value={draft.speaker}
-                      onChange={(event) => patch({ speaker: event.target.value })}
-                    >
-                      {(
-                        teams.data?.speakers ?? ["round_robin", "moderator", "all", "selector", "manual"]
-                      ).map((speaker) => (
-                        <option key={speaker} value={speaker}>
-                          {speaker}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={draft.speaker} onValueChange={(value) => patch({ speaker: value })}>
+                      <SelectTrigger id="team-speaker" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(
+                          teams.data?.speakers ?? [
+                            "round_robin",
+                            "moderator",
+                            "all",
+                            "selector",
+                            "manual",
+                          ]
+                        ).map((speaker) => (
+                          <SelectItem key={speaker} value={speaker}>
+                            {speaker}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="team-moderator">Moderator</Label>
-                    <select
-                      id="team-moderator"
-                      className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-                      value={draft.moderator ?? ""}
-                      onChange={(event) => patch({ moderator: event.target.value || null })}
+                    <Select
+                      value={draft.moderator ?? "__first__"}
+                      onValueChange={(value) =>
+                        patch({ moderator: value === "__first__" ? null : value })
+                      }
                     >
-                      <option value="">(first member)</option>
-                      {draft.members.map((member) => (
-                        <option key={member.name} value={member.name}>
-                          {member.name}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger id="team-moderator" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__first__">(first member)</SelectItem>
+                        {draft.members.map((member) => (
+                          <SelectItem key={member.name} value={member.name}>
+                            {member.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="team-turns">Max turns</Label>
@@ -495,7 +530,12 @@ export default function Studio() {
                       onChange={(event) => patchMember(index, { description: event.target.value })}
                       placeholder="description"
                     />
-                    <Button variant="ghost" size="icon" onClick={() => removeMember(index)}>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Remove ${member.name || "member"}`}
+                      onClick={() => removeMember(index)}
+                    >
                       <Trash2 className="size-4" />
                     </Button>
                   </div>

@@ -21,7 +21,16 @@ export interface NavItem {
   icon: LucideIcon
 }
 
-export function AppSidebar({ items, subtitle }: { items: NavItem[]; subtitle?: string }) {
+export interface NavGroup {
+  label: string
+  items: NavItem[]
+}
+
+function isActive(pathname: string, url: string): boolean {
+  return url === "/" ? pathname === "/" : pathname.startsWith(url)
+}
+
+export function AppSidebar({ groups, subtitle }: { groups: NavGroup[]; subtitle?: string }) {
   const location = useLocation()
 
   return (
@@ -44,31 +53,29 @@ export function AppSidebar({ items, subtitle }: { items: NavItem[]; subtitle?: s
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Manage</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {items.map((item) => (
-                <SidebarMenuItem key={item.url}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={
-                      item.url === "/"
-                        ? location.pathname === "/"
-                        : location.pathname.startsWith(item.url)
-                    }
-                    tooltip={item.title}
-                  >
-                    <Link to={item.url}>
-                      <item.icon />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {groups.map((group) => (
+          <SidebarGroup key={group.label}>
+            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => (
+                  <SidebarMenuItem key={item.url}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive(location.pathname, item.url)}
+                      tooltip={item.title}
+                    >
+                      <Link to={item.url}>
+                        <item.icon />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
       <SidebarRail />
     </Sidebar>

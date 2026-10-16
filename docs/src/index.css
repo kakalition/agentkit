@@ -62,13 +62,13 @@
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
     --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
+    --muted-foreground: oklch(0.53 0 0);
     --accent: oklch(0.97 0 0);
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
+    --border: oklch(0.9 0 0);
+    --input: oklch(0.9 0 0);
+    --ring: oklch(0.62 0 0);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -101,7 +101,7 @@
     --accent: oklch(0.269 0 0);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
+    --border: oklch(1 0 0 / 14%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
     --chart-1: oklch(0.87 0 0);
@@ -129,9 +129,50 @@
   html {
     @apply font-sans antialiased;
     }
+  :where(a, button, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    }
   ::selection {
     background-color: color-mix(in oklab, var(--foreground) 14%, transparent);
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Landing hero                                                       */
+/* ------------------------------------------------------------------ */
+
+.hero-glow {
+  background: radial-gradient(
+    58% 52% at 50% 0%,
+    color-mix(in oklab, var(--foreground) 9%, transparent),
+    transparent 72%
+  );
+}
+
+.dark .hero-glow {
+  background: radial-gradient(
+    58% 52% at 50% 0%,
+    color-mix(in oklab, var(--foreground) 13%, transparent),
+    transparent 72%
+  );
+}
+
+.hero-grid {
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in oklab, var(--foreground) 7%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in oklab, var(--foreground) 7%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 2.75rem 2.75rem;
+  mask-image: radial-gradient(68% 58% at 50% 0%, black, transparent 76%);
+  -webkit-mask-image: radial-gradient(68% 58% at 50% 0%, black, transparent 76%);
 }
 
 /* ------------------------------------------------------------------ */
@@ -298,7 +339,7 @@
 }
 .prose-ak .hljs-comment,
 .prose-ak .hljs-quote {
-  color: #6e7781;
+  color: #5c6470;
   font-style: italic;
 }
 .prose-ak .hljs-keyword,

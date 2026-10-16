@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
+import { toast } from "sonner"
 
-import { ErrorAlert, Page } from "@/components/page"
+import { ErrorAlert, Loading, Page } from "@/components/page"
+import { TableShell } from "@/components/table-shell"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,13 +43,18 @@ export default function Conversations() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["messages", selected] })
       void queryClient.invalidateQueries({ queryKey: ["conversations"] })
+      toast.success("Conversation cleared")
     },
+    onError: (error) => toast.error((error as Error).message),
   })
 
   return (
     <Page title="Conversations" description="Durable conversation history.">
       <ErrorAlert error={conversations.error} />
-      <div className="rounded-lg border">
+      {conversations.isLoading ? (
+        <Loading />
+      ) : (
+        <TableShell>
         <Table>
           <TableHeader>
             <TableRow>
@@ -64,7 +71,9 @@ export default function Conversations() {
                 className="cursor-pointer"
                 onClick={() => setSelected(conversation.id)}
               >
-                <TableCell className="font-medium">{conversation.id}</TableCell>
+                <TableCell className="font-medium" title={conversation.id}>
+                  {conversation.id}
+                </TableCell>
                 <TableCell>
                   <Badge variant="secondary">{conversation.channel}</Badge>
                 </TableCell>
@@ -83,7 +92,8 @@ export default function Conversations() {
             ) : null}
           </TableBody>
         </Table>
-      </div>
+        </TableShell>
+      )}
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         <SheetContent className="flex w-full flex-col sm:max-w-xl">

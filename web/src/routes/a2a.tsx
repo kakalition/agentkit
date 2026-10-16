@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { ErrorAlert, Page } from "@/components/page"
+import { ErrorAlert, Loading, Page } from "@/components/page"
+import { TableShell } from "@/components/table-shell"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -25,48 +26,56 @@ export default function A2A() {
   return (
     <Page title="A2A tasks" description="Durable inbound agent-to-agent tasks.">
       <ErrorAlert error={tasks.error} />
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Id</TableHead>
-              <TableHead>Context</TableHead>
-              <TableHead>State</TableHead>
-              <TableHead>Updated</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {tasks.data?.tasks.map((task) => (
-              <TableRow
-                key={task.id}
-                className="cursor-pointer"
-                onClick={() => setSelected(task.id)}
-              >
-                <TableCell className="font-mono text-xs">{task.id}</TableCell>
-                <TableCell className="font-mono text-xs">{task.context_id ?? "—"}</TableCell>
-                <TableCell>
-                  <Badge variant="secondary">{task.state}</Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground text-sm">{task.updated_at}</TableCell>
-              </TableRow>
-            ))}
-            {tasks.data?.tasks.length === 0 ? (
+      {tasks.isLoading ? (
+        <Loading />
+      ) : (
+        <TableShell>
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={4} className="text-muted-foreground text-center">
-                  No A2A tasks.
-                </TableCell>
+                <TableHead>Id</TableHead>
+                <TableHead>Context</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead>Updated</TableHead>
               </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {tasks.data?.tasks.map((task) => (
+                <TableRow
+                  key={task.id}
+                  className="cursor-pointer"
+                  onClick={() => setSelected(task.id)}
+                >
+                  <TableCell className="font-mono text-xs" title={task.id}>
+                    {task.id}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs" title={task.context_id ?? undefined}>
+                    {task.context_id ?? "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{task.state}</Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground text-sm">{task.updated_at}</TableCell>
+                </TableRow>
+              ))}
+              {tasks.data?.tasks.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-muted-foreground text-center">
+                    No A2A tasks.
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </TableShell>
+      )}
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         <SheetContent className="w-full sm:max-w-xl">
           <SheetHeader>
             <SheetTitle>Task {selected}</SheetTitle>
           </SheetHeader>
-          <ScrollArea className="mt-4 h-[70vh] pr-2">
+          <ScrollArea className="mt-4 h-[70svh] pr-2">
             <pre className="overflow-x-auto text-xs whitespace-pre-wrap">
               {JSON.stringify(detail.data?.payload ?? {}, null, 2)}
             </pre>

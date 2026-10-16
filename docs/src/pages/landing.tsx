@@ -11,9 +11,11 @@ import {
 import { Link } from "react-router"
 
 import { Markdown } from "@/components/markdown"
+import { ConsoleMock } from "@/components/console-mock"
 import { Terminal } from "@/components/terminal"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { STATS } from "@/lib/site"
 
 const FEATURES = [
   {
@@ -46,13 +48,6 @@ const FEATURES = [
     title: "MCP & A2A",
     body: "Consume MCP toolsets and speak the A2A agent-to-agent protocol.",
   },
-]
-
-const STATS = [
-  { value: "155", label: "public exports" },
-  { value: "279", label: "tests passing" },
-  { value: "83%", label: "coverage" },
-  { value: "40+", label: "docs pages" },
 ]
 
 const CHECKS = [
@@ -120,21 +115,22 @@ export function Landing() {
   return (
     <div>
       <section className="relative overflow-hidden border-b">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_60%_at_50%_0%,var(--muted),transparent)]" />
-        <div className="relative mx-auto w-full max-w-[88rem] px-4 py-20 sm:px-6 sm:py-28">
-          <div className="mx-auto max-w-4xl text-center">
+        <div className="hero-grid pointer-events-none absolute inset-0" />
+        <div className="hero-glow pointer-events-none absolute inset-x-0 top-0 h-[42rem]" />
+        <div className="relative mx-auto grid w-full max-w-[88rem] items-center gap-14 px-4 py-20 sm:px-6 sm:py-28 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16">
+          <div>
             <Badge variant="outline" className="font-mono text-xs">
               Python · PydanticAI · DBOS
             </Badge>
-            <h1 className="mt-6 text-4xl font-semibold tracking-tight text-balance sm:text-6xl">
+            <h1 className="mt-6 text-4xl font-semibold leading-[1.05] tracking-tight text-balance sm:text-6xl lg:text-7xl">
               Build, run, and ship durable AI agents.
             </h1>
-            <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
+            <p className="mt-6 max-w-2xl text-lg text-foreground/70 sm:text-xl">
               A batteries-included framework with a Laravel-style developer experience —
               application container, providers, a fluent agent builder, memory, skills,
               RAG, streaming, and production-grade safety. One process, one mental model.
             </p>
-            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <Button asChild size="lg" className="w-full sm:w-auto">
                 <Link to="/guide/getting-started">
                   Get started
@@ -149,8 +145,8 @@ export function Landing() {
               MIT licensed · Runs locally · No hosted account required
             </p>
           </div>
-          <div className="mx-auto mt-14 max-w-2xl">
-            <Terminal />
+          <div className="min-w-0">
+            <ConsoleMock />
           </div>
         </div>
       </section>
@@ -231,24 +227,26 @@ export function Landing() {
             title="A concept map for Laravel developers"
           />
           <div className="mt-8 overflow-hidden rounded-xl border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40 text-left">
-                  <th className="px-4 py-2.5 font-medium text-muted-foreground">Laravel</th>
-                  <th className="px-4 py-2.5 font-medium text-muted-foreground">agentkit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {CONCEPTS.map(([laravel, agentkit]) => (
-                  <tr key={laravel} className="border-b last:border-0">
-                    <td className="px-4 py-2.5 text-muted-foreground">{laravel}</td>
-                    <td className="px-4 py-2.5">
-                      <code className="font-mono text-[13px]">{agentkit}</code>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[34rem] text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-left">
+                    <th className="px-4 py-2.5 font-medium text-muted-foreground">Laravel</th>
+                    <th className="px-4 py-2.5 font-medium text-muted-foreground">agentkit</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {CONCEPTS.map(([laravel, agentkit]) => (
+                    <tr key={laravel} className="border-b last:border-0">
+                      <td className="px-4 py-2.5 text-muted-foreground">{laravel}</td>
+                      <td className="px-4 py-2.5">
+                        <code className="font-mono text-[13px]">{agentkit}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </section>

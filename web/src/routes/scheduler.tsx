@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Plus, Trash2 } from "lucide-react"
 import { useState } from "react"
+import { toast } from "sonner"
 
-import { ErrorAlert, Page } from "@/components/page"
+import { ErrorAlert, Loading, Page } from "@/components/page"
+import { TableShell } from "@/components/table-shell"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,16 +72,23 @@ export default function Scheduler() {
       setOpen(false)
       setForm(empty)
       void invalidate()
+      toast.success("Schedule created")
     },
+    onError: (error) => toast.error((error as Error).message),
   })
   const toggle = useMutation({
     mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
       api.patchSchedule(name, { enabled }),
     onSuccess: () => void invalidate(),
+    onError: (error) => toast.error((error as Error).message),
   })
   const remove = useMutation({
     mutationFn: (name: string) => api.deleteSchedule(name),
-    onSuccess: () => void invalidate(),
+    onSuccess: () => {
+      void invalidate()
+      toast.success("Schedule deleted")
+    },
+    onError: (error) => toast.error((error as Error).message),
   })
 
   return (
@@ -187,8 +196,11 @@ export default function Scheduler() {
       }
     >
       <ErrorAlert error={schedules.error} />
-      <div className="rounded-lg border">
-        <Table>
+      {schedules.isLoading ? (
+        <Loading />
+      ) : (
+        <TableShell>
+          <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
@@ -225,7 +237,7 @@ export default function Scheduler() {
                 <TableCell>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon">
+                      <Button variant="ghost" size="icon" aria-label={`Delete ${job.name}`}>
                         <Trash2 />
                       </Button>
                     </AlertDialogTrigger>
@@ -253,8 +265,9 @@ export default function Scheduler() {
               </TableRow>
             ) : null}
           </TableBody>
-        </Table>
-      </div>
+          </Table>
+        </TableShell>
+      )}
     </Page>
   )
 }

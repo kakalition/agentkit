@@ -1,11 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Code2, Play, Plus, Save, Trash2 } from "lucide-react"
 import { useState } from "react"
+import { toast } from "sonner"
 
-import { ErrorAlert } from "@/components/page"
+import { ListItem } from "@/components/list-item"
+import { ErrorAlert, Loading } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import { defaultFor, SchemaForm, type JSONSchema } from "@/lib/schema-form"
@@ -33,7 +42,9 @@ export function SpecPanel({ kind, schema }: { kind: string; schema: JSONSchema }
     onSuccess: () => {
       setSelected(String(draft.name ?? ""))
       refresh()
+      toast.success(`${kind} saved`)
     },
+    onError: (error) => toast.error((error as Error).message),
   })
   const remove = useMutation({
     mutationFn: (name: string) => api.deleteStudioSpec(kind, name),
@@ -43,15 +54,19 @@ export function SpecPanel({ kind, schema }: { kind: string; schema: JSONSchema }
       setResult(null)
       setDraft(defaultFor(schema) as Record<string, unknown>)
       refresh()
+      toast.success(`${kind} deleted`)
     },
+    onError: (error) => toast.error((error as Error).message),
   })
   const showCode = useMutation({
     mutationFn: () => api.studioSpecCode(kind, selected as string, target),
     onSuccess: (data) => setCode(data.code),
+    onError: (error) => toast.error((error as Error).message),
   })
   const run = useMutation({
     mutationFn: () => api.runStudioSpec(kind, selected as string, prompt),
     onSuccess: (data) => setResult(data.result),
+    onError: (error) => toast.error((error as Error).message),
   })
 
   const load = (name: string) => {
@@ -84,20 +99,20 @@ export function SpecPanel({ kind, schema }: { kind: string; schema: JSONSchema }
           </Button>
         </CardHeader>
         <CardContent className="space-y-1">
-          {list.data?.specs.length ? (
+          {list.isLoading ? (
+            <Loading rows={3} />
+          ) : list.data?.specs.length ? (
             list.data.specs.map((record) => (
-              <button
+              <ListItem
                 key={record.name}
-                onClick={() => load(record.name)}
-                className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent ${
-                  selected === record.name ? "bg-accent" : ""
-                }`}
+                active={selected === record.name}
+                onSelect={() => load(record.name)}
               >
                 <span className="truncate">{record.name}</span>
                 <Badge variant="secondary" className="text-[10px]">
                   v{record.version}
                 </Badge>
-              </button>
+              </ListItem>
             ))
           ) : (
             <p className="text-muted-foreground text-sm">No {kind} definitions yet.</p>
@@ -129,15 +144,16 @@ export function SpecPanel({ kind, schema }: { kind: string; schema: JSONSchema }
               >
                 <Trash2 className="size-4" /> Delete
               </Button>
-              <select
-                className="border-input bg-background h-9 rounded-md border px-3 text-sm"
-                value={target}
-                onChange={(event) => setTarget(event.target.value)}
-              >
-                <option value="python">python</option>
-                <option value="yaml">yaml</option>
-                <option value="json">json</option>
-              </select>
+              <Select value={target} onValueChange={setTarget}>
+                <SelectTrigger className="w-[7rem]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="python">python</SelectItem>
+                  <SelectItem value="yaml">yaml</SelectItem>
+                  <SelectItem value="json">json</SelectItem>
+                </SelectContent>
+              </Select>
               <Button
                 variant="outline"
                 onClick={() => showCode.mutate()}

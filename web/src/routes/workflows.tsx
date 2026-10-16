@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { MoreHorizontal } from "lucide-react"
 import { useState } from "react"
+import { toast } from "sonner"
 
-import { ErrorAlert, Page } from "@/components/page"
+import { ErrorAlert, Loading, Page } from "@/components/page"
+import { TableShell } from "@/components/table-shell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -39,7 +41,7 @@ function WorkflowTable({
   onAction: (action: "cancel" | "resume", id: string) => void
 }) {
   return (
-    <div className="rounded-lg border">
+    <TableShell>
       <Table>
         <TableHeader>
           <TableRow>
@@ -53,7 +55,11 @@ function WorkflowTable({
         <TableBody>
           {workflows.map((workflow) => (
             <TableRow key={workflow.id}>
-              <TableCell className="font-mono text-xs" onClick={() => onSelect(workflow.id)}>
+              <TableCell
+                className="font-mono text-xs"
+                title={workflow.id}
+                onClick={() => onSelect(workflow.id)}
+              >
                 {workflow.id.slice(0, 16)}
               </TableCell>
               <TableCell>{workflow.name ?? "—"}</TableCell>
@@ -64,7 +70,7 @@ function WorkflowTable({
               <TableCell>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon">
+                    <Button variant="ghost" size="icon" aria-label="Workflow actions">
                       <MoreHorizontal />
                     </Button>
                   </DropdownMenuTrigger>
@@ -90,7 +96,7 @@ function WorkflowTable({
           ) : null}
         </TableBody>
       </Table>
-    </div>
+    </TableShell>
   )
 }
 
@@ -109,7 +115,11 @@ export default function Workflows() {
       if (kind === "cancel") await api.cancelWorkflow(id)
       else await api.resumeWorkflow(id)
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["workflows"] }),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["workflows"] })
+      toast.success(variables.kind === "cancel" ? "Workflow cancelled" : "Workflow resumed")
+    },
+    onError: (error) => toast.error((error as Error).message),
   })
 
   const onAction = (kind: "cancel" | "resume", id: string) => action.mutate({ kind, id })
@@ -123,14 +133,20 @@ export default function Workflows() {
           <TabsTrigger value="failed">Failed</TabsTrigger>
         </TabsList>
         <TabsContent value="all" className="mt-4">
-          {list.data?.error ? (
-            <p className="text-muted-foreground text-sm">{list.data.error}</p>
-          ) : null}
-          <WorkflowTable
-            workflows={list.data?.workflows ?? []}
-            onSelect={setSelected}
-            onAction={onAction}
-          />
+          {list.isLoading ? (
+            <Loading />
+          ) : (
+            <>
+              {list.data?.error ? (
+                <p className="text-muted-foreground text-sm">{list.data.error}</p>
+              ) : null}
+              <WorkflowTable
+                workflows={list.data?.workflows ?? []}
+                onSelect={setSelected}
+                onAction={onAction}
+              />
+            </>
+          )}
         </TabsContent>
         <TabsContent value="failed" className="mt-4">
           <WorkflowTable
@@ -146,7 +162,7 @@ export default function Workflows() {
           <SheetHeader>
             <SheetTitle>Workflow {selected?.slice(0, 16)}</SheetTitle>
           </SheetHeader>
-          <ScrollArea className="mt-4 h-[70vh] pr-2">
+          <ScrollArea className="mt-4 h-[70svh] pr-2">
             <pre className="overflow-x-auto text-xs whitespace-pre-wrap">
               {JSON.stringify(detail.data ?? {}, null, 2)}
             </pre>

@@ -45,7 +45,7 @@ export default function Persona() {
           <Textarea
             value={text}
             onChange={(event) => setText(event.target.value)}
-            className="min-h-[28rem] font-mono text-sm"
+            className="min-h-[50svh] font-mono text-sm"
           />
         </CardContent>
       </Card>

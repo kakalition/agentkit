@@ -1,6 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useState, type ComponentType } from "react"
+import { toast } from "sonner"
 
+import { ListItem } from "@/components/list-item"
 import { ErrorAlert } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -35,12 +37,10 @@ export function PanelHost() {
         </CardHeader>
         <CardContent className="space-y-1">
           {list.map((panel) => (
-            <button
+            <ListItem
               key={panel.id}
-              onClick={() => setActive(panel.id)}
-              className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent ${
-                current?.id === panel.id ? "bg-accent" : ""
-              }`}
+              active={current?.id === panel.id}
+              onSelect={() => setActive(panel.id)}
             >
               <span>{panel.title}</span>
               {panel.spec_kind ? (
@@ -48,7 +48,7 @@ export function PanelHost() {
                   {panel.spec_kind}
                 </Badge>
               ) : null}
-            </button>
+            </ListItem>
           ))}
         </CardContent>
       </Card>
@@ -84,6 +84,8 @@ function ActionPanel({ panel }: { panel: StudioPanel }) {
   const [text, setText] = useState("{}")
   const action = useMutation({
     mutationFn: (actionId: string) => api.studioAction(actionId, body),
+    onSuccess: () => toast.success("Action complete"),
+    onError: (error) => toast.error((error as Error).message),
   })
   return (
     <Card>

@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 
+import { ListItem } from "@/components/list-item"
 import { ErrorAlert } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { api } from "@/lib/api"
 
 /** The Studio "App" panel: inspect the live internal app (agents, comms, teams). */
@@ -166,18 +168,16 @@ export function TracesView() {
         <CardContent className="space-y-1">
           {runs.data?.runs.length ? (
             runs.data.runs.map((run) => (
-              <button
+              <ListItem
                 key={run.run_id}
-                onClick={() => setSelected(run.run_id)}
-                className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent ${
-                  selected === run.run_id ? "bg-accent" : ""
-                }`}
+                active={selected === run.run_id}
+                onSelect={() => setSelected(run.run_id)}
               >
                 <span className="truncate font-mono text-xs">{run.run_id}</span>
                 <Badge variant="secondary" className="text-[10px]">
                   {run.events}
                 </Badge>
-              </button>
+              </ListItem>
             ))
           ) : (
             <p className="text-muted-foreground text-sm">No traces yet. Run a chat or team.</p>
@@ -229,20 +229,22 @@ export function TracesView() {
           <CardContent className="space-y-2">
             {checkpoints.data?.checkpoints.length ? (
               checkpoints.data.checkpoints.map((checkpoint) => (
-                <details
+                <Collapsible
                   key={String(checkpoint.seq)}
                   className="rounded-md border p-2 text-sm"
                 >
-                  <summary className="cursor-pointer">
+                  <CollapsibleTrigger className="flex w-full cursor-pointer items-center gap-1 text-left">
                     <span className="text-muted-foreground font-mono text-xs">
                       #{String(checkpoint.seq)}
                     </span>{" "}
                     {String(checkpoint.label ?? "")}
-                  </summary>
-                  <pre className="mt-2 overflow-x-auto text-xs">
-                    {JSON.stringify(checkpoint.state, null, 2)}
-                  </pre>
-                </details>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <pre className="mt-2 overflow-x-auto text-xs">
+                      {JSON.stringify(checkpoint.state, null, 2)}
+                    </pre>
+                  </CollapsibleContent>
+                </Collapsible>
               ))
             ) : (
               <p className="text-muted-foreground text-sm">

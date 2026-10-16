@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Check, X } from "lucide-react"
+import { toast } from "sonner"
 
 import { ErrorAlert, Page } from "@/components/page"
 import { Badge } from "@/components/ui/badge"
@@ -21,9 +22,11 @@ export default function Lessons() {
   const decide = useMutation({
     mutationFn: ({ id, approve }: { id: number; approve: boolean }) =>
       approve ? api.approveLesson(id) : api.rejectLesson(id),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["lessons"] })
+      toast.success(variables.approve ? "Lesson approved" : "Lesson rejected")
     },
+    onError: (error) => toast.error((error as Error).message),
   })
 
   return (

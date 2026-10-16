@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query"
 import { Bar, BarChart, CartesianGrid, ReferenceLine, XAxis } from "recharts"
 
-import { ErrorAlert, Page } from "@/components/page"
+import { ErrorAlert, Loading, Page } from "@/components/page"
+import { TableShell } from "@/components/table-shell"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   ChartContainer,
@@ -106,35 +107,48 @@ export default function Usage() {
         </CardContent>
       </Card>
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>When</TableHead>
-              <TableHead>Kind</TableHead>
-              <TableHead>Conversation</TableHead>
-              <TableHead>Model</TableHead>
-              <TableHead>Context</TableHead>
-              <TableHead>Total</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {usage.data?.recent.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="text-muted-foreground text-sm">{row.created_at}</TableCell>
-                <TableCell>{row.kind}</TableCell>
-                <TableCell className="font-mono text-xs">{row.conversation_id ?? "—"}</TableCell>
-                <TableCell className="text-sm">{row.model}</TableCell>
-                <TableCell>
-                  {row.context_tokens}
-                  {row.context_window ? ` / ${row.context_window}` : ""}
-                </TableCell>
-                <TableCell>{row.total_tokens}</TableCell>
+      {usage.isLoading ? (
+        <Loading />
+      ) : (
+        <TableShell>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>When</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>Conversation</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Context</TableHead>
+                <TableHead>Total</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {usage.data?.recent.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell className="text-muted-foreground text-sm">{row.created_at}</TableCell>
+                  <TableCell>{row.kind}</TableCell>
+                  <TableCell className="font-mono text-xs" title={row.conversation_id ?? undefined}>
+                    {row.conversation_id ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-sm">{row.model}</TableCell>
+                  <TableCell>
+                    {row.context_tokens}
+                    {row.context_window ? ` / ${row.context_window}` : ""}
+                  </TableCell>
+                  <TableCell>{row.total_tokens}</TableCell>
+                </TableRow>
+              ))}
+              {usage.data?.recent.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-muted-foreground text-center">
+                    No usage recorded yet.
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </TableShell>
+      )}
     </Page>
   )
 }

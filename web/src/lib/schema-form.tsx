@@ -1,6 +1,16 @@
+import { useId } from "react"
+
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 
 /** A (partial) JSON-Schema node — enough to drive the generic Studio form. */
@@ -121,10 +131,20 @@ export function SchemaForm({
   )
 }
 
-function FieldLabel({ name, schema, required }: { name: string; schema: JSONSchema; required: boolean }) {
+function FieldLabel({
+  name,
+  schema,
+  required,
+  htmlFor,
+}: {
+  name: string
+  schema: JSONSchema
+  required: boolean
+  htmlFor?: string
+}) {
   return (
     <div className="space-y-0.5">
-      <Label className="text-xs">
+      <Label htmlFor={htmlFor} className="text-xs">
         {schema.title ?? name}
         {required ? <span className="text-destructive"> *</span> : null}
       </Label>
@@ -152,50 +172,62 @@ function SchemaField({
 }) {
   const { schema: node, nullable } = normalize(schema, root)
   const kind = typeOf(node)
+  const fieldId = useId()
 
   if (node.enum) {
     return (
       <div className="space-y-1">
-        <FieldLabel name={name} schema={node} required={required} />
-        <select
-          className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
-          value={value === undefined || value === null ? "" : String(value)}
-          onChange={(event) => {
-            const raw = event.target.value
+        <FieldLabel name={name} schema={node} required={required} htmlFor={fieldId} />
+        <Select
+          value={
+            value === undefined || value === null ? (nullable ? "__none__" : "") : String(value)
+          }
+          onValueChange={(raw) => {
+            if (raw === "__none__") {
+              onChange(null)
+              return
+            }
             const matched = node.enum?.find((option) => String(option) === raw)
-            onChange(raw === "" && nullable ? null : (matched ?? raw))
+            onChange(matched ?? raw)
           }}
         >
-          {nullable ? <option value="">(none)</option> : null}
-          {(node.enum ?? []).map((option) => (
-            <option key={String(option)} value={String(option)}>
-              {String(option)}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id={fieldId} className="w-full">
+            <SelectValue placeholder="Select…" />
+          </SelectTrigger>
+          <SelectContent>
+            {nullable ? <SelectItem value="__none__">(none)</SelectItem> : null}
+            {(node.enum ?? []).map((option) => (
+              <SelectItem key={String(option)} value={String(option)}>
+                {String(option)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     )
   }
 
   if (kind === "boolean") {
     return (
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          className="size-4 rounded border"
+      <div className="flex items-center gap-2 text-sm">
+        <Checkbox
+          id={fieldId}
           checked={Boolean(value)}
-          onChange={(event) => onChange(event.target.checked)}
+          onCheckedChange={(checked) => onChange(checked === true)}
         />
-        <span>{node.title ?? name}</span>
-      </label>
+        <Label htmlFor={fieldId} className="font-normal">
+          {node.title ?? name}
+        </Label>
+      </div>
     )
   }
 
   if (kind === "integer" || kind === "number") {
     return (
       <div className="space-y-1">
-        <FieldLabel name={name} schema={node} required={required} />
+        <FieldLabel name={name} schema={node} required={required} htmlFor={fieldId} />
         <Input
+          id={fieldId}
           type="number"
           value={value === undefined || value === null ? "" : String(value)}
           onChange={(event) =>
@@ -236,15 +268,17 @@ function SchemaField({
   const useTextarea = TEXTAREA_HINT.test(name) || node.format === "textarea"
   return (
     <div className="space-y-1">
-      <FieldLabel name={name} schema={node} required={required} />
+      <FieldLabel name={name} schema={node} required={required} htmlFor={fieldId} />
       {useTextarea ? (
         <Textarea
+          id={fieldId}
           rows={3}
           value={value === undefined || value === null ? "" : String(value)}
           onChange={(event) => onChange(event.target.value)}
         />
       ) : (
         <Input
+          id={fieldId}
           value={value === undefined || value === null ? "" : String(value)}
           onChange={(event) =>
             onChange(event.target.value === "" && nullable ? null : event.target.value)

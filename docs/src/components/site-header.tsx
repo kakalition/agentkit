@@ -64,10 +64,14 @@ export function SiteHeader({ onSearch }: { onSearch: () => void }) {
             </kbd>
           </button>
 
-          <Button asChild variant="ghost" size="icon" className="sm:hidden">
-            <span onClick={onSearch} role="button" aria-label="Search">
-              <Search />
-            </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="sm:hidden"
+            aria-label="Search"
+            onClick={onSearch}
+          >
+            <Search />
           </Button>
 
           <Button asChild variant="ghost" size="icon">
