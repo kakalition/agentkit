@@ -143,13 +143,18 @@ export function AppInspector() {
   )
 }
 
-/** The Studio "Traces" panel: browse recorded runs and their event streams. */
+/** The Studio "Traces" panel: browse recorded runs, their events, and checkpoints. */
 export function TracesView() {
   const [selected, setSelected] = useState<string | null>(null)
   const runs = useQuery({ queryKey: ["studio", "runs"], queryFn: () => api.studioRuns(50) })
   const events = useQuery({
     queryKey: ["studio", "run", selected],
     queryFn: () => api.studioRun(selected as string),
+    enabled: selected !== null,
+  })
+  const checkpoints = useQuery({
+    queryKey: ["studio", "checkpoints", selected],
+    queryFn: () => api.checkpoints(selected as string),
     enabled: selected !== null,
   })
   return (
@@ -179,39 +184,74 @@ export function TracesView() {
           )}
         </CardContent>
       </Card>
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Events</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          <ErrorAlert error={runs.error ?? events.error} />
-          {events.data?.events.length ? (
-            events.data.events.map((event) => (
-              <div key={event.seq} className="flex items-start gap-2 rounded-md border p-2 text-sm">
-                <Badge
-                  variant={event.kind === "error" ? "destructive" : "secondary"}
-                  className="text-[10px]"
-                >
-                  {event.kind}
-                </Badge>
-                <div className="min-w-0 flex-1">
-                  <div className="text-muted-foreground font-mono text-[10px]">
-                    #{event.seq}
-                    {event.tool ? ` tool=${event.tool}` : ""}
+      <div className="min-w-0 space-y-4">
+        <ErrorAlert error={runs.error ?? events.error ?? checkpoints.error} />
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Events</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {events.data?.events.length ? (
+              events.data.events.map((event) => (
+                <div key={event.seq} className="flex items-start gap-2 rounded-md border p-2 text-sm">
+                  <Badge
+                    variant={event.kind === "error" ? "destructive" : "secondary"}
+                    className="text-[10px]"
+                  >
+                    {event.kind}
+                  </Badge>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-muted-foreground font-mono text-[10px]">
+                      #{event.seq}
+                      {event.tool ? ` tool=${event.tool}` : ""}
+                    </div>
+                    {event.text ? (
+                      <div className="whitespace-pre-wrap break-words">{event.text}</div>
+                    ) : null}
                   </div>
-                  {event.text ? (
-                    <div className="whitespace-pre-wrap break-words">{event.text}</div>
-                  ) : null}
                 </div>
-              </div>
-            ))
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              {selected ? "No events recorded for this run." : "Select a run to inspect its trace."}
-            </p>
-          )}
-        </CardContent>
-      </Card>
+              ))
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                {selected
+                  ? "No events recorded for this run."
+                  : "Select a run to inspect its trace."}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">
+              Checkpoints ({checkpoints.data?.checkpoints.length ?? 0})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {checkpoints.data?.checkpoints.length ? (
+              checkpoints.data.checkpoints.map((checkpoint) => (
+                <details
+                  key={String(checkpoint.seq)}
+                  className="rounded-md border p-2 text-sm"
+                >
+                  <summary className="cursor-pointer">
+                    <span className="text-muted-foreground font-mono text-xs">
+                      #{String(checkpoint.seq)}
+                    </span>{" "}
+                    {String(checkpoint.label ?? "")}
+                  </summary>
+                  <pre className="mt-2 overflow-x-auto text-xs">
+                    {JSON.stringify(checkpoint.state, null, 2)}
+                  </pre>
+                </details>
+              ))
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                No checkpoints (enable <code>CHECKPOINTS_ENABLED</code> to record run state).
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

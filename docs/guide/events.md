@@ -99,3 +99,10 @@ Use events for auditing, metrics, notifications, and cache invalidation. To
 :::
 
 Continue to [Middleware →](/guide/middleware)
+
+## Live stream in the web UI
+
+The **Events** page consumes `GET /api/events` (an SSE stream that emits a `hello`
+frame then a `tick` snapshot every 5s) and renders the rolling snapshots. The SPA
+parses SSE with `fetch` + `ReadableStream` (so the bearer token is sent), normalising
+the CRLF frame separators that `sse-starlette` emits.

@@ -50,6 +50,12 @@ All notable changes to this project are documented here. The format follows
   extensions); the Studio SPA gained **App** and **Traces** tabs.
 - Docs: `/guide/extensions`, `/guide/specs`, `/guide/computer-use`,
   `/guide/realtime`, `/guide/catalog`; updates to studio/evaluations.
+- **Web UI completeness**: the SPA now surfaces every backend feature — a **Chat**
+  "Stream tokens" toggle over `POST /api/chat/stream` (with cancel), an **Events**
+  page over the `/api/events` SSE stream, a **Data** page for
+  `GET /api/data/export` / `POST /api/data/forget` (dry-run + confirm), checkpoint
+  browsing in the Traces panel, and a conversation-detail call. The SPA SSE parser
+  now normalises the CRLF frame separators `sse-starlette` emits.
 
 ## [0.2.0] - 2026-10-16
 

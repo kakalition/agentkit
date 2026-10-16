@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { SendHorizontal } from "lucide-react"
-import { useState } from "react"
+import { SendHorizontal, Square } from "lucide-react"
+import { useRef, useState } from "react"
 
 import { ErrorAlert, Page } from "@/components/page"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -55,6 +55,15 @@ export default function Chat() {
   const [conversationId, setConversationId] = useState("webui:default")
   const [draft, setDraft] = useState("")
   const [ephemeral, setEphemeral] = useState(false)
+  const [streaming, setStreaming] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [live, setLive] = useState("")
+  const [liveNote, setLiveNote] = useState<string | null>(null)
+  const [streamError, setStreamError] = useState<Error | null>(null)
+  const [liveUsage, setLiveUsage] = useState<{ history_length: number; total_tokens: number } | null>(
+    null,
+  )
+  const abortRef = useRef<AbortController | null>(null)
 
   const info = useQuery({ queryKey: ["info"], queryFn: api.info })
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations })
@@ -71,6 +80,47 @@ export default function Chat() {
       if (!ephemeral) void messages.refetch()
     },
   })
+
+  const sendStreaming = async () => {
+    const controller = new AbortController()
+    abortRef.current = controller
+    setBusy(true)
+    setStreamError(null)
+    setLive("")
+    setLiveNote(null)
+    setLiveUsage(null)
+    const text = draft
+    setDraft("")
+    try {
+      await api.chatStream(
+        conversationId,
+        text,
+        {
+          onText: (chunk) => setLive((current) => current + chunk),
+          onCompaction: (note) => setLiveNote(note),
+          onFinal: (final) => {
+            setLive((current) => current || final.output)
+            setLiveUsage({
+              history_length: final.history_length,
+              total_tokens: final.usage?.total_tokens ?? 0,
+            })
+          },
+        },
+        { ephemeral, signal: controller.signal },
+      )
+      if (!ephemeral) void messages.refetch()
+    } catch (error) {
+      if (!controller.signal.aborted) setStreamError(error as Error)
+    } finally {
+      setBusy(false)
+      abortRef.current = null
+    }
+  }
+
+  const cancelStream = () => {
+    abortRef.current?.abort()
+    setBusy(false)
+  }
 
   const chatEnabled = info.data?.chat_enabled ?? false
   const compacted = send.data?.usage?.compacted_messages ?? 0
@@ -110,6 +160,12 @@ export default function Chat() {
             Temporary chat
           </Label>
         </div>
+        <div className="flex items-center gap-2">
+          <Switch id="streaming" checked={streaming} onCheckedChange={setStreaming} />
+          <Label htmlFor="streaming" className="text-sm">
+            Stream tokens
+          </Label>
+        </div>
       </div>
 
       {!chatEnabled && !info.isLoading ? (
@@ -128,7 +184,7 @@ export default function Chat() {
         </Alert>
       ) : null}
 
-      <ErrorAlert error={messages.error ?? send.error} />
+      <ErrorAlert error={messages.error ?? send.error ?? streamError} />
 
       <Card>
         <CardContent className="p-4">
@@ -145,6 +201,20 @@ export default function Chat() {
               ) : (
                 <p className="text-muted-foreground text-sm">No messages yet.</p>
               )}
+              {liveNote ? (
+                <p className="text-muted-foreground text-xs italic">{liveNote}</p>
+              ) : null}
+              {live ? (
+                <div className="flex justify-start">
+                  <Card className="max-w-[80%]">
+                    <CardContent className="space-y-1 py-3 text-sm">
+                      <div className="text-muted-foreground text-xs uppercase">assistant</div>
+                      <p className="whitespace-pre-wrap">{live}</p>
+                      {busy ? <span className="text-muted-foreground text-xs">▍</span> : null}
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : null}
             </div>
           </ScrollArea>
         </CardContent>
@@ -154,7 +224,9 @@ export default function Chat() {
         className="flex items-end gap-2"
         onSubmit={(event) => {
           event.preventDefault()
-          if (draft.trim() && chatEnabled) send.mutate()
+          if (!draft.trim() || !chatEnabled || busy) return
+          if (streaming) void sendStreaming()
+          else send.mutate()
         }}
       >
         <Textarea
@@ -164,10 +236,16 @@ export default function Chat() {
           disabled={!chatEnabled}
           rows={2}
         />
-        <Button type="submit" disabled={!chatEnabled || send.isPending || !draft.trim()}>
-          <SendHorizontal />
-          {send.isPending ? "Sending…" : "Send"}
-        </Button>
+        {busy ? (
+          <Button type="button" variant="outline" onClick={cancelStream}>
+            <Square /> Cancel
+          </Button>
+        ) : (
+          <Button type="submit" disabled={!chatEnabled || send.isPending || !draft.trim()}>
+            <SendHorizontal />
+            {send.isPending ? "Sending…" : "Send"}
+          </Button>
+        )}
       </form>
 
       {send.data ? (
@@ -175,6 +253,11 @@ export default function Chat() {
           {send.data.history_length} messages in history
           {send.data.usage ? ` · ${send.data.usage.total_tokens ?? 0} tokens` : ""}
           {compacted > 0 ? ` · context compacted (${compacted})` : ""}
+        </p>
+      ) : null}
+      {liveUsage ? (
+        <p className="text-muted-foreground text-xs">
+          {liveUsage.history_length} messages in history · {liveUsage.total_tokens} tokens
         </p>
       ) : null}
     </Page>

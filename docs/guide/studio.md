@@ -115,3 +115,8 @@ each descriptor. Known layouts get rich UIs (Traces, Catalog); a panel with a
 `POST /api/studio/actions/{id}`. Because the generic renderer is schema-driven,
 an extension that registers a new spec kind shows a working builder panel with no
 SPA rebuild (see [Extensions](/guide/extensions)).
+
+Checkpoint rows for the selected run are browsable below the event list (seq,
+label, and the recorded state), driven by
+`GET /api/studio/checkpoints/{run_id}[/{seq}]` — enable `CHECKPOINTS_ENABLED` to
+record them.

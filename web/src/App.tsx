@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import {
+  Activity,
   BarChart3,
   Blocks,
   CalendarClock,
+  Database,
   FolderOpen,
   GraduationCap,
   Inbox,
@@ -29,6 +31,8 @@ import Audit from "@/routes/audit"
 import Chat from "@/routes/chat"
 import Config from "@/routes/config"
 import Conversations from "@/routes/conversations"
+import Data from "@/routes/data"
+import Events from "@/routes/events"
 import Lessons from "@/routes/lessons"
 import Overview from "@/routes/overview"
 import Persona from "@/routes/persona"
@@ -51,6 +55,8 @@ const baseItems: NavItem[] = [
   { title: "Usage", url: "/usage", icon: BarChart3 },
   { title: "Audit", url: "/audit", icon: ShieldCheck },
   { title: "A2A", url: "/a2a", icon: Network },
+  { title: "Events", url: "/events", icon: Activity },
+  { title: "Data", url: "/data", icon: Database },
   { title: "Persona", url: "/persona", icon: UserCog },
   { title: "Config", url: "/config", icon: Settings },
   { title: "Artifacts", url: "/artifacts", icon: FolderOpen },
@@ -97,6 +103,8 @@ export default function App() {
             <Route path="/usage" element={<Usage />} />
             <Route path="/audit" element={<Audit />} />
             <Route path="/a2a" element={<A2A />} />
+            <Route path="/events" element={<Events />} />
+            <Route path="/data" element={<Data />} />
             <Route path="/persona" element={<Persona />} />
             <Route path="/config" element={<Config />} />
             <Route path="/artifacts" element={<Artifacts />} />

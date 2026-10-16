@@ -332,14 +332,127 @@ const json = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 })
 
+export type SSEMessage = { event: string; data: string }
+
+/** Parse a `text/event-stream` response body, invoking `onEvent` per message. */
+async function readSSE(
+  response: Response,
+  onEvent: (message: SSEMessage) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const reader = response.body?.getReader()
+  if (!reader) return
+  const decoder = new TextDecoder()
+  let buffer = ""
+  while (true) {
+    if (signal?.aborted) break
+    const { value, done } = await reader.read()
+    if (done) break
+    // sse-starlette separates frames with CRLF; normalise so `\n\n` delimits.
+    buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n")
+    let boundary = buffer.indexOf("\n\n")
+    while (boundary !== -1) {
+      const chunk = buffer.slice(0, boundary)
+      buffer = buffer.slice(boundary + 2)
+      let event = "message"
+      let data = ""
+      for (const rawLine of chunk.split("\n")) {
+        const line = rawLine.replace(/\r$/, "")
+        if (line.startsWith("event:")) event = line.slice(6).trim()
+        else if (line.startsWith("data:")) data += line.slice(5).replace(/^ /, "")
+      }
+      if (chunk.trim()) onEvent({ event, data })
+      boundary = buffer.indexOf("\n\n")
+    }
+  }
+}
+
+async function sseRequest(
+  path: string,
+  init: RequestInit,
+  onEvent: (message: SSEMessage) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const headers: Record<string, string> = { Accept: "text/event-stream" }
+  if (init.body) headers["Content-Type"] = "application/json"
+  const token = getToken()
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  const response = await fetch(`${BASE}${path}`, { ...init, headers, signal })
+  if (!response.ok) {
+    let message = response.statusText
+    try {
+      const body = (await response.json()) as { detail?: unknown }
+      message = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail ?? body)
+    } catch {
+      // keep the status text
+    }
+    throw new ApiError(response.status, message)
+  }
+  await readSSE(response, onEvent, signal)
+}
+
 export const api = {
   info: () => request<Info>("/info"),
   whoami: () => request<Whoami>("/whoami"),
   health: () => request<Health>("/health"),
   chat: (conversation_id: string, text: string, ephemeral = false) =>
     request<ChatReply>("/chat", json("POST", { conversation_id, text, ephemeral })),
+  chatStream: (
+    conversation_id: string,
+    text: string,
+    handlers: {
+      onText?: (chunk: string) => void
+      onCompaction?: (text: string) => void
+      onFinal?: (final: {
+        output: string
+        history_length: number
+        usage: Record<string, number> | null
+      }) => void
+    },
+    options: { ephemeral?: boolean; signal?: AbortSignal } = {},
+  ) =>
+    sseRequest(
+      "/chat/stream",
+      json("POST", { conversation_id, text, ephemeral: options.ephemeral ?? false }),
+      (message) => {
+        if (message.event === "text") handlers.onText?.(message.data)
+        else if (message.event === "compaction") handlers.onCompaction?.(message.data)
+        else if (message.event === "final") {
+          try {
+            handlers.onFinal?.(JSON.parse(message.data))
+          } catch {
+            /* ignore a malformed final frame */
+          }
+        }
+      },
+      options.signal,
+    ),
   cancelChat: (conversation_id: string) =>
     request<{ cancelled: boolean }>("/chat/cancel", json("POST", { conversation_id })),
+  events: (
+    onTick: (snapshot: Record<string, unknown>) => void,
+    signal?: AbortSignal,
+  ) =>
+    sseRequest("/events", { method: "GET" }, (message) => {
+      if (message.event === "tick") {
+        try {
+          onTick(JSON.parse(message.data))
+        } catch {
+          /* ignore a malformed tick */
+        }
+      }
+    }, signal),
+  exportData: () => request<Record<string, unknown>>("/data/export"),
+  forgetData: (confirm = false) =>
+    request<Record<string, unknown>>(`/data/forget?confirm=${confirm}`, { method: "POST" }),
+  conversation: (id: string) =>
+    request<{
+      id: string
+      channel: string
+      created_at: string
+      updated_at: string
+      message_count: number
+    }>(`/conversations/${encodeURIComponent(id)}`),
 
   lessons: (status = "proposed") =>
     request<{ lessons: Lesson[] }>(`/lessons?status=${encodeURIComponent(status)}`),

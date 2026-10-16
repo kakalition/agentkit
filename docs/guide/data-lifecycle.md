@@ -44,3 +44,10 @@ Forget cannot be undone. Always run the dry run first, and back up with
 | `DATA_FORGET_ENABLED` | `false` | Allow destructive erasure (opt-in). |
 
 Continue to [Deployment →](/guide/deployment)
+
+## In the web UI
+
+The **Data** page drives both endpoints: **Export JSON** downloads the owner export
+(`GET /api/data/export`), and **Forget** offers a dry run and a confirm-gated erase
+(`POST /api/data/forget?confirm=true`). Forget stays disabled (HTTP 403) unless
+`DATA_FORGET_ENABLED=true`, and the confirm checkbox must be ticked.

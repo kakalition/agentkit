@@ -88,3 +88,11 @@ app.cancel("webui:default")  # cancel it (True if one was cancelled)
 unchanged, so a cancelled turn can be replayed with `App.replay`.
 
 Continue to [Human-in-the-Loop →](/guide/hitl)
+
+## Token streaming in the web UI
+
+The **Chat** page has a **Stream tokens** toggle. When on it calls
+`POST /api/chat/stream` and renders text deltas live, shows the compaction notice,
+and prints the final usage; **Cancel** aborts the request (and cancels the run
+server-side). The same `text` / `compaction` / `final` frames the CLI consumes flow
+straight to the browser.
