@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -79,3 +80,72 @@ def test_tick_accepts_dbos_scheduled_signature():
     # DBOS invokes scheduled workflows as fn(scheduled_time, context).
     params = list(inspect.signature(scheduler.tick).parameters)
     assert len(params) >= 2
+
+
+# -- result delivery --------------------------------------------------------
+async def test_invoke_task_delivers_result_to_origin(sched):
+    delivered: list[tuple[str, str]] = []
+    sched.set_result_sink(lambda cid, text: delivered.append((cid, text)))
+
+    @sched.task("report")
+    def report(**kwargs):
+        return "done!"
+
+    try:
+        await sched.invoke_task("report", json.dumps({"_deliver_to": "cli:1"}))
+        assert delivered == [("cli:1", "done!")]
+
+        # No ``_deliver_to`` -> no delivery.
+        await sched.invoke_task("report", "{}")
+        assert delivered == [("cli:1", "done!")]
+    finally:
+        sched.set_result_sink(None)
+
+
+async def test_invoke_task_strips_deliver_to_from_kwargs(sched):
+    seen: dict = {}
+
+    @sched.task("inspect")
+    def inspect(**kwargs):
+        seen.update(kwargs)
+
+    await sched.invoke_task("inspect", json.dumps({"_deliver_to": "cli:1", "x": 2}))
+    assert seen == {"x": 2}
+
+
+async def test_result_sink_failure_is_best_effort(sched):
+    def boom(cid, text):
+        raise RuntimeError("nope")
+
+    sched.set_result_sink(boom)
+
+    @sched.task("safe")
+    def safe(**kwargs):
+        return 42
+
+    try:
+        assert await sched.invoke_task("safe", json.dumps({"_deliver_to": "cli:1"})) == 42
+    finally:
+        sched.set_result_sink(None)
+
+
+async def test_app_deliver_result_maps_channel(tmp_path):
+    from agentkit.foundation.application import App
+
+    settings = AgentSettings(agent_home=tmp_path, memory_embedding_backend="hash")
+    app = App(name="deliver", settings=settings, discover=False)
+    app.boot()
+
+    telegram: list[str | None] = []
+    app.notifier.channel(
+        "telegram", lambda notification, *, conversation_id=None: telegram.append(conversation_id)
+    )
+    app._deliver_result("telegram:42", "task done")
+    assert telegram == ["telegram:42"]
+
+    # A webui conversation has no channel sender -> falls back to ``conversation``
+    # (writes into chat history).
+    app._deliver_result("webui:default", "hello")
+    async with app.repositories() as repos:
+        payloads = await repos.messages.list("webui:default")
+    assert payloads

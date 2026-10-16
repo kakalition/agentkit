@@ -14,8 +14,37 @@ async def test_usage_repo_totals(repos: Repositories):
         "input_tokens": 30,
         "output_tokens": 13,
         "total_tokens": 43,
+        "cache_read_tokens": 0,
+        "context_tokens": 0,
         "cost_usd": 0.0,
     }
+
+
+async def test_usage_repo_context_telemetry_roundtrip(repos: Repositories):
+    row = await repos.usage.add(
+        conversation_id="cli:1",
+        requests=1,
+        input_tokens=10,
+        output_tokens=5,
+        total_tokens=15,
+        cache_read_tokens=7,
+        context_tokens=10,
+        context_window=128000,
+    )
+    assert row.cache_read_tokens == 7
+    assert row.context_tokens == 10
+    assert row.context_window == 128000
+
+    stored = await repos.usage.list(limit=1)
+    assert stored[0].cache_read_tokens == 7
+    assert stored[0].context_tokens == 10
+    assert stored[0].context_window == 128000
+
+    totals = await repos.usage.totals()
+    assert totals["cache_read_tokens"] == 7
+    assert totals["context_tokens"] == 10
+    # ``context_window`` is a per-model constant and is never summed.
+    assert "context_window" not in totals
 
 
 async def test_audit_chain_verifies(repos: Repositories):

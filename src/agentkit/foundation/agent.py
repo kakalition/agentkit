@@ -551,6 +551,12 @@ class Agent:
         """
         resolved = settings or self._settings
         profile = self._resolve_profile(resolved)
+        # A posture may supply defaulted settings (e.g. offload threshold); apply
+        # to the local copy so the builder path matches ``App.boot``. Operator-set
+        # (non-default) values win, and ``hybrid``/``specialized`` declare none.
+        from agentkit.posture import apply_settings_overrides
+
+        resolved = apply_settings_overrides(resolved, profile)
 
         def layer(key: str, explicit: bool | None) -> bool:
             if explicit is not None:

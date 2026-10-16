@@ -57,7 +57,7 @@ class _FakeApp:
     def __init__(self) -> None:
         self.approvals = ApprovalQueue()
 
-    async def stream(self, text: str, *, conversation_id: str, actor=None):
+    async def stream(self, text: str, *, conversation_id: str, actor=None, ephemeral: bool = False):
         yield SimpleNamespace(kind="text", text="he")
         yield SimpleNamespace(
             kind="final",

@@ -224,6 +224,10 @@ class App:
         """Run the register/boot lifecycle once (idempotent)."""
         if self._booted:
             return self
+        self._apply_posture_settings()
+        from agentkit import scheduler as _scheduler
+
+        _scheduler.set_result_sink(self._deliver_result)
         instances: list[Provider] = []
         for candidate in self._providers:
             provider = candidate() if isinstance(candidate, type) else candidate
@@ -499,6 +503,25 @@ class App:
         if self._posture is not None:
             return self._posture
         return str(getattr(self.settings, "agent_posture", "hybrid"))
+
+    def _apply_posture_settings(self) -> None:
+        """Apply the active posture's settings overrides (once, at boot).
+
+        Runs before the runtime/settings are read elsewhere so ``runtime.settings``
+        and ``deps.settings`` (which read the same object) see the override. Only
+        replaces ``self._settings`` when a defaulted override actually applies; an
+        operator-set (non-default) value wins.
+        """
+        from agentkit.posture import apply_settings_overrides, resolve_posture
+
+        name = self._posture or getattr(self.settings, "agent_posture", None)
+        try:
+            profile = resolve_posture(name)
+        except ValueError:  # pragma: no cover - defensive
+            profile = None
+        updated = apply_settings_overrides(self.settings, profile)
+        if updated is not self.settings:
+            self._settings = updated
 
     # -- running turns / approvals -------------------------------------
     @property
@@ -789,6 +812,30 @@ class App:
         """Send a :class:`~agentkit.foundation.notifications.Notification`."""
         return self._notifier.send(notification, to=to, conversation_id=conversation_id)
 
+    def _deliver_result(self, conversation_id: str, text: str) -> None:
+        """Deliver a scheduled task's result to the conversation that scheduled it.
+
+        Best-effort: the scheduler calls this after a successful run; the channel
+        is derived from the conversation prefix (``telegram``/``log`` when
+        registered, else ``conversation`` — which writes into chat history).
+        """
+        if not conversation_id:
+            return
+        from agentkit.foundation.notifications import Notification
+
+        prefix = conversation_id.split(":", 1)[0]
+        channel = prefix if self._notifier.channel(prefix) is not None else "conversation"
+
+        body = text or "(scheduled task finished)"
+
+        class _ScheduledResult(Notification):
+            channels = (channel,)
+
+            def content(self) -> str:
+                return body
+
+        self.notify(_ScheduledResult(), to=[channel], conversation_id=conversation_id)
+
     async def dispatch(self, job: Any, *, queue: str | None = None) -> Any:
         """Run a :class:`~agentkit.foundation.queue.Job`.
 
@@ -947,9 +994,15 @@ class App:
         """``(conversation_id, text, *, actor=None) -> ChatResult`` for webui/a2a/mcp."""
 
         async def run_answer(
-            conversation_id: str, text: str, *, actor: Actor | None = None
+            conversation_id: str,
+            text: str,
+            *,
+            actor: Actor | None = None,
+            ephemeral: bool = False,
         ) -> ChatResult:
-            return await self.run(text, conversation_id=conversation_id, actor=actor)
+            return await self.run(
+                text, conversation_id=conversation_id, actor=actor, ephemeral=ephemeral
+            )
 
         return run_answer
 

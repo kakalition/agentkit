@@ -257,6 +257,18 @@ async def search_history(
     }
 
 
+@router.get("/teams")
+async def list_teams(ctx: WebUIContext = Depends(get_context)) -> dict[str, Any]:
+    """Registered multi-agent teams (name, runner kind, and roster)."""
+    from agentkit.teams import TEAMS
+
+    teams = [
+        {"name": spec.name, "kind": spec.kind, "roster": sorted(spec.roster)}
+        for spec in sorted(TEAMS.values(), key=lambda spec: spec.name)
+    ]
+    return {"teams": teams}
+
+
 @router.get("/usage")
 async def get_usage(
     limit: int = Query(100, ge=1, le=1000), ctx: WebUIContext = Depends(get_context)
@@ -276,6 +288,9 @@ async def get_usage(
                 "input_tokens": row.input_tokens,
                 "output_tokens": row.output_tokens,
                 "total_tokens": row.total_tokens,
+                "cache_read_tokens": row.cache_read_tokens,
+                "context_tokens": row.context_tokens,
+                "context_window": row.context_window,
                 "created_at": row.created_at.isoformat(),
             }
             for row in rows

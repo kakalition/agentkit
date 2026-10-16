@@ -1,8 +1,9 @@
 # CONTINUATION — Posture Duality & Gap-Fill
 
-Source-of-truth plan: `.kilo/plans/1792103850196-posture-duality-and-gap-fill.md`
-(also read `.kilo/plans/1792071123307-competitive-improvement-roadmap.md`, the
-contracts+drivers roadmap this plan builds on).
+Source-of-truth plan: `.kilo/plans/1792122358580-studio-mvp-and-remaining-gaps.md`
+(the earlier `1792103850196-posture-duality-and-gap-fill.md` it superseded does
+not exist). See also `.kilo/plans/1792071123307-competitive-improvement-roadmap.md`,
+the contracts+drivers roadmap this builds on.
 
 Branch: `main`, work in the tree (uncommitted at handoff time — see "Commit" below).
 Do **not** commit `.kilo/` or `kilo.json` (untracked tooling; they are git-ignored
@@ -21,8 +22,7 @@ All validation is **green** as of the last edit:
 | Tests | `uv run pytest --cov=agentkit --cov-report=term` | all pass, **coverage 81%** (gate ≥70%) |
 | Web build | `cd web && bun run build` | passes (bundles written to `src/agentkit/webui/static/`) |
 
-Workstreams WS0, WS-DX, WS1, WS2, WS3, WS4 are **complete**. WS5 is **mostly done**
-(see NOT DONE).
+Workstreams WS0, WS-DX, WS1, WS2, WS3, WS4 and WS5 are **complete** (see RESOLVED).
 
 ---
 
@@ -107,12 +107,12 @@ Workstreams WS0, WS-DX, WS1, WS2, WS3, WS4 are **complete**. WS5 is **mostly don
 - **`src/agentkit/agents/groupchat.py`** (new): `GroupChatRunner` (real turn loop,
   shared transcript, max-turns/terminator/consensus, `agent.message` events),
   `GroupChatResult`. `comms.GroupChatTopology.run()` delegates to it.
-- **`src/agentkit/agents/team.py`** (new): `MagenticTeam` (manager-led rounds,
+- **`src/agentkit/agents/team.py`** (new): `ManagedTeam` (manager-led rounds,
   replan-on-stall) + `TeamLedger` (facts/plan/tasks) + `TeamRunResult`.
 - **`src/agentkit/teams.py`**: `TeamSpec`, `TEAMS`, `register_team`, `resolve_team`,
   `build_team`, `team_tool` (namespaced `team_<name>`); `Agent.team("name")`.
 - **Introspection**: `stack_view` reports `teams`; `inspect` prints them.
-- **Exports**: speakers, `GroupChatRunner`, `MagenticTeam`, `TeamLedger`, team regs.
+- **Exports**: speakers, `GroupChatRunner`, `ManagedTeam`, `TeamLedger`, team regs.
 - **Tests**: `tests/test_multiagent.py`. **Docs**: `docs/guide/group-chat.md`.
 
 ### WS3 — Execution backends
@@ -167,50 +167,38 @@ Workstreams WS0, WS-DX, WS1, WS2, WS3, WS4 are **complete**. WS5 is **mostly don
 
 ---
 
-## NOT DONE (next steps, in priority order)
+## RESOLVED (2026-10-16)
 
-1. **WS5 Studio MVP** — not started. The plan wants the web UI to drive the new
-   surfaces from `web/src/routes/`: a schedule create/edit form already exists;
-   add (a) a **context-usage chart** fed by the new `context_tokens`/
-   `context_window`/`cache_read_tokens` telemetry, (b) a **teams** view / run a team
-   from Chat (`TEAMS` is already in `stack_view`), (c) lessons approve/reject is
-   present — verify it still renders. Backend hooks: `/api/info` already includes
-   `posture`/`teams`; usage endpoint exists.
-2. **Channel delivery for scheduling** — the plan's "NL scheduling + delivery
-   (from any channel)" wants a scheduled/durable task result delivered back to the
-   originating channel. Only the scheduling half exists; no delivery target is
-   recorded on the schedule, and `scheduler.invoke_task` does not post results to a
-   channel. Decide a design (e.g. store `deliver_to` in `ScheduledJob.args` and
-   have the task wrapper call `app.notifier.channel(...)`).
-3. **Web UI ephemeral "temporary chat" toggle** — `App.run/stream(ephemeral=)` and
-   `tinker --ephemeral` exist, but `/api/chat` (`webui/app.py` `ChatBody`) does not
-   accept/pass `ephemeral`, and the Chat route has no toggle. Small, self-contained.
-4. **Posture `settings_overrides` are inert** — `PostureProfile.settings_overrides`
-   is declared and `free` sets `{}`; nothing consumes it. To make `free` auto-enable
-   `tool_output_offload_threshold` / `memory_nudge_every` (and `specialized` force
-   them off), apply overrides where the builder/app resolves settings (e.g. a
-   `model_copy(update=...)` before build) and test precedence. Do this carefully so
-   `hybrid` stays a byte-for-byte no-op.
-5. **Context-telemetry compaction event** — usage fields are added, but no
-   `compaction` `StreamEvent` is emitted when the history processor shrinks context.
-   Add a `StreamEvent` kind (and consume it in the web UI) if the context chart is to
-   show compaction.
-6. **Magentic LLM planner** — `MagenticTeam.manager` is a deterministic callable
-   hook, not an LLM planner, and there are no `write_ledger`/`read_ledger` LLM tools.
-   The plan's "plan, ledger, replan on stall" works, but the manager is not yet
-   model-driven.
-7. **Docs/web builds not re-run at handoff** — `docs/` (React Router) was not built;
-   `web/` was built once after the search page and not since (no web changes after,
-   but re-run `cd web && bun run build` if you touch `web/src`). Verify
-   `DOC_PATHS`/nav renders for the 5 new guide pages.
-8. **Optional-extra paths untested** — `jupyter`/`e2b`/`paramiko`/`modal`/`daytona`/
-   `vercel`/`boto3`/`textual` are not installed, so only the missing-extra and
-   driver-selection paths are covered. Spot-check each with its extra before claiming
-   parity.
-9. **`agentkit generate` batch CLI** — the `_read_prompts` helper and the CLI are
-   not unit-tested (trajectory export/compress are).
-10. **Version bump** — `pyproject.toml` version was not changed; decide whether this
-    release warrants one before tagging.
+The next-steps list that lived here was completed in the Studio MVP & gap-fill
+pass (see `CHANGELOG.md` `[0.2.0]`):
+
+1. **Studio MVP** — persisted `cache_read_tokens`/`context_tokens`/
+   `context_window` telemetry with a web Usage context chart; `GET /api/teams` +
+   a web Teams view; lessons review verified with a regression test.
+2. **Channel delivery for scheduling** — `_deliver_to` recorded in a job's args;
+   `scheduler.invoke_task` calls a result sink (`App._deliver_result`) that maps
+   the conversation prefix to a notifier channel (`conversation` fallback).
+3. **Web UI ephemeral toggle** — `ChatBody.ephemeral` → `/api/chat[/stream]` →
+   `App.run/stream(ephemeral=)`; a Chat switch that skips history persistence.
+4. **Posture `settings_overrides`** — `apply_settings_overrides` applied in
+   `App.boot()` and `Agent.full()`; `free` enables offload + nudges (an
+   operator-set non-default value wins); `hybrid`/`specialized` stay no-ops.
+5. **Compaction event** — `StreamEvent("compaction")` + `usage.compacted_messages`,
+   surfaced in the Chat route.
+6. **Model-driven planner + member ledger** — `ManagedTeam(planner_model=.../
+   planner_agent=...)` and member-writable `read_ledger`/`write_ledger` tools
+   (`attach_team_ledger`), with the manager owning the plan/tasks.
+7. **Docs/web builds re-run** — both green; the 5 guide pages prerender.
+8. **Optional-extra paths** — all 8 extras spot-checked; missing-extra tests are
+   skip-guarded so CI without an extra still passes.
+9. **`agentkit generate`** — `_read_prompts` + batch CLI unit tests added.
+10. **Version bump** — `0.2.0` (`pyproject.toml`, `agentkit.__version__`,
+    `uv.lock`) with `CHANGELOG.md` `[Unreleased]` → `[0.2.0]`.
+
+Also: the manager-led team class and its team kind were renamed to
+`ManagedTeam`/`managed`; the web SPA's missing `@tanstack/react-query`/
+`react-router-dom` deps added; the stale `docs/.vitepress/` directory removed
+(now gitignored).
 
 ---
 
@@ -272,5 +260,5 @@ git commit -m "feat: posture duality + gap-fill (WS0–WS5 partial)"
 git push
 ```
 
-Note: `.kilo/plans/1792103850196-posture-duality-and-gap-fill.md` (the plan this doc
+Note: the plan under `.kilo/plans/` (the Studio MVP & gap-fill plan this doc
 references) stays untracked by design.

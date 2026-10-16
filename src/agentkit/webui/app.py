@@ -68,6 +68,7 @@ FALLBACK_HTML = """<!doctype html>
 class ChatBody(BaseModel):
     conversation_id: str = "webui:default"
     text: str
+    ephemeral: bool = False
 
 
 class CancelBody(BaseModel):
@@ -185,7 +186,9 @@ def build_webui_app(
     ) -> dict[str, Any]:
         if ctx.answer is None:
             raise HTTPException(status_code=501, detail="chat is not enabled for this agent")
-        result = await ctx.answer(body.conversation_id, body.text, actor=actor)
+        result = await ctx.answer(
+            body.conversation_id, body.text, actor=actor, ephemeral=body.ephemeral
+        )
         return {
             "conversation_id": body.conversation_id,
             "output": result.output,
@@ -206,7 +209,10 @@ def build_webui_app(
         async def _stream() -> Any:
             yield {"event": "hello", "data": "{}"}
             async for event in ctx.app.stream(
-                body.text, conversation_id=body.conversation_id, actor=actor
+                body.text,
+                conversation_id=body.conversation_id,
+                actor=actor,
+                ephemeral=body.ephemeral,
             ):
                 kind = getattr(event, "kind", "text")
                 payload = getattr(event, "text", None)

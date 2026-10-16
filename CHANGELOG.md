@@ -4,9 +4,28 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — full-stack agent
+## [0.2.0] - 2026-10-16
 
 ### Added
+- **Studio MVP & gap-fill**: context telemetry is now persisted per turn
+  (`UsageRecord.cache_read_tokens`/`context_tokens`/`context_window`, auto-added
+  to older DBs) and surfaced with a web **Usage** context-window chart; a web
+  **Teams** view (`GET /api/teams`, kind + roster); a web **temporary chat**
+  toggle (`POST /api/chat`/`/api/chat/stream` `ephemeral=true` writes no rows);
+  **scheduling channel delivery** (a job's `_deliver_to` origin is delivered the
+  result via a scheduler result sink wired to the app notifier); **posture
+  settings overrides** (a posture may supply defaulted settings — only `free`
+  does, and an operator-set non-default value wins); a streamed **compaction**
+  event plus `usage.compacted_messages`; a **model-driven manager**
+  (`ManagedTeam(planner_model=.../planner_agent=...)`) and a **member-writable
+  team ledger** (`attach_team_ledger`, `read_ledger`, `write_ledger`) where the
+  manager owns the plan/tasks and members own facts + their own task status.
+- **Optional-extra spot checks**: the `jupyter`, `e2b`, `ssh`, `modal`, `daytona`,
+  `vercel`, `s3`, and `tui` extras were each installed and their driver
+  dependencies import cleanly (no new hard core dependency). The skip-guarded
+  tests still raise `ConfigurationError` naming the extra when it is absent;
+  remote-service happy paths (jupyter kernels, E2B/Modal/Daytona sandboxes, a
+  Vercel sandbox, an SSH host) run in environments that provide credentials.
 - **Postures** (`agentkit.posture`): one runtime, three opinionated default
   profiles — `specialized` (closed, egress-free, approval-gated), `hybrid`
   (today's `.full()`, the default) and `free` (autonomous generalist). Selected
@@ -44,7 +63,7 @@ All notable changes to this project are documented here. The format follows
   (`round_robin`/`moderator`/`all`/`selector`/`manual`, `speaker_driver`); a real
   `GroupChatRunner` turn loop (shared transcript, max-turns/terminator/consensus,
   `agent.message` events) that `GroupChatTopology` delegates to; a manager-led
-  `MagenticTeam` with a `TeamLedger` (facts/plan/tasks, replan-on-stall); and
+  `ManagedTeam` with a `TeamLedger` (facts/plan/tasks, replan-on-stall); and
   named team presets (`register_team`/`TEAMS`/`build_team`, `Agent.team("name")`
   attaching a namespaced `team_<name>` tool). Docs: `/guide/group-chat`.
 

@@ -69,6 +69,9 @@ class UsageRecord(SQLModel, table=True):
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    cache_read_tokens: int = 0
+    context_tokens: int = 0
+    context_window: int | None = None  # per-model constant (never summed)
     cost_usd: float = 0.0  # estimated from pricing (see agentkit.pricing)
     created_at: datetime = Field(default_factory=_utcnow)
 

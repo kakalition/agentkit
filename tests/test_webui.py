@@ -5,6 +5,7 @@ import threading
 import pytest
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+from pydantic_ai.models.function import FunctionModel
 
 from agentkit import scheduler
 from agentkit.config import AgentSettings
@@ -22,7 +23,9 @@ def _reset_scheduler():
     scheduler._runtime = old
 
 
-async def _stub_answer(conversation_id: str, text: str, *, actor=None) -> ChatResult:
+async def _stub_answer(
+    conversation_id: str, text: str, *, actor=None, ephemeral: bool = False
+) -> ChatResult:
     return ChatResult(
         output=f"echo:{text}", artifacts=[{"kind": "note", "path": "x"}],
         history_length=2, usage={"total_tokens": 7},
@@ -37,6 +40,7 @@ def client(tmp_path):
         owner_id="owner",
         agent_name="tester",
         agent_home=tmp_path,
+        memory_embedding_backend="hash",
         openai_api_key="sk-secret",
         libsql_auth_token="secret-token",
     )
@@ -52,7 +56,17 @@ def client(tmp_path):
                     serialize_message(ModelResponse(parts=[TextPart(content="hello!")])),
                 ],
             )
-            await repos.usage.add(conversation_id="webui:default", requests=1, total_tokens=5)
+            await repos.usage.add(
+                conversation_id="webui:default",
+                requests=1,
+                total_tokens=5,
+                cache_read_tokens=2,
+                context_tokens=4,
+                context_window=1000,
+            )
+            await repos.memories.add(
+                "always refill the water bowl", kind="procedural", status="proposed"
+            )
             await repos.audit.append("test.action", target="thing")
             await repos.a2a.upsert("t1", "owner", "ctx", "working", '{"x": 1}')
             await repos.schedules.upsert("job1", kind="cron", schedule="* * * * *", task="noop")
@@ -194,6 +208,64 @@ def test_artifacts_list_and_download(client):
 
 def test_artifact_path_traversal_blocked(client):
     assert client.get("/api/artifacts/..%2Fagent.db").status_code in (400, 404)
+
+
+def test_usage_context_telemetry(client):
+    usage = client.get("/api/usage").json()
+    assert usage["totals"]["cache_read_tokens"] == 2
+    assert usage["totals"]["context_tokens"] == 4
+    assert "context_window" not in usage["totals"]
+    assert usage["recent"][0]["cache_read_tokens"] == 2
+    assert usage["recent"][0]["context_tokens"] == 4
+    assert usage["recent"][0]["context_window"] == 1000
+
+
+def test_teams_endpoint(tmp_path):
+    from agentkit.teams import register_team
+
+    register_team("webui_squad", {"a": lambda: None, "b": lambda: None}, kind="supervisor")
+    settings = AgentSettings(agent_home=tmp_path, agent_name="teams", memory_embedding_backend="hash")
+    runtime = build_runtime(settings)
+    client = TestClient(build_webui_app(runtime=runtime, settings=settings))
+    teams = {t["name"]: t for t in client.get("/api/teams").json()["teams"]}
+    assert teams["webui_squad"]["kind"] == "supervisor"
+    assert teams["webui_squad"]["roster"] == ["a", "b"]
+
+
+def test_lessons_review_regression(client):
+    proposed = client.get("/api/lessons", params={"status": "proposed"}).json()["lessons"]
+    assert proposed and proposed[0]["status"] == "proposed"
+    lesson_id = proposed[0]["id"]
+    assert client.post(f"/api/lessons/{lesson_id}/approve").json()["status"] == "active"
+    active = client.get("/api/lessons", params={"status": "active"}).json()["lessons"]
+    assert any(lesson["id"] == lesson_id for lesson in active)
+
+
+def test_ephemeral_chat_writes_nothing(tmp_path):
+    from agentkit import Agent
+    from agentkit.foundation.application import App
+
+    settings = AgentSettings(agent_home=tmp_path, agent_name="ephemeral", memory_embedding_backend="hash")
+    app = App(name="ephemeral", settings=settings, discover=False)
+    app.agent(Agent.make("e").instructions("x").output(str))
+    app._model = FunctionModel(lambda m, i: ModelResponse(parts=[TextPart("hi")]))
+    app.boot()
+
+    web = build_webui_app(runtime=app.runtime, settings=app.settings, answer=app.answer, app=app)
+    client = TestClient(web)
+
+    response = client.post(
+        "/api/chat",
+        json={"conversation_id": "webui:temp", "text": "hi", "ephemeral": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["output"] == "hi"
+    assert client.get("/api/conversations/webui:temp/messages").json()["messages"] == []
+
+    kept = client.post("/api/chat", json={"conversation_id": "webui:keep", "text": "hi"})
+    assert kept.status_code == 200
+    messages = client.get("/api/conversations/webui:keep/messages").json()["messages"]
+    assert len(messages) == 2
 
 
 def test_chat_endpoint(client):

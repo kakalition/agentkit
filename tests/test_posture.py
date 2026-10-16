@@ -7,7 +7,12 @@ import pytest
 from agentkit import Agent, Posture
 from agentkit.config import AgentSettings
 from agentkit.policy import ALLOW, APPROVE, DENY, free_policy, specialized_policy
-from agentkit.posture import PostureProfile, register_posture, resolve_posture
+from agentkit.posture import (
+    PostureProfile,
+    apply_settings_overrides,
+    register_posture,
+    resolve_posture,
+)
 
 
 def _settings(tmp_path: Path, **overrides) -> AgentSettings:
@@ -113,3 +118,48 @@ def test_scaffold_posture_option(tmp_path: Path):
     assert '.posture("free").full()' in assistant
     with pytest.raises(ValueError):
         scaffold_project("bad", tmp_path, posture="bogus")
+
+
+# -- settings overrides -----------------------------------------------------
+def test_free_posture_overrides_defaulted_settings(tmp_path: Path):
+    settings = _settings(tmp_path)
+    updated = apply_settings_overrides(settings, resolve_posture("free"))
+    assert updated is not settings
+    assert updated.tool_output_offload_threshold == 4000
+    assert updated.memory_nudge_every == 10
+    # the original is untouched
+    assert settings.tool_output_offload_threshold == 0
+    assert settings.memory_nudge_every == 0
+
+
+def test_operator_value_beats_posture_override(tmp_path: Path):
+    settings = _settings(tmp_path, memory_nudge_every=3)
+    updated = apply_settings_overrides(settings, resolve_posture("free"))
+    assert updated.memory_nudge_every == 3  # operator value wins
+    assert updated.tool_output_offload_threshold == 4000  # still defaulted -> overridden
+
+
+def test_hybrid_and_specialized_settings_unchanged(tmp_path: Path):
+    settings = _settings(tmp_path)
+    assert apply_settings_overrides(settings, resolve_posture("hybrid")) is settings
+    assert apply_settings_overrides(settings, resolve_posture("specialized")) is settings
+    assert apply_settings_overrides(settings, None) is settings
+
+
+def test_boot_applies_posture_settings(tmp_path: Path):
+    from agentkit.foundation.application import App
+
+    settings = _settings(tmp_path, agent_posture="free")
+    app = App(name="free-app", settings=settings, discover=False)
+    app.boot()
+    assert app.settings.tool_output_offload_threshold == 4000
+    assert app.settings.memory_nudge_every == 10
+
+
+def test_boot_hybrid_leaves_settings_identity(tmp_path: Path):
+    from agentkit.foundation.application import App
+
+    settings = _settings(tmp_path)
+    app = App(name="hybrid-app", settings=settings, discover=False)
+    app.boot()
+    assert app.settings is settings

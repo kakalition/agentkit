@@ -31,6 +31,9 @@ class UsageRepo:
         input_tokens: int = 0,
         output_tokens: int = 0,
         total_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        context_tokens: int = 0,
+        context_window: int | None = None,
         cost_usd: float = 0.0,
     ) -> UsageRecord:
         record = UsageRecord(
@@ -42,6 +45,9 @@ class UsageRepo:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
+            cache_read_tokens=cache_read_tokens,
+            context_tokens=context_tokens,
+            context_window=context_window,
             cost_usd=cost_usd,
         )
         self.session.add(record)
@@ -65,18 +71,30 @@ class UsageRepo:
             func.coalesce(func.sum(UsageRecord.input_tokens), 0),
             func.coalesce(func.sum(UsageRecord.output_tokens), 0),
             func.coalesce(func.sum(UsageRecord.total_tokens), 0),
+            func.coalesce(func.sum(UsageRecord.cache_read_tokens), 0),
+            func.coalesce(func.sum(UsageRecord.context_tokens), 0),
             func.coalesce(func.sum(UsageRecord.cost_usd), 0.0),
         )
         stmt: Any = select(*columns).where(UsageRecord.owner_id == self.owner_id)  # type: ignore[call-overload]
         if since is not None:
             stmt = stmt.where(UsageRecord.created_at >= since)
         row: Any = (await self.session.exec(stmt)).one()
-        requests, input_tokens, output_tokens, total_tokens, cost_usd = row
+        (
+            requests,
+            input_tokens,
+            output_tokens,
+            total_tokens,
+            cache_read_tokens,
+            context_tokens,
+            cost_usd,
+        ) = row
         return {
             "requests": int(requests),
             "input_tokens": int(input_tokens),
             "output_tokens": int(output_tokens),
             "total_tokens": int(total_tokens),
+            "cache_read_tokens": int(cache_read_tokens),
+            "context_tokens": int(context_tokens),
             "cost_usd": round(float(cost_usd), 6),
         }
 

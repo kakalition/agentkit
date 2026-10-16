@@ -1,6 +1,6 @@
 [project]
 name = "agentkit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Opinionated, batteries-included building blocks for PydanticAI personal-assistant agents (CLI + Telegram, MCP + A2A, durable execution)"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"

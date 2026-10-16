@@ -99,6 +99,10 @@ def test_schedule_natural_tool_attached(tmp_path: Path):
 
 # -- TUI --------------------------------------------------------------------
 def test_tui_requires_extra():
+    import importlib.util
+
+    if importlib.util.find_spec("textual") is not None:
+        pytest.skip("textual installed; missing-extra path not applicable")
     with pytest.raises(ConfigurationError) as excinfo:
         run_tui()
     assert "tui" in str(excinfo.value)

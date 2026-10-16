@@ -43,7 +43,7 @@ __all__ = [
 
 SUPERVISOR_INSTRUCTIONS = ROUTER_INSTRUCTIONS
 
-TEAM_KINDS = ("groupchat", "supervisor", "magentic")
+TEAM_KINDS = ("groupchat", "supervisor", "managed")
 
 
 @dataclass
@@ -59,7 +59,7 @@ TEAMS: dict[str, TeamSpec] = {}
 
 
 def register_team(name: str, roster: Mapping[str, Any], *, kind: str = "groupchat") -> TeamSpec:
-    """Register a named team (``groupchat`` | ``supervisor`` | ``magentic``)."""
+    """Register a named team (``groupchat`` | ``supervisor`` | ``managed``)."""
     if kind not in TEAM_KINDS:
         raise ValueError(f"unknown team kind {kind!r}; choose from {', '.join(TEAM_KINDS)}")
     spec = TeamSpec(name=name, roster=dict(roster), kind=kind)
@@ -79,10 +79,10 @@ def resolve_team(name: str) -> TeamSpec:
 def build_team(name: str, *, speaker: Any = None, max_turns: int = 12, max_rounds: int = 8) -> Any:
     """Build the runnable for a named team (a runner with ``run(task, ctx=...)``)."""
     spec = resolve_team(name)
-    if spec.kind == "magentic":
-        from agentkit.agents.team import MagenticTeam
+    if spec.kind == "managed":
+        from agentkit.agents.team import ManagedTeam
 
-        return MagenticTeam(spec.roster, speaker=speaker, max_rounds=max_rounds)
+        return ManagedTeam(spec.roster, speaker=speaker, max_rounds=max_rounds)
     from agentkit.agents.groupchat import GroupChatRunner
 
     if spec.kind == "supervisor":

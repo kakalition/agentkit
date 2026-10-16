@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Bar, BarChart, CartesianGrid, XAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, ReferenceLine, XAxis } from "recharts"
 
 import { ErrorAlert, Page } from "@/components/page"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -16,23 +16,36 @@ const chartConfig = {
   total_tokens: { label: "Tokens", color: "var(--chart-1)" },
 } satisfies ChartConfig
 
+const contextChartConfig = {
+  context_tokens: { label: "Context", color: "var(--chart-2)" },
+} satisfies ChartConfig
+
 export default function Usage() {
   const usage = useQuery({ queryKey: ["usage"], queryFn: api.usage })
   const totals = usage.data?.totals
-  const data = [...(usage.data?.recent ?? [])]
-    .reverse()
-    .map((row) => ({ label: row.created_at.slice(5, 16), total_tokens: row.total_tokens }))
+  const recent = [...(usage.data?.recent ?? [])].reverse()
+  const data = recent.map((row) => ({
+    label: row.created_at.slice(5, 16),
+    total_tokens: row.total_tokens,
+  }))
+  const contextData = recent.map((row) => ({
+    label: row.created_at.slice(5, 16),
+    context_tokens: row.context_tokens,
+  }))
+  const contextWindow = recent.find((row) => row.context_window)?.context_window ?? null
 
   return (
     <Page title="Usage" description="Token accounting per turn (counts only).">
       <ErrorAlert error={usage.error} />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {[
           ["Requests", totals?.requests],
           ["Input tokens", totals?.input_tokens],
           ["Output tokens", totals?.output_tokens],
           ["Total tokens", totals?.total_tokens],
+          ["Cache read tokens", totals?.cache_read_tokens],
+          ["Context tokens", totals?.context_tokens],
         ].map(([label, value]) => (
           <Card key={label as string}>
             <CardHeader className="pb-2">
@@ -65,6 +78,34 @@ export default function Usage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Context window</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {contextData.length ? (
+            <ChartContainer config={contextChartConfig} className="h-64 w-full">
+              <BarChart data={contextData}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Bar dataKey="context_tokens" fill="var(--color-context_tokens)" radius={4} />
+                {contextWindow ? (
+                  <ReferenceLine
+                    y={contextWindow}
+                    stroke="var(--muted-foreground)"
+                    strokeDasharray="4 4"
+                    label="context window"
+                  />
+                ) : null}
+              </BarChart>
+            </ChartContainer>
+          ) : (
+            <p className="text-muted-foreground text-sm">No context telemetry recorded yet.</p>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="rounded-lg border">
         <Table>
           <TableHeader>
@@ -73,6 +114,7 @@ export default function Usage() {
               <TableHead>Kind</TableHead>
               <TableHead>Conversation</TableHead>
               <TableHead>Model</TableHead>
+              <TableHead>Context</TableHead>
               <TableHead>Total</TableHead>
             </TableRow>
           </TableHeader>
@@ -83,6 +125,10 @@ export default function Usage() {
                 <TableCell>{row.kind}</TableCell>
                 <TableCell className="font-mono text-xs">{row.conversation_id ?? "—"}</TableCell>
                 <TableCell className="text-sm">{row.model}</TableCell>
+                <TableCell>
+                  {row.context_tokens}
+                  {row.context_window ? ` / ${row.context_window}` : ""}
+                </TableCell>
                 <TableCell>{row.total_tokens}</TableCell>
               </TableRow>
             ))}

@@ -40,6 +40,18 @@ TASKS: dict[str, Callable[..., Any]] = {}
 TICK_SCHEDULE_NAME = "agentkit-scheduler-tick"
 WORKER_QUEUE = "agentkit"
 _runtime: Runtime | None = None
+_result_sink: Callable[[str, str], Any] | None = None
+
+
+def set_result_sink(fn: Callable[[str, str], Any] | None) -> None:
+    """Register a best-effort ``(conversation_id, text) -> Any`` sink for job results.
+
+    :func:`invoke_task` calls it after a successful run when the job carried a
+    ``_deliver_to`` argument. A sink failure never fails the job.
+    """
+    global _result_sink
+    _result_sink = fn
+
 
 
 def task(name: str):
@@ -58,14 +70,24 @@ async def invoke_task(task_name: str, args_json: str = "{}") -> Any:
     function = TASKS.get(task_name)
     if function is None:
         raise ValueError(f"no task registered as {task_name!r}")
+    kwargs = json.loads(args_json or "{}")
+    deliver_to: str | None = None
+    if isinstance(kwargs, dict):
+        deliver_to = kwargs.pop("_deliver_to", None)
     try:
-        result = function(**json.loads(args_json or "{}"))
+        result = function(**kwargs)
         if inspect.isawaitable(result):
             result = await result
     except Exception:
         metrics.record_scheduler_run(task_name, "error")
         raise
     metrics.record_scheduler_run(task_name, "ok")
+    if deliver_to and _result_sink is not None:
+        try:
+            text = result if isinstance(result, str) else ("" if result is None else str(result))
+            _result_sink(str(deliver_to), text)
+        except Exception:  # pragma: no cover - delivery must never fail the job
+            pass
     return result
 
 

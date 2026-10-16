@@ -53,6 +53,7 @@ def attach_scheduler(
         cron: str | None = None,
         at: str | None = None,
         args: dict[str, Any] | None = None,
+        deliver_to: str | None = None,
     ) -> str:
         """Create or update a durable schedule (requires approval).
 
@@ -62,6 +63,7 @@ def attach_scheduler(
             cron: A 5-field cron expression for a recurring schedule.
             at: An ISO-8601 datetime for a one-off schedule (instead of cron).
             args: Keyword arguments passed to the task.
+            deliver_to: Conversation id to send the result to (default: this chat).
         """
         repos = repos_of(ctx)
         if repos is None:
@@ -71,7 +73,11 @@ def attach_scheduler(
             return f"ERROR: task {task!r} is not allowed; choose from {', '.join(allowed)}"
         if bool(cron) == bool(at):
             return "ERROR: provide exactly one of cron or at"
-        encoded = json.dumps(args or {})
+        payload = dict(args or {})
+        target = deliver_to or ctx.deps.conversation_id
+        if target:
+            payload["_deliver_to"] = target
+        encoded = json.dumps(payload)
         if cron:
             try:
                 croniter(cron)
@@ -97,7 +103,11 @@ def attach_scheduler(
 
     @agent.tool(requires_approval=True)
     async def schedule_natural(
-        ctx: RunContext[Deps], when: str, task: str, name: str | None = None
+        ctx: RunContext[Deps],
+        when: str,
+        task: str,
+        name: str | None = None,
+        deliver_to: str | None = None,
     ) -> str:
         """Schedule a task from a natural-language time (requires approval).
 
@@ -105,6 +115,7 @@ def attach_scheduler(
             when: e.g. "every day at 9am", "every monday at 8:30", "in 2 hours".
             task: The registered task name to run.
             name: Optional schedule name (default: task + a short time hash).
+            deliver_to: Conversation id to send the result to (default: this chat).
         """
         from agentkit.scheduling_nl import parse_when
 
@@ -118,9 +129,12 @@ def attach_scheduler(
         if parsed is None:
             return f"ERROR: could not understand {when!r}; try 'every day at 9am' or 'in 2 hours'"
         resolved = name or f"{task}-{abs(hash(when)) % 100000}"
+        target = deliver_to or ctx.deps.conversation_id
+        payload = {"_deliver_to": target} if target else {}
+        encoded = json.dumps(payload)
         if parsed.kind == "cron":
             await repos.schedules.upsert(
-                resolved, kind="cron", schedule=parsed.schedule, task=task, args="{}"
+                resolved, kind="cron", schedule=parsed.schedule, task=task, args=encoded
             )
         else:
             await repos.schedules.upsert(
@@ -128,7 +142,7 @@ def attach_scheduler(
                 kind="once",
                 schedule=(parsed.at or datetime.now()).isoformat(),
                 task=task,
-                args="{}",
+                args=encoded,
             )
         await emit_event("schedule.upsert", name=resolved, task=task)
         return f"scheduled {resolved!r} -> {task} ({parsed.describe()})"
@@ -194,7 +208,13 @@ def attach_scheduler(
         allowed = _allowed(ctx)
         if allowed and job.task not in allowed:
             return f"ERROR: task {job.task!r} is not allowed"
-        await invoke_task(job.task, job.args or "{}")
+        payload = json.loads(job.args or "{}")
+        if not isinstance(payload, dict):
+            payload = {}
+        target = ctx.deps.conversation_id
+        if target:
+            payload["_deliver_to"] = target
+        await invoke_task(job.task, json.dumps(payload))
         await repos.schedules.record_run(name)
         await emit_event("schedule.run", name=name, task=job.task)
         return f"ran {name!r} ({job.task})"

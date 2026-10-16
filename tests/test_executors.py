@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib.util
+import shutil
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,26 @@ from agentkit.executors import (
 )
 from agentkit.foundation.application import App
 from agentkit.foundation.storage import MemoryFilesystem, S3FileSystem
+
+
+def _installed(module: str) -> bool:
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):  # pragma: no cover - defensive
+        return False
+
+
+#: ``extra -> the module its driver imports on first use``.
+OPTIONAL_EXTRAS = [
+    ("jupyter", "jupyter_client"),
+    ("e2b", "e2b_code_interpreter"),
+    ("ssh", "paramiko"),
+    ("modal", "modal"),
+    ("daytona", "daytona"),
+    ("vercel", "vercel"),
+    ("s3", "boto3"),
+    ("tui", "textual"),
+]
 
 
 def _settings(tmp_path: Path, **overrides) -> AgentSettings:
@@ -59,21 +81,32 @@ async def test_local_executor_rejects_other_languages():
 
 
 @pytest.mark.parametrize(
-    ("executor", "extra"),
+    ("executor", "extra", "module"),
     [
-        (JupyterExecutor(), "jupyter"),
-        (E2BExecutor(), "e2b"),
-        (SSHExecutor("host"), "ssh"),
-        (ModalExecutor(), "modal"),
-        (DaytonaExecutor(), "daytona"),
-        (VercelExecutor(), "vercel"),
-        (SingularityExecutor("img"), "singularity"),
+        (JupyterExecutor(), "jupyter", "jupyter_client"),
+        (E2BExecutor(), "e2b", "e2b_code_interpreter"),
+        (SSHExecutor("host"), "ssh", "paramiko"),
+        (ModalExecutor(), "modal", "modal"),
+        (DaytonaExecutor(), "daytona", "daytona"),
+        (VercelExecutor(), "vercel", "vercel"),
+        (SingularityExecutor("img"), "singularity", None),
     ],
 )
-async def test_missing_extra_names_the_extra(executor, extra):
+async def test_missing_extra_names_the_extra(executor, extra, module):
+    if module is not None and _installed(module):
+        pytest.skip(f"{module} installed; missing-extra path not applicable")
+    if module is None and (shutil.which("singularity") or shutil.which("apptainer")):
+        pytest.skip("singularity/apptainer on PATH")
     with pytest.raises(ConfigurationError) as excinfo:
         await executor.run("print(1)")
     assert extra in str(excinfo.value)
+
+
+@pytest.mark.parametrize(("extra", "module"), OPTIONAL_EXTRAS)
+def test_optional_extra_module_importable_when_installed(extra, module):
+    """Spot check: when an extra is installed its driver dependency imports."""
+    pytest.importorskip(module)
+    assert _installed(module)
 
 
 def test_code_executor_driver_selection(tmp_path: Path):
@@ -89,6 +122,8 @@ def test_code_executor_driver_selection(tmp_path: Path):
 def test_s3_filesystem_conforms_and_lazy_imports(tmp_path: Path):
     fs = S3FileSystem("my-bucket", prefix="artifacts")
     assert isinstance(fs, FileSystem)
+    if _installed("boto3"):
+        pytest.skip("boto3 installed; missing-extra path not applicable")
     # Constructing must not require boto3; first use raises naming the extra.
     with pytest.raises(ConfigurationError) as excinfo:
         fs.exists("x.txt")

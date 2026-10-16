@@ -49,13 +49,13 @@ delegates to the runner via `topology.run(task)`.
 
 ## Manager-led teams (ledger)
 
-A `MagenticTeam` keeps a `TeamLedger` of facts, a plan, and a task list across
+A `ManagedTeam` keeps a `TeamLedger` of facts, a plan, and a task list across
 rounds, and replans when a member stalls.
 
 ```python
-from agentkit import MagenticTeam, register_team
+from agentkit import ManagedTeam, register_team
 
-team = MagenticTeam(
+team = ManagedTeam(
     {"planner": planner, "coder": coder, "reviewer": reviewer},
     manager=lambda ledger, stalled: ["reframe the task", "assign a reviewer"],
     max_rounds=8,
@@ -78,5 +78,5 @@ agent = Agent.make("lead").team("squad").output(str)
 ```
 
 `Agent.team("squad")` attaches a namespaced `team_squad(prompt)` tool. The kinds
-are `groupchat`, `supervisor`, and `magentic`. `agentkit inspect` lists the
+are `groupchat`, `supervisor`, and `managed`. `agentkit inspect` lists the
 registered teams.

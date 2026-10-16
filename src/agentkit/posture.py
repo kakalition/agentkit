@@ -35,6 +35,7 @@ __all__ = [
     "POSTURES",
     "Posture",
     "PostureProfile",
+    "apply_settings_overrides",
     "register_posture",
     "resolve_posture",
 ]
@@ -162,7 +163,10 @@ def _free() -> PostureProfile:
             "workspace": True,
             "subagents": True,
         },
-        settings_overrides={},
+        settings_overrides={
+            "tool_output_offload_threshold": 4000,
+            "memory_nudge_every": 10,
+        },
         policy_factory=free_policy,
         egress=True,
     )
@@ -200,3 +204,31 @@ def resolve_posture(name: str | Posture | None) -> PostureProfile | None:
     except KeyError as exc:
         available = ", ".join(sorted(POSTURES))
         raise ValueError(f"unknown posture {name!r}; choose from {available}") from exc
+
+
+def apply_settings_overrides(settings: Any, profile: PostureProfile | None) -> Any:
+    """Return ``settings`` with a posture's overrides applied (or unchanged).
+
+    An override only applies while the setting is still at its field default, so
+    an operator-set (non-default) value always wins. Returns ``settings`` itself
+    when ``profile`` is ``None``, declares no overrides, or every override key is
+    already non-default — callers can compare with ``is`` to detect a change.
+    """
+    if settings is None or profile is None or not profile.settings_overrides:
+        return settings
+    from pydantic_core import PydanticUndefined
+
+    fields = getattr(type(settings), "model_fields", {})
+    applicable: dict[str, Any] = {}
+    for key, value in profile.settings_overrides.items():
+        field = fields.get(key)
+        if field is None or not hasattr(settings, key):
+            continue
+        default = field.get_default(call_default_factory=True)
+        if default is PydanticUndefined:
+            continue
+        if getattr(settings, key) == default:
+            applicable[key] = value
+    if not applicable:
+        return settings
+    return settings.model_copy(update=applicable)

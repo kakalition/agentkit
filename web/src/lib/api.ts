@@ -90,6 +90,9 @@ export interface UsageRow {
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  cache_read_tokens: number
+  context_tokens: number
+  context_window: number | null
   created_at: string
 }
 
@@ -99,8 +102,16 @@ export interface Usage {
     input_tokens: number
     output_tokens: number
     total_tokens: number
+    cache_read_tokens: number
+    context_tokens: number
   }
   recent: UsageRow[]
+}
+
+export interface Team {
+  name: string
+  kind: string
+  roster: string[]
 }
 
 export interface AuditEntry {
@@ -217,8 +228,8 @@ export const api = {
   info: () => request<Info>("/info"),
   whoami: () => request<Whoami>("/whoami"),
   health: () => request<Health>("/health"),
-  chat: (conversation_id: string, text: string) =>
-    request<ChatReply>("/chat", json("POST", { conversation_id, text })),
+  chat: (conversation_id: string, text: string, ephemeral = false) =>
+    request<ChatReply>("/chat", json("POST", { conversation_id, text, ephemeral })),
   cancelChat: (conversation_id: string) =>
     request<{ cancelled: boolean }>("/chat/cancel", json("POST", { conversation_id })),
 
@@ -282,6 +293,7 @@ export const api = {
     }),
 
   usage: () => request<Usage>("/usage"),
+  teams: () => request<{ teams: Team[] }>("/teams"),
   audit: () => request<{ entries: AuditEntry[] }>("/audit"),
   verifyAudit: () => request<{ ok: boolean }>("/audit/verify"),
 

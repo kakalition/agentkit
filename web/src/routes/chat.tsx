@@ -8,7 +8,9 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import type { Message } from "@/lib/api"
@@ -52,24 +54,26 @@ function MessageBubble({ message }: { message: Message }) {
 export default function Chat() {
   const [conversationId, setConversationId] = useState("webui:default")
   const [draft, setDraft] = useState("")
+  const [ephemeral, setEphemeral] = useState(false)
 
   const info = useQuery({ queryKey: ["info"], queryFn: api.info })
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations })
   const messages = useQuery({
     queryKey: ["messages", conversationId],
     queryFn: () => api.messages(conversationId),
-    enabled: conversationId.length > 0,
+    enabled: conversationId.length > 0 && !ephemeral,
   })
 
   const send = useMutation({
-    mutationFn: () => api.chat(conversationId, draft),
+    mutationFn: () => api.chat(conversationId, draft, ephemeral),
     onSuccess: () => {
       setDraft("")
-      void messages.refetch()
+      if (!ephemeral) void messages.refetch()
     },
   })
 
   const chatEnabled = info.data?.chat_enabled ?? false
+  const compacted = send.data?.usage?.compacted_messages ?? 0
 
   return (
     <Page
@@ -100,6 +104,12 @@ export default function Chat() {
         <Button variant="outline" size="sm" onClick={() => void messages.refetch()}>
           Refresh
         </Button>
+        <div className="flex items-center gap-2">
+          <Switch id="ephemeral" checked={ephemeral} onCheckedChange={setEphemeral} />
+          <Label htmlFor="ephemeral" className="text-sm">
+            Temporary chat
+          </Label>
+        </div>
       </div>
 
       {!chatEnabled && !info.isLoading ? (
@@ -109,13 +119,26 @@ export default function Chat() {
         </Alert>
       ) : null}
 
+      {ephemeral ? (
+        <Alert>
+          <AlertTitle>Temporary chat</AlertTitle>
+          <AlertDescription>
+            Messages are not saved to conversation history and are not shown here.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <ErrorAlert error={messages.error ?? send.error} />
 
       <Card>
         <CardContent className="p-4">
           <ScrollArea className="h-[26rem] pr-4">
             <div className="flex flex-col gap-3">
-              {messages.data?.messages.length ? (
+              {ephemeral ? (
+                <p className="text-muted-foreground text-sm">
+                  Temporary chat: history is disabled. Send a message to get a one-off reply.
+                </p>
+              ) : messages.data?.messages.length ? (
                 messages.data.messages.map((message, index) => (
                   <MessageBubble key={index} message={message} />
                 ))
@@ -151,6 +174,7 @@ export default function Chat() {
         <p className="text-muted-foreground text-xs">
           {send.data.history_length} messages in history
           {send.data.usage ? ` · ${send.data.usage.total_tokens ?? 0} tokens` : ""}
+          {compacted > 0 ? ` · context compacted (${compacted})` : ""}
         </p>
       ) : null}
     </Page>

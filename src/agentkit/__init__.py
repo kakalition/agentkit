@@ -15,9 +15,12 @@ from agentkit.agents import (
     AgentRegistry,
     Mailbox,
     attach_agents,
+    attach_team_ledger,
     handoff,
     handoff_tool,
     mailbox_tools,
+    read_ledger,
+    write_ledger,
 )
 from agentkit.agents.groupchat import GroupChatResult, GroupChatRunner
 from agentkit.agents.speaker import (
@@ -29,7 +32,7 @@ from agentkit.agents.speaker import (
     SpeakerManager,
     SpeakerStrategy,
 )
-from agentkit.agents.team import MagenticTeam, TeamLedger, TeamRunResult
+from agentkit.agents.team import ManagedTeam, TeamLedger, TeamRunResult
 from agentkit.app import AgentApp
 from agentkit.approvals import (
     ApprovalQueue,
@@ -304,7 +307,7 @@ from agentkit.workspace import (
     workspace_dir,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "__version__",
@@ -430,9 +433,12 @@ __all__ = [
     "AgentRegistry",
     "Mailbox",
     "attach_agents",
+    "attach_team_ledger",
     "handoff",
     "handoff_tool",
     "mailbox_tools",
+    "read_ledger",
+    "write_ledger",
     "approval_capability",
     "approval_handler",
     "auto_approver",
@@ -543,7 +549,7 @@ __all__ = [
     "AllSpeaker",
     "SelectorSpeaker",
     "ManualSpeaker",
-    "MagenticTeam",
+    "ManagedTeam",
     "TeamLedger",
     "TeamRunResult",
     "register_team",

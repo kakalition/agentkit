@@ -125,7 +125,8 @@ class StreamEvent:
     """One increment of a streamed turn.
 
     ``kind`` is one of ``"text"`` (``text`` carries the delta), ``"tool"``
-    (``tool`` names it), or ``"final"`` (``result`` carries the :class:`ChatResult`).
+    (``tool`` names it), ``"compaction"`` (``text`` describes a shrunken history
+    window), or ``"final"`` (``result`` carries the :class:`ChatResult`).
     """
 
     kind: str
@@ -153,6 +154,8 @@ class ChatRunner:
         self.max_history = max_history
         self.history_processor = history_processor
         self.persist = persist
+        # Set by ``_begin`` when a history processor shrank the window.
+        self._compaction: dict[str, int] | None = None
         # Make the conversation id available to tools (e.g. to deliver later).
         self.deps.extras["conversation_id"] = conversation_id
 
@@ -181,6 +184,9 @@ class ChatRunner:
         """Run one turn, yielding :class:`StreamEvent` increments then the final result."""
         repos, channel, history = await self._begin(text)
         self.deps.artifacts.clear()
+        if self._compaction:
+            dropped = self._compaction["messages"]
+            yield StreamEvent("compaction", text=f"context compacted ({dropped} messages)")
         async with self.agent.run_stream(
             text,
             deps=self.deps,
@@ -217,6 +223,7 @@ class ChatRunner:
     async def _begin(self, text: Any) -> tuple[Any, str, list[ModelMessage]]:
         repos = self.deps.repos
         channel = self.conversation_id.split(":", 1)[0]
+        self._compaction = None
         self.deps.extras["ephemeral"] = not self.persist
         if self.persist:
             await repos.conversations.get_or_create(self.conversation_id, channel=channel)
@@ -224,6 +231,7 @@ class ChatRunner:
         else:
             history = []
         if self.history_processor is not None:
+            before = list(history)
             if _accepts_conversation(self.history_processor):
                 processed = self.history_processor(history, conversation_id=self.conversation_id)
             else:
@@ -231,6 +239,14 @@ class ChatRunner:
             if inspect.isawaitable(processed):
                 processed = await processed
             history = list(processed)
+            if len(history) < len(before):
+                from agentkit.compaction import estimate_tokens, transcript
+
+                saved = estimate_tokens(transcript(before)) - estimate_tokens(transcript(history))
+                self._compaction = {
+                    "messages": len(before) - len(history),
+                    "tokens": max(saved, 0),
+                }
 
         from agentkit.foundation.facade import emit
 
@@ -327,6 +343,7 @@ class ChatRunner:
             "cache_read_tokens": int(getattr(run_usage, "cache_read_tokens", 0) or 0),
             "context_tokens": input_tokens,
             "context_window": self._context_window(),
+            "compacted_messages": int((self._compaction or {}).get("messages", 0)),
         }
         totals["cost_usd"] = usage_cost(run_usage, model_name)
         return totals
@@ -358,7 +375,15 @@ class ChatRunner:
             cost_usd=totals["cost_usd"],
             **{
                 key: totals[key]
-                for key in ("requests", "input_tokens", "output_tokens", "total_tokens")
+                for key in (
+                    "requests",
+                    "input_tokens",
+                    "output_tokens",
+                    "total_tokens",
+                    "cache_read_tokens",
+                    "context_tokens",
+                    "context_window",
+                )
             },
         )
         return totals

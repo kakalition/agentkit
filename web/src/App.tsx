@@ -11,6 +11,7 @@ import {
   Search as SearchIcon,
   Settings,
   ShieldCheck,
+  Users,
   UserCog,
   Workflow,
 } from "lucide-react"
@@ -32,6 +33,7 @@ import Overview from "@/routes/overview"
 import Persona from "@/routes/persona"
 import Scheduler from "@/routes/scheduler"
 import Search from "@/routes/search"
+import Teams from "@/routes/teams"
 import Usage from "@/routes/usage"
 import Workflows from "@/routes/workflows"
 
@@ -42,6 +44,7 @@ const baseItems: NavItem[] = [
   { title: "Lessons", url: "/lessons", icon: GraduationCap },
   { title: "Scheduler", url: "/scheduler", icon: CalendarClock },
   { title: "Workflows", url: "/workflows", icon: Workflow },
+  { title: "Teams", url: "/teams", icon: Users },
   { title: "Usage", url: "/usage", icon: BarChart3 },
   { title: "Audit", url: "/audit", icon: ShieldCheck },
   { title: "A2A", url: "/a2a", icon: Network },
@@ -86,6 +89,7 @@ export default function App() {
             <Route path="/lessons" element={<Lessons />} />
             <Route path="/scheduler" element={<Scheduler />} />
             <Route path="/workflows" element={<Workflows />} />
+            <Route path="/teams" element={<Teams />} />
             <Route path="/usage" element={<Usage />} />
             <Route path="/audit" element={<Audit />} />
             <Route path="/a2a" element={<A2A />} />

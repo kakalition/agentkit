@@ -80,6 +80,55 @@ def test_render_jsonl_is_one_object_per_line():
     assert json.loads(text.splitlines()[0]) == {"a": 1}
 
 
+def test_read_prompts_handles_text_and_jsonl(tmp_path: Path):
+    from agentkit.cli.commands.training import _read_prompts
+
+    path = tmp_path / "prompts.jsonl"
+    path.write_text(
+        'plain line\n{"prompt": "json prompt"}\n{"text": "alt"}\n\nnot json {oops\n',
+        encoding="utf-8",
+    )
+    assert _read_prompts(path) == ["plain line", "json prompt", "alt", "not json {oops"]
+
+
+def test_generate_batch_writes_jsonl(tmp_path: Path, monkeypatch):
+    module = tmp_path / "gen_bootstrap.py"
+    module.write_text(
+        "from agentkit import Agent, App\n"
+        "from pydantic_ai.messages import ModelResponse, TextPart\n"
+        "from pydantic_ai.models.function import FunctionModel\n"
+        "app = App('gen', discover=False)\n"
+        "app.agent(Agent.make('gen').instructions('x').output(str))\n"
+        "app._model = FunctionModel(lambda m, i: ModelResponse(parts=[TextPart('out')]))\n",
+        encoding="utf-8",
+    )
+    prompts = tmp_path / "prompts.txt"
+    prompts.write_text("one\ntwo\n", encoding="utf-8")
+    out = tmp_path / "generations.jsonl"
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_app,
+        [
+            "generate",
+            str(prompts),
+            "--out",
+            str(out),
+            "--bootstrap",
+            "gen_bootstrap:app",
+            "--n",
+            "2",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 4  # 2 prompts x 2 samples
+    first = json.loads(lines[0])
+    assert first["prompt"] == "one"
+    assert first["output"] == "out"
+
+
 async def test_iter_trajectories_over_repos(repos: Repositories):
     await repos.conversations.get_or_create("cli:t", channel="cli")
     await repos.messages.append("cli:t", [serialize_message(m) for m in _conversation()])
