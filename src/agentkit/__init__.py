@@ -270,6 +270,13 @@ from agentkit.soul import (
     load_soul,
     soul_path,
 )
+from agentkit.studio import (
+    TeamDefinition,
+    TeamMember,
+    materialize_team,
+    render_team_code,
+    run_team_definition,
+)
 from agentkit.supervise import Service, run_all
 from agentkit.support import DriverKind, Manager, register_driver
 from agentkit.teams import (
@@ -558,6 +565,12 @@ __all__ = [
     "team_tool",
     "TeamSpec",
     "TEAMS",
+    # studio (declarative teams)
+    "TeamDefinition",
+    "TeamMember",
+    "materialize_team",
+    "render_team_code",
+    "run_team_definition",
     # tooling
     "cached_tool",
     # safety

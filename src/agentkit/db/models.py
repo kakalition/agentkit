@@ -275,3 +275,21 @@ class Feedback(SQLModel, table=True):
     rating: int = 0  # -1 / +1, or 1..5
     comment: str = ""
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class TeamDefinitionRecord(SQLModel, table=True):
+    """A declarative, Studio-authored team definition (JSON).
+
+    The roster is stored by name; members are resolved to live agents at run
+    time (see :mod:`agentkit.studio`). Distinct from the in-process
+    ``agentkit.teams.TEAMS`` registry, which holds live, code-registered teams.
+    """
+
+    __tablename__ = "team_definitions"
+
+    name: str = Field(primary_key=True)
+    owner_id: str = Field(index=True)
+    kind: str = "groupchat"  # groupchat | supervisor | managed
+    definition: str = "{}"  # JSON-serialized agentkit.studio.TeamDefinition
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)

@@ -19,6 +19,7 @@ from agentkit.db.repositories.knowledge import KnowledgeRepo
 from agentkit.db.repositories.learning import LearningRunRepo
 from agentkit.db.repositories.memory import MEMORY_KINDS, MemoryRepo, OwnerProfileRepo
 from agentkit.db.repositories.scheduling import ScheduledJobRepo
+from agentkit.db.repositories.team_specs import TeamSpecRepo
 from agentkit.db.repositories.usage import AuditRepo, UsageRepo
 
 __all__ = [
@@ -34,5 +35,6 @@ __all__ = [
     "OwnerProfileRepo",
     "Repositories",
     "ScheduledJobRepo",
+    "TeamSpecRepo",
     "UsageRepo",
 ]

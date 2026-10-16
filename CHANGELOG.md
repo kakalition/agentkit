@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 ## [0.2.0] - 2026-10-16
 
 ### Added
+- **Studio (team builder + playground + export)**: a declarative
+  `TeamDefinition` layer (`agentkit.studio`) that persists teams per owner
+  (`team_definitions`), materializes them by resolving named members against the
+  app's `AgentRegistry` (+ primary agent) or a placeholder, runs them, and exports
+  the Python that rebuilds them. A web **Studio** page (Builder / JSON / Python /
+  Playground) authors teams, imports/exports JSON, generates `register_team(...)`
+  code, activates a definition into the in-process `TEAMS` registry, and renders a
+  run's transcript as a **message-flow graph** plus the ledger for `managed`
+  teams. REST: `/api/studio/teams` CRUD, `/run`, `/code`, `/activate`. Docs:
+  `/guide/studio`.
 - **Studio MVP & gap-fill**: context telemetry is now persisted per turn
   (`UsageRecord.cache_read_tokens`/`context_tokens`/`context_window`, auto-added
   to older DBs) and surfaced with a web **Usage** context-window chart; a web

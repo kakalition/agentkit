@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import {
   BarChart3,
+  Blocks,
   CalendarClock,
   FolderOpen,
   GraduationCap,
@@ -33,6 +34,7 @@ import Overview from "@/routes/overview"
 import Persona from "@/routes/persona"
 import Scheduler from "@/routes/scheduler"
 import Search from "@/routes/search"
+import Studio from "@/routes/studio"
 import Teams from "@/routes/teams"
 import Usage from "@/routes/usage"
 import Workflows from "@/routes/workflows"
@@ -44,6 +46,7 @@ const baseItems: NavItem[] = [
   { title: "Lessons", url: "/lessons", icon: GraduationCap },
   { title: "Scheduler", url: "/scheduler", icon: CalendarClock },
   { title: "Workflows", url: "/workflows", icon: Workflow },
+  { title: "Studio", url: "/studio", icon: Blocks },
   { title: "Teams", url: "/teams", icon: Users },
   { title: "Usage", url: "/usage", icon: BarChart3 },
   { title: "Audit", url: "/audit", icon: ShieldCheck },
@@ -89,6 +92,7 @@ export default function App() {
             <Route path="/lessons" element={<Lessons />} />
             <Route path="/scheduler" element={<Scheduler />} />
             <Route path="/workflows" element={<Workflows />} />
+            <Route path="/studio" element={<Studio />} />
             <Route path="/teams" element={<Teams />} />
             <Route path="/usage" element={<Usage />} />
             <Route path="/audit" element={<Audit />} />

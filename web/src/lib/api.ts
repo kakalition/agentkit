@@ -114,6 +114,46 @@ export interface Team {
   roster: string[]
 }
 
+export interface TeamMember {
+  name: string
+  description: string
+  capabilities: string[]
+}
+
+export interface TeamDefinition {
+  name: string
+  kind: string
+  members: TeamMember[]
+  speaker: string
+  moderator: string | null
+  manual_order: string[]
+  max_turns: number
+  max_rounds: number
+  instructions: string | null
+}
+
+export interface StudioTeam extends TeamDefinition {
+  registered: boolean
+  updated_at: string
+}
+
+export interface TeamLedgerTask {
+  id: number
+  description: string
+  owner: string | null
+  status: string
+  result: string
+}
+
+export interface TeamRun {
+  team: string
+  kind: string
+  output: string
+  rounds: number
+  transcript: { speaker: string; text: string }[]
+  ledger: { facts: string[]; plan: string[]; tasks: TeamLedgerTask[] } | null
+}
+
 export interface AuditEntry {
   id: number
   seq: number
@@ -294,6 +334,26 @@ export const api = {
 
   usage: () => request<Usage>("/usage"),
   teams: () => request<{ teams: Team[] }>("/teams"),
+
+  studioTeams: () =>
+    request<{ teams: StudioTeam[]; kinds: string[]; speakers: string[] }>("/studio/teams"),
+  saveStudioTeam: (body: TeamDefinition) =>
+    request<{ name: string; created: boolean }>("/studio/teams", json("POST", body)),
+  deleteStudioTeam: (name: string) =>
+    request<{ name: string; removed: boolean }>(`/studio/teams/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+  studioTeamCode: (name: string) =>
+    request<{ name: string; code: string }>(
+      `/studio/teams/${encodeURIComponent(name)}/code`,
+    ),
+  activateStudioTeam: (name: string) =>
+    request<{ name: string; registered: boolean; tool: string }>(
+      `/studio/teams/${encodeURIComponent(name)}/activate`,
+      { method: "POST" },
+    ),
+  runStudioTeam: (name: string, prompt: string) =>
+    request<TeamRun>(`/studio/teams/${encodeURIComponent(name)}/run`, json("POST", { prompt })),
   audit: () => request<{ entries: AuditEntry[] }>("/audit"),
   verifyAudit: () => request<{ ok: boolean }>("/audit/verify"),
 

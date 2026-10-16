@@ -64,6 +64,7 @@ export const NAV: Record<Section, NavGroup[]> = {
         { slug: "planning", label: "Planning & Graphs" },
         { slug: "teams", label: "Multi-Agent Teams" },
         { slug: "group-chat", label: "Group Chat & Teams" },
+        { slug: "studio", label: "Studio (Team Builder)" },
         { slug: "routing", label: "Model Routing & Cost" },
         { slug: "multi-provider", label: "Multiple Model Providers" },
         { slug: "multimodal", label: "Multimodal & Voice" },

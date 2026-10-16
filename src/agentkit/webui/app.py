@@ -35,6 +35,7 @@ from agentkit.webui import (
     openai_api,
     scheduler_api,
     soul_api,
+    studio_api,
     workflows_api,
 )
 from agentkit.webui.auth import install_auth, install_rate_limit
@@ -148,6 +149,7 @@ def build_webui_app(
         artifacts_api,
         learning_api,
         data_api,
+        studio_api,
     ):
         app.include_router(module.router, prefix="/api")
     app.include_router(openai_api.router)

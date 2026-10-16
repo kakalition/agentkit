@@ -17,6 +17,7 @@ from agentkit.db.repositories.learning import LearningRunRepo
 from agentkit.db.repositories.memory import MemoryRepo, OwnerProfileRepo
 from agentkit.db.repositories.ratelimit import RateWindowRepo
 from agentkit.db.repositories.scheduling import ScheduledJobRepo
+from agentkit.db.repositories.team_specs import TeamSpecRepo
 from agentkit.db.repositories.usage import AuditRepo, UsageRepo
 from agentkit.db.repositories.webhooks import WebhookDeliveryRepo, WebhookRepo
 
@@ -42,6 +43,7 @@ class Repositories:
         self.messages = MessageRepo(self.session, self.owner_id)
         self.a2a = A2ATaskRepo(self.session, self.owner_id)
         self.schedules = ScheduledJobRepo(self.session, self.owner_id)
+        self.team_specs = TeamSpecRepo(self.session, self.owner_id)
         self.usage = UsageRepo(self.session, self.owner_id)
         self.audit = AuditRepo(self.session, self.owner_id)
         self.memories = MemoryRepo(self.session, self.owner_id)
