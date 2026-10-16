@@ -19,8 +19,31 @@ def _runtime():
 
 
 @app.command("migrate")
-def migrate() -> None:
-    """Create missing tables and reconcile schema drift (non-destructive)."""
+def migrate(
+    kind: str | None = typer.Argument(
+        None, help="Import a hub (openclaw). Omit to migrate the DB schema."
+    ),
+    source: Path | None = typer.Argument(
+        None, exists=True, file_okay=False, help="The hub directory to import."
+    ),
+    target: Path | None = typer.Option(None, "--target", help="Agent home (default: settings)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Report without writing anything."),
+) -> None:
+    """Migrate the DB schema, or import a hub (``agentkit migrate openclaw <dir>``)."""
+    if kind == "openclaw":
+        if source is None:
+            typer.echo("migrate openclaw needs a source directory", err=True)
+            raise typer.Exit(code=2)
+        from agentkit.config import get_settings
+        from agentkit.migrate import migrate_openclaw
+
+        resolved = target or get_settings().home
+        typer.echo(migrate_openclaw(source, target=resolved, dry_run=dry_run).render())
+        return
+    if kind is not None:
+        typer.echo(f"unknown migration source {kind!r}; only 'openclaw' is supported", err=True)
+        raise typer.Exit(code=2)
+
     from agentkit.db.migrations import init_db
 
     runtime = _runtime()

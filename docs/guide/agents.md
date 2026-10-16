@@ -108,6 +108,18 @@ agent.orchestrate({
 agent.orchestrate([(notes_agent, "handle_notes", "Manage notes.")])
 ```
 
+### `.team(name, *, speaker=None, max_turns=12)`
+
+Attach a namespaced `team_<name>(prompt)` tool that runs a
+[registered team](/guide/group-chat). Register the roster first:
+
+```python
+from agentkit import register_team
+
+register_team("squad", {"researcher": researcher, "writer": writer})
+agent.team("squad")
+```
+
 ## Capability bundles
 
 These add a tool or instructions and are the fastest way to give an agent a skill.
@@ -171,6 +183,17 @@ calls). See [Human-in-the-Loop](/guide/hitl).
 
 Attaches a `ToolPolicy` that denies tools not in its allow-list at execution time.
 See [Safety](/guide/safety).
+
+### `.posture(name, *, profile=None)`, `.specialized()`, `.free()`
+
+Select a [posture](/guide/posture) — the default layer set for `full(...)`.
+`hybrid` is the default; an explicit argument to `full(...)` always wins.
+
+```python
+Agent.make("support").specialized().full()
+Agent.make("scout").free().full()
+Agent.make("x").posture("free").full()
+```
 
 ## Native toolkits and self-learning
 

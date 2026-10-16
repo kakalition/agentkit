@@ -103,7 +103,12 @@ this is a swappable [driver](/guide/drivers).
 | `local` (default) | a subprocess of the current Python interpreter | your own machine, quick utility code | nothing |
 | `docker` | inside a fresh container | running untrusted code safely | the `docker` extra + a running Docker daemon |
 | `jupyter` | a Jupyter kernel | notebook-style, stateful exploration | the `jupyter` extra |
-| `e2b` | a hosted cloud sandbox | zero local setup, strong isolation | the `e2b` extra + an API key |
+| `e2b` | a hosted cloud sandbox (supports `hibernate()`/`wake()`) | zero local setup, strong isolation | the `e2b` extra + an API key |
+| `ssh` | a remote host over SSH | a machine you already run | the `ssh` extra + `SSH_HOST` |
+| `modal` | a Modal sandbox (hibernating) | serverless GPU/data work | the `modal` extra |
+| `daytona` | a Daytona sandbox (hibernating) | ephemeral dev environments | the `daytona` extra |
+| `vercel` | a Vercel Sandbox | edge/JS-adjacent workloads | the `vercel` extra |
+| `singularity` | a Singularity/Apptainer container | HPC clusters | `singularity` on `PATH` |
 
 ```bash
 CODE_EXECUTOR_DRIVER=local      # default

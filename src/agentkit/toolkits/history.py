@@ -22,6 +22,36 @@ async def _owned_conversation(repos: Any, conversation_id: str) -> Any | None:
     return conversation
 
 
+def _index_for(ctx: RunContext[Deps]) -> Any:
+    """The configured search index (falls back to a bounded scan)."""
+    extras = getattr(ctx.deps, "extras", None) or {}
+    app = extras.get("app")
+    if app is not None:
+        try:
+            return app.manager("search").driver()
+        except Exception:  # pragma: no cover - defensive
+            pass
+    from agentkit.search import ScanSearchIndex
+
+    return ScanSearchIndex()
+
+
+async def _search(ctx: RunContext[Deps], query: str, limit: int) -> str:
+    repos = repos_of(ctx)
+    if repos is None:
+        return "ERROR: no repositories"
+    needle = (query or "").strip()
+    if not needle:
+        return "ERROR: empty query"
+    cap = max(1, min(int(limit), MAX_LIMIT))
+    hits = await _index_for(ctx).search(repos, needle, limit=cap)
+    if not hits:
+        return "(no matches)"
+    return json.dumps(
+        [{"conversation_id": hit.conversation_id, "text": hit.text} for hit in hits], default=str
+    )
+
+
 def attach_history(agent: Any, *, flag: str = "history_tools_enabled") -> Any:
     """Register the history tools on a built PydanticAI agent (idempotent)."""
     if getattr(agent, "_agentkit_history_attached", False):
@@ -54,33 +84,23 @@ def attach_history(agent: Any, *, flag: str = "history_tools_enabled") -> Any:
 
     @agent.tool
     async def search_history(ctx: RunContext[Deps], query: str, limit: int = 10) -> str:
-        """Search past conversation messages for a substring.
+        """Search past conversation messages (indexed full-text search).
 
         Args:
-            query: The text to look for (case-insensitive).
+            query: The text to look for.
+            limit: Maximum matches to return (capped at 100).
         """
-        from agentkit.session import deserialize_messages
+        return await _search(ctx, query, limit)
 
-        repos = repos_of(ctx)
-        if repos is None:
-            return "ERROR: no repositories"
-        needle = (query or "").strip().lower()
-        if not needle:
-            return "ERROR: empty query"
-        hits: list[dict[str, Any]] = []
-        conversations = await repos.conversations.list(limit=50)
-        for conversation in conversations:
-            rows = await repos.messages.list(conversation.id, limit=200)
-            for payload in deserialize_messages([row.payload for row in rows]):
-                for part in getattr(payload, "parts", []):
-                    content = getattr(part, "content", None)
-                    if isinstance(content, str) and needle in content.lower():
-                        hits.append(
-                            {"conversation_id": conversation.id, "text": content[:400]}
-                        )
-                    if len(hits) >= max(1, min(int(limit), MAX_LIMIT)):
-                        return json.dumps(hits, default=str)
-        return json.dumps(hits, default=str) if hits else "(no matches)"
+    @agent.tool
+    async def search_sessions(ctx: RunContext[Deps], query: str, limit: int = 10) -> str:
+        """Alias for ``search_history``: search across past conversations.
+
+        Args:
+            query: The text to look for.
+            limit: Maximum matches to return (capped at 100).
+        """
+        return await _search(ctx, query, limit)
 
     @agent.tool
     async def read_conversation(ctx: RunContext[Deps], id: str, limit: int = 20) -> str:

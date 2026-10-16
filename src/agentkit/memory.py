@@ -57,6 +57,16 @@ def _enabled(deps: Any) -> bool:
     return bool(getattr(settings, "memory_enabled", True))
 
 
+def _ephemeral(deps: Any) -> bool:
+    """Whether this turn is a temporary (non-persisting) conversation."""
+    return bool(getattr(deps, "extras", {}).get("ephemeral"))
+
+
+def _writable(deps: Any) -> bool:
+    """Memory writes are suppressed in ephemeral conversations."""
+    return _enabled(deps) and not _ephemeral(deps)
+
+
 def _profile_line(profile: Any) -> str | None:
     if profile is None:
         return None
@@ -112,7 +122,7 @@ def attach_memory(agent: Agent[Any, Any]) -> Agent[Any, Any]:
             kind: One of fact, preference, person, date, episodic, procedural.
         """
         store = _store(ctx.deps)
-        if store is None or not _enabled(ctx.deps):
+        if store is None or not _writable(ctx.deps):
             return "memory is unavailable"
         try:
             row = await store.add(fact, kind=kind)
@@ -129,7 +139,7 @@ def attach_memory(agent: Agent[Any, Any]) -> Agent[Any, Any]:
             note: An optional detail about them.
         """
         store = _store(ctx.deps)
-        if store is None or not _enabled(ctx.deps):
+        if store is None or not _writable(ctx.deps):
             return "memory is unavailable"
         content = f"{name} — {note}" if note else name
         row = await store.add(content, kind="person")
@@ -156,7 +166,7 @@ def attach_memory(agent: Agent[Any, Any]) -> Agent[Any, Any]:
     async def forget_memory(ctx: RunContext[Any], memory_id: int) -> str:
         """Delete a remembered fact by its id."""
         store = _store(ctx.deps)
-        if store is None or not _enabled(ctx.deps):
+        if store is None or not _writable(ctx.deps):
             return "memory is unavailable"
         return "forgotten" if await store.forget(memory_id) else "no such memory"
 
@@ -171,7 +181,7 @@ def attach_memory(agent: Agent[Any, Any]) -> Agent[Any, Any]:
     ) -> str:
         """Update the owner's profile (only the fields you pass are changed)."""
         store = _profile_store(ctx.deps)
-        if store is None or not _enabled(ctx.deps):
+        if store is None or not _writable(ctx.deps):
             return "profile is unavailable"
         fields: dict[str, Any] = {}
         for key, value in (

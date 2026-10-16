@@ -34,6 +34,71 @@ from agentkit.memory import attach_memory
 from agentkit.orchestrator import make_delegate
 from agentkit.soul import compose_instructions, load_soul
 
+# Historical ``.full()`` layer defaults, used when no posture or explicit arg
+# overrides a toggle. Keeping these here (not in the signature) lets a posture
+# supply the default while preserving the historical behavior exactly.
+_FULL_DEFAULTS: dict[str, bool] = {
+    "persona": True,
+    "memory": True,
+    "skills": True,
+    "hitl": True,
+    "safety": True,
+    "native": True,
+    "learning": True,
+    "todos": True,
+    "code": False,
+}
+
+
+def _snake_case(name: str) -> str:
+    """``NoteAssistant`` -> ``note_assistant`` (used for default agent names)."""
+    out: list[str] = []
+    for index, char in enumerate(name):
+        if char.isupper() and index and not name[index - 1].isupper():
+            out.append("_")
+        out.append(char.lower())
+    return "".join(out).strip("_")
+
+
+class AgentDefinition:
+    """Base class for convention-discovered agents under ``app/Agents/``.
+
+    Subclasses declare ``name`` (default: the class name in snake_case), may set
+    ``posture``/``description``, and implement :meth:`define` to configure the
+    builder. :class:`~agentkit.foundation.discovery` builds and registers every
+    subclass automatically, so no manual ``app.agent(...)`` call is needed::
+
+        class Assistant(AgentDefinition):
+            name = "assistant"
+            posture = "hybrid"
+
+            def define(self, agent):
+                return agent.instructions("...").memory().full()
+
+    Subclasses must be instantiable with no arguments.
+    """
+
+    name: str = ""
+    description: str | None = None
+    posture: str | None = None
+
+    def define(self, agent: Agent) -> Agent:
+        """Configure and return the builder (override in subclasses)."""
+        return agent
+
+    @classmethod
+    def to_builder(cls, *, settings: Any = None, events: Any = None) -> Agent:
+        """Build the :class:`Agent` builder for this definition."""
+        builder = Agent.make(
+            cls.name or _snake_case(cls.__name__),
+            settings=settings,
+            events=events,
+            description=cls.description,
+        )
+        if cls.posture:
+            builder.posture(cls.posture)
+        return cls().define(builder)
+
 
 class Agent:
     """A fluent builder that assembles a :class:`pydantic_ai.Agent`."""
@@ -95,6 +160,8 @@ class Agent:
         self._learning_requested = False
         self._todos_requested = False
         self._code_requested = False
+        self._posture: Any = None
+        self._posture_name: str | None = None
 
     # -- construction ---------------------------------------------------
     @classmethod
@@ -324,6 +391,17 @@ class Agent:
         self._handoff_requested = True
         return self
 
+    def team(self, name: str, *, speaker: Any = None, max_turns: int = 12) -> Agent:
+        """Attach a namespaced tool that runs a registered team (see ``agentkit.teams``).
+
+        The tool is named ``team_<name>``; register the team first with
+        ``agentkit.teams.register_team``.
+        """
+        from agentkit.teams import team_tool
+
+        self.tool(team_tool(name, speaker=speaker, max_turns=max_turns))
+        return self
+
     # -- native toolkits + self-learning ---------------------------------
     def database(self, models: Mapping[str, Any] | None = None) -> Agent:
         """Expose allow-listed models as CRUD tools (read + approval-gated write).
@@ -412,21 +490,50 @@ class Agent:
         self._code_requested = enabled
         return self
 
+    # -- posture --------------------------------------------------------
+    def posture(self, name: Any = None, *, profile: Any = None) -> Agent:
+        """Select a posture (``specialized`` | ``hybrid`` | ``free``).
+
+        The posture supplies the default layers for :meth:`full`; an explicit
+        ``profile`` (a :class:`~agentkit.posture.PostureProfile`) wins over
+        ``name``. Composes fluently: ``Agent.make("x").free().full()``.
+        """
+        from agentkit.posture import resolve_posture
+
+        if profile is None:
+            profile = resolve_posture(name if name is not None else "hybrid")
+        self._posture = profile
+        self._posture_name = str(profile.name) if profile is not None else None
+        return self
+
+    def specialized(self) -> Agent:
+        """Use the closed ``specialized`` posture (egress-free, approval-gated)."""
+        return self.posture("specialized")
+
+    def free(self) -> Agent:
+        """Use the open ``free`` posture (autonomous generalist)."""
+        return self.posture("free")
+
+    @property
+    def posture_name(self) -> str | None:
+        """The selected posture name, or ``None`` when no posture was set."""
+        return self._posture_name
+
     def full(
         self,
         *,
-        persona: bool = True,
-        memory: bool = True,
-        skills: bool = True,
+        persona: bool | None = None,
+        memory: bool | None = None,
+        skills: bool | None = None,
         knowledge: Any = None,
-        hitl: bool = True,
-        safety: bool = True,
+        hitl: bool | None = None,
+        safety: bool | None = None,
         workspace: Any = None,
         subagents: Any = None,
-        native: bool = True,
-        learning: bool = True,
-        todos: bool = True,
-        code: bool = False,
+        native: bool | None = None,
+        learning: bool | None = None,
+        todos: bool | None = None,
+        code: bool | None = None,
         models: Mapping[str, Any] | None = None,
         tasks: Iterable[str] | None = None,
         jobs: Mapping[str, Any] | None = None,
@@ -434,56 +541,106 @@ class Agent:
     ) -> Agent:
         """Expand to the full agent capability stack (each layer toggleable, idempotent).
 
-        Respects settings flags (``memory_enabled``, ``skills_enabled``,
-        ``approvals_enabled``) so a disabled layer is silently skipped, and never
-        double-registers a layer when called more than once.
+        Omitted layer toggles fall back to the selected :class:`~agentkit.posture.Posture`
+        (``.specialized()`` / ``.free()`` / ``.posture(...)``), then to the
+        historical defaults. Precedence: explicit argument > builder method >
+        posture > ``agent_posture`` setting. Settings flags remain a hard gate
+        (``memory_enabled``, ``skills_enabled``, ``approvals_enabled``): a disabled
+        layer stays disabled. Calling ``full()`` more than once never
+        double-registers a layer.
         """
         resolved = settings or self._settings
+        profile = self._resolve_profile(resolved)
+
+        def layer(key: str, explicit: bool | None) -> bool:
+            if explicit is not None:
+                return explicit
+            if profile is not None:
+                return profile.layer(key, _FULL_DEFAULTS[key])
+            return _FULL_DEFAULTS[key]
 
         def enabled(flag: str, default: bool = True) -> bool:
             return bool(getattr(resolved, flag, default)) if resolved is not None else default
 
-        if persona and "persona" not in self._full_layers:
+        self._apply_preamble(profile)
+
+        if layer("persona", persona) and "persona" not in self._full_layers:
             self.persona()
             self._full_layers.add("persona")
-        if memory and enabled("memory_enabled") and "memory" not in self._full_layers:
+        if layer("memory", memory) and enabled("memory_enabled") and "memory" not in self._full_layers:
             self.memory()
             self._full_layers.add("memory")
-        if skills and enabled("skills_enabled") and "skills" not in self._full_layers:
+        if layer("skills", skills) and enabled("skills_enabled") and "skills" not in self._full_layers:
             self.skills()
             self._full_layers.add("skills")
         if knowledge is not None and "knowledge" not in self._full_layers:
             self.knowledge(knowledge)
             self._full_layers.add("knowledge")
-        if hitl and enabled("approvals_enabled") and "hitl" not in self._full_layers:
+        if layer("hitl", hitl) and enabled("approvals_enabled") and "hitl" not in self._full_layers:
             self.approvals()
             self.clarify()
             self._full_layers.add("hitl")
-        if safety and "safety" not in self._full_layers:
+        if layer("safety", safety) and "safety" not in self._full_layers:
             from agentkit.policy import default_policy
 
-            self.policy(default_policy())
+            self.policy(profile.policy_factory() if profile is not None else default_policy())
             self._full_layers.add("safety")
-        if workspace is not None and "workspace" not in self._full_layers:
-            self.workspace(workspace)
+        target_workspace = workspace
+        if (
+            target_workspace is None
+            and profile is not None
+            and profile.layer("workspace", False)
+            and "workspace" not in self._full_layers
+        ):
+            target_workspace = self._default_workspace(resolved)
+        if target_workspace is not None and "workspace" not in self._full_layers:
+            self.workspace(target_workspace)
             self._full_layers.add("workspace")
         if subagents is not None:
             self.handoff_to(subagents)
-        elif enabled("subagents_enabled", False):
+        elif (profile is not None and profile.layer("subagents", False)) or enabled(
+            "subagents_enabled", False
+        ):
             self._handoff_requested = True
-        if native and "native" not in self._full_layers:
+        if profile is not None and profile.egress and "egress" not in self._full_layers:
+            self.web_search()
+            self.web_fetch()
+            self._full_layers.add("egress")
+        if layer("native", native) and "native" not in self._full_layers:
             self.native(models=models, tasks=tasks, jobs=jobs)
             self._full_layers.add("native")
-        if learning and enabled("learning_enabled") and "learning" not in self._full_layers:
+        if layer("learning", learning) and enabled("learning_enabled") and "learning" not in self._full_layers:
             self.learning()
             self._full_layers.add("learning")
-        if todos and "todos" not in self._full_layers:
+        if layer("todos", todos) and "todos" not in self._full_layers:
             self.todos()
             self._full_layers.add("todos")
-        if code and "code" not in self._full_layers:
+        if layer("code", code) and "code" not in self._full_layers:
             self.code_execution()
             self._full_layers.add("code")
         return self
+
+    def _resolve_profile(self, settings: Any) -> Any:
+        """The posture profile for this build (builder selection, else settings)."""
+        if self._posture is not None:
+            return self._posture
+        name = getattr(settings, "agent_posture", None) if settings is not None else None
+        if name is None:
+            return None
+        from agentkit.posture import resolve_posture
+
+        return resolve_posture(name)
+
+    def _apply_preamble(self, profile: Any) -> None:
+        """Prepend the posture preamble once (idempotent)."""
+        if profile is None or not profile.preamble or "posture" in self._full_layers:
+            return
+        self._instruction_parts.insert(0, profile.preamble)
+        self._full_layers.add("posture")
+
+    def _default_workspace(self, settings: Any) -> Any:
+        home = getattr(settings, "home", None)
+        return home / "workspace" if home is not None else None
 
     def capability(self, capability: Any) -> Agent:
         self._capabilities.append(capability)
@@ -622,6 +779,7 @@ class Agent:
         self._attach_learning(built, resolved_settings)
         self._attach_tasks(built)
         self._attach_code(built)
+        self._attach_artifacts(built, resolved_settings)
         self._built = built
         return built
 
@@ -781,6 +939,15 @@ class Agent:
         from agentkit.executors import attach_code_executor
 
         attach_code_executor(agent)
+
+    def _attach_artifacts(self, agent: PydanticAgent[Any, Any], settings: Any) -> None:
+        if settings is None:
+            return
+        if int(getattr(settings, "tool_output_offload_threshold", 0) or 0) <= 0:
+            return
+        from agentkit.offload import attach_artifacts
+
+        attach_artifacts(agent, getattr(settings, "artifacts_dir", "."))
 
     def _attach_workspace(self, agent: PydanticAgent[Any, Any]) -> None:
         if not self._workspace_requested:

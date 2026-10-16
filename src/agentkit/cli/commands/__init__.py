@@ -18,6 +18,8 @@ from agentkit.cli.commands import (
     runtime,
     schedule,
     skills,
+    surfaces,
+    training,
     webhooks,
     workspace,
 )
@@ -38,6 +40,8 @@ __all__ = [
     "runtime",
     "schedule",
     "skills",
+    "surfaces",
+    "training",
     "webhooks",
     "workspace",
 ]

@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from agentkit.posture import Posture
 from agentkit.support.kinds import (
     AgentMiddlewareDriver,
     AudioDriver,
@@ -45,6 +46,8 @@ from agentkit.support.kinds import (
     RerankerDriver,
     RetrieverDriver,
     SchedulerDriver,
+    SearchDriver,
+    SpeakerDriver,
     StorageDriver,
     TaskDriver,
     VaultDriver,
@@ -91,6 +94,10 @@ class AgentSettings(BaseSettings):
     # persona
     soul_file: str | None = None  # path to SOUL.md (default: <agent_home>/SOUL.md)
 
+    # posture — the opinionated default layer set for ``.full()``. ``hybrid``
+    # reproduces the historical behavior, so this is safe to leave at the default.
+    agent_posture: Posture = Posture.HYBRID
+
     # memory — durable facts about the owner (name, preferences, …) the agent can
     # save and recall across conversations. Recall is semantic by default.
     memory_enabled: bool = True
@@ -109,12 +116,18 @@ class AgentSettings(BaseSettings):
     memory_recall_half_life_days: float = 30.0
     # consolidation
     memory_consolidate_duplicate_threshold: float = 0.92
+    # memory nudges — every N turns, propose review-gated memories (0 = off).
+    memory_nudge_every: int = 0
 
     # skills — discoverable ``SKILL.md`` folders the agent can load on demand.
     # ``skills_dir`` overrides the default roots (project ``./skills`` and
     # ``<agent_home>/skills``).
     skills_enabled: bool = True
     skills_dir: str | None = None
+
+    # tool-output offload — when > 0, tool returns larger than this many tokens are
+    # written to <agent_home>/artifacts/offload/ and previewed in history (0 = off).
+    tool_output_offload_threshold: int = 0
 
     # native tools — first-class, agent-callable toolkits (see ``agentkit.toolkits``).
     # Each is opt-out: reachable capabilities stay deny-by-default (empty
@@ -220,6 +233,7 @@ class AgentSettings(BaseSettings):
     database_driver: DatabaseDriver = DatabaseDriver.SQLITE
     queue_driver: QueueDriverKind = QueueDriverKind.DATABASE
     scheduler_driver: SchedulerDriver = SchedulerDriver.DBOS
+    search_driver: SearchDriver = SearchDriver.FTS
     storage_driver: StorageDriver = StorageDriver.LOCAL
     rate_limit_driver: RateLimitDriver = RateLimitDriver.DATABASE
     durability_driver: DurabilityDriver = DurabilityDriver.DBOS
@@ -230,6 +244,7 @@ class AgentSettings(BaseSettings):
     retriever_driver: RetrieverDriver = RetrieverDriver.REPOSITORY
     reranker_driver: RerankerDriver = RerankerDriver.IDENTITY
     comms_driver: CommsDriver = CommsDriver.MAILBOX
+    speaker_driver: SpeakerDriver = SpeakerDriver.ROUND_ROBIN
     tasks_driver: TaskDriver = TaskDriver.MEMORY
     planning_driver: PlanningDriver = PlanningDriver.SINGLE
     context_driver: ContextDriver = ContextDriver.ISOLATED
@@ -239,6 +254,24 @@ class AgentSettings(BaseSettings):
     evals_reporter_driver: EvalsReporterDriver = EvalsReporterDriver.TEXT
     channel_driver: ChannelDriver = ChannelDriver.LOG
     notification_channel_driver: NotificationChannelDriver = NotificationChannelDriver.LOG
+
+    # chat channels — extra gateways + DM pairing
+    mattermost_webhook_url: str | None = None
+    mattermost_base_url: str | None = None
+    mattermost_token: str | None = None
+    linear_api_key: str | None = None
+    webhook_url: str | None = None
+    channel_pairing_enabled: bool = False
+
+    # remote code execution (optional drivers)
+    ssh_host: str | None = None
+    singularity_image: str = "python:3.12-slim"
+
+    # S3 filesystem (``storage_driver=s3``; needs the ``s3`` extra)
+    s3_bucket: str | None = None
+    s3_prefix: str = ""
+    s3_region: str | None = None
+    s3_endpoint_url: str | None = None
 
     # storage — agents live under ``workspace_root``; ``agent_home`` defaults to
     # ``workspace_root/<agent_name>`` and can be overridden with ``AGENT_HOME``.

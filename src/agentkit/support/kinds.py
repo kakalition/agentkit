@@ -53,6 +53,8 @@ __all__ = [
     "RerankerDriver",
     "RetrieverDriver",
     "SchedulerDriver",
+    "SearchDriver",
+    "SpeakerDriver",
     "StorageDriver",
     "TaskDriver",
     "VaultDriver",
@@ -93,6 +95,8 @@ class DriverKind(StrEnum):
     RERANKER = "reranker"
     RETRIEVER = "retriever"
     SCHEDULER = "scheduler"
+    SEARCH = "search"
+    SPEAKER = "speaker"
     STORAGE = "storage"
     TASKS = "tasks"
     VAULT = "vault"
@@ -144,6 +148,7 @@ class RerankerDriver(StrEnum):
 class StorageDriver(StrEnum):
     LOCAL = "local"
     MEMORY = "memory"
+    S3 = "s3"
 
 
 class QueueDriverKind(StrEnum):
@@ -154,6 +159,19 @@ class QueueDriverKind(StrEnum):
 class SchedulerDriver(StrEnum):
     DBOS = "dbos"
     MEMORY = "memory"
+
+
+class SearchDriver(StrEnum):
+    FTS = "fts"
+    SCAN = "scan"
+
+
+class SpeakerDriver(StrEnum):
+    ROUND_ROBIN = "round_robin"
+    MODERATOR = "moderator"
+    ALL = "all"
+    SELECTOR = "selector"
+    MANUAL = "manual"
 
 
 class DurabilityDriver(StrEnum):
@@ -267,6 +285,11 @@ class CodeExecDriver(StrEnum):
     DOCKER = "docker"
     JUPYTER = "jupyter"
     E2B = "e2b"
+    SSH = "ssh"
+    MODAL = "modal"
+    DAYTONA = "daytona"
+    VERCEL = "vercel"
+    SINGULARITY = "singularity"
 
 
 class EvalsReporterDriver(StrEnum):
@@ -281,6 +304,9 @@ class ChannelDriver(StrEnum):
     SLACK = "slack"
     EMAIL = "email"
     DISCORD = "discord"
+    MATTERMOST = "mattermost"
+    LINEAR = "linear"
+    WEBHOOK = "webhook"
 
 
 class NotificationChannelDriver(StrEnum):

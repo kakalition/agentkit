@@ -68,6 +68,17 @@ slack = [
 discord = [
     "discord-py>=2.4,<3",
 ]
+# code-execution backends (optional drivers)
+jupyter = ["jupyter-client>=8.6"]
+e2b = ["e2b-code-interpreter>=1.0"]
+ssh = ["paramiko>=3.4"]
+modal = ["modal>=0.64"]
+daytona = ["daytona>=0.20"]
+vercel = ["vercel>=0.3"]
+# remote filesystem
+s3 = ["boto3>=1.35"]
+# interactive terminal UI
+tui = ["textual>=0.80"]
 
 [project.scripts]
 agentkit = "agentkit.cli:main"

@@ -75,12 +75,19 @@ async def sync_missing_columns(engine: AsyncEngine, metadata: Any = None) -> lis
         return await connection.run_sync(apply_missing_columns, meta)
 
 
+def _ensure_fts(connection: Connection) -> bool:
+    from agentkit.db.fts import ensure_fts
+
+    return ensure_fts(connection)
+
+
 async def init_db(engine: AsyncEngine, metadata: Any = None) -> None:
-    """Create all tables (first-run convenience), then reconcile drift."""
+    """Create all tables (first-run convenience), then reconcile drift + FTS."""
     meta = metadata or SQLModel.metadata
     async with engine.begin() as connection:
         await connection.run_sync(meta.create_all)
         await connection.run_sync(apply_missing_columns, meta)
+        await connection.run_sync(_ensure_fts)
 
 
 def make_alembic_config(root: str | Path, *, database_url: str | None = None) -> Any:

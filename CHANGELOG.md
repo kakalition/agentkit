@@ -7,6 +7,74 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased] — full-stack agent
 
 ### Added
+- **Postures** (`agentkit.posture`): one runtime, three opinionated default
+  profiles — `specialized` (closed, egress-free, approval-gated), `hybrid`
+  (today's `.full()`, the default) and `free` (autonomous generalist). Selected
+  with `Agent.make(...).posture()/.specialized()/.free()`, `App.posture(...)`,
+  or the `agent_posture` setting. `.full()` reads the profile when an explicit
+  arg is omitted; precedence is explicit arg > builder method > posture >
+  settings flag, and a disabled settings flag still vetoes. Adds
+  `specialized_policy()`/`free_policy()` and reports the active posture in
+  `inspect`/`/api/info`; `agentkit new --posture` scaffolds it. Docs:
+  `/guide/posture`.
+- **Laravel front door** (`agentkit.foundation.discovery`): `Application` is the
+  canonical container (with `App` kept as an alias) and
+  `Application.configure(...).withProviders(...).withConfig(...).create()` is the
+  fluent entry point. Providers under `app/Providers/`, agents under
+  `app/Agents/`, channels under `app/Channels/`, commands under
+  `app/Console/Commands/`, config under `config/` and the `Repositories` subclass
+  under `app/Repositories/` are discovered at boot; explicit declarations win.
+  Class-based agents (`AgentDefinition`) register themselves — no
+  `app.agent(...)` call. The generated project boots from a ~4-line
+  `bootstrap.py`. `make:agent` now emits a discoverable `AgentDefinition` under
+  `app/Agents/` (and `make:policy` was added).
+- **Context & memory parity** (WS1): ephemeral conversations
+  (`ChatRunner(persist=False)`, `App.run/stream(ephemeral=True)`, `tinker
+  --ephemeral`) that write no rows and suppress memory writes; tool-output
+  **offload** to `<agent_home>/artifacts/offload/` with a `read_artifact` tool
+  and `tool_output_offload_threshold`; **indexed cross-session search**
+  (`agentkit.search`, `DriverKind.SEARCH`, `fts`/`scan`, SQLite FTS5 +
+  `MessageRepo.search_text`, tools `search_history`/`search_sessions`,
+  `GET /api/search` and a web UI Search page); **memory nudges**
+  (`agentkit.nudges`, `memory_nudge_every`, review-gated via
+  `propose_memories`); and **context telemetry**
+  (`cache_read_tokens`/`context_tokens`/`context_window` in `ChatResult.usage`).
+
+- **Multi-agent parity** (WS2): a `SpeakerStrategy` contract + `SpeakerDriver`
+  (`round_robin`/`moderator`/`all`/`selector`/`manual`, `speaker_driver`); a real
+  `GroupChatRunner` turn loop (shared transcript, max-turns/terminator/consensus,
+  `agent.message` events) that `GroupChatTopology` delegates to; a manager-led
+  `MagenticTeam` with a `TeamLedger` (facts/plan/tasks, replan-on-stall); and
+  named team presets (`register_team`/`TEAMS`/`build_team`, `Agent.team("name")`
+  attaching a namespaced `team_<name>` tool). Docs: `/guide/group-chat`.
+
+- **Execution backends** (WS3): real `jupyter` and `e2b` code-execution drivers plus
+  new optional drivers `ssh`, `modal`, `daytona`, `vercel`, and `singularity`, each
+  import-guarded (a missing extra raises `ConfigurationError` naming it) and
+  registered under `CodeExecDriver`; an optional `HibernatingExecutor` contract
+  (`hibernate()`/`wake()`) for serverless backends; and an `S3FileSystem`
+  (`storage_driver=s3`, `s3` extra) with the same root-confined surface as
+  `Filesystem`. Also fixed the code-exec manager to read `code_executor_driver`
+  (it previously resolved `codeexec_driver`, so the setting was inert). Docs:
+  `/guide/code-execution`.
+
+- **Training & migration** (WS4): `agentkit.trajectory` (`export_trajectory`,
+  `compress_messages`/`compress_content`, `iter_trajectories`, `render_jsonl`) with
+  `agentkit trajectory` and `agentkit generate` (batch, ephemeral) CLI commands;
+  and `agentkit.migrate.migrate_openclaw` (`agentkit migrate openclaw <dir>`) which
+  tolerantly imports config, memories, skills, schedules, and channels from a Claw
+  hub. Docs: `/guide/training`.
+
+- **Surfaces & channels** (WS5, partial): new channel drivers `mattermost`,
+  `linear`, and `webhook` (plus `PairingRegistry` DM pairing wired into
+  `Gateway.is_allowed`/`pair`/`confirm_pairing`); an `agentkit tui` terminal UI
+  (`tui` extra, lazily imported); `agentkit mcp:serve` +
+  `build_agent_mcp_server`/`serve_agent` exposing the agent as an MCP `ask` tool;
+  and natural-language scheduling (`agentkit.scheduling_nl.parse_when` + the
+  approval-gated `schedule_natural` tool). Docs: `/guide/surfaces`. Studio MVP and
+  channel-delivery wiring remain (see `CONTINUATION.md`).
+
+### Added (prior)
 - **Contracts + drivers substrate** (`agentkit.contracts`, `agentkit.support`):
   the Laravel-style `contract → driver → registry → extend()` shape applied across
   the framework. Contracts are runtime-checkable Protocols; `agentkit.support.Manager`

@@ -94,30 +94,32 @@ def _full_overlay() -> dict[str, str]:
     return {
         "bootstrap.py": '''"""The application entry point.
 
-``agentkit serve`` boots ``bootstrap:app``, so this is the single place your app is
-assembled: settings, the repository container, and the service providers.
-``FullStackProvider`` wires the whole stack (config sections, the daily
-``memory:consolidate`` schedule, and any configured channels).
+``agentkit serve`` boots ``bootstrap:app``. The app is assembled by convention:
+providers in ``app/Providers/``, agents in ``app/Agents/``, channels in
+``app/Channels/`` and commands in ``app/Console/Commands/`` are discovered
+automatically. ``FullStackProvider`` wires the whole stack (config sections, the
+daily ``memory:consolidate`` schedule, and any configured channels).
 """
 
 from __future__ import annotations
 
-from agentkit import App, FullStackProvider
+from pathlib import Path
+
+from agentkit import Application, FullStackProvider
 
 from app.config import Settings
-from app.Providers.AppServiceProvider import AppServiceProvider
-from app.Providers.DriverServiceProvider import DriverServiceProvider
-from app.Providers.EventServiceProvider import EventServiceProvider
-from app.Repositories import AppRepositories
 
-app = App(name="{{project}}", settings=Settings, repos_factory=AppRepositories)
-app.providers([EventServiceProvider, AppServiceProvider, DriverServiceProvider, FullStackProvider])
+app = (
+    Application.configure(settings=Settings, base_path=Path(__file__).parent)
+    .withProviders([FullStackProvider])
+    .create()
+)
 ''',
-        "app/Agents/assistant.py": '''"""The agent, built declaratively with ``Agent.make(...).full()``."""
+        "app/Agents/assistant.py": '''"""The agent, defined as a discoverable class (``Agent.make(...).full()``)."""
 
 from __future__ import annotations
 
-from agentkit import Agent
+from agentkit import Agent, AgentDefinition
 
 from app.Policies.AssistantPolicy import assistant_policy
 from app.Tools.notes import add_note, current_time, list_notes
@@ -129,25 +131,29 @@ INSTRUCTIONS = (
 )
 
 
-def build_assistant() -> Agent:
-    return (
-        Agent.make("{{project}}")
-        .instructions(INSTRUCTIONS)
-        .tool(current_time)
-        .tool(add_note)
-        .tool(list_notes)
-        # Native toolkits are opt-in per capability; allow-lists stay empty by default.
-        # .database({"note": Note})            # expose allow-listed models to the agent
-        # .scheduler(["sync_notes"])           # expose allow-listed tasks
-        # .queue()                             # enqueue allow-listed jobs/tasks
-        .learning()                            # reflect -> learn -> apply (review-gated)
-        # The whole agent stack: persona + memory + skills + HITL + safety + todos
-        # (each layer skipped when its settings flag disables it).
-        .full()
-        # .code_execution()                    # opt in to the approval-gated run_code tool
-        .policy(assistant_policy())
-        .output(str)
-    )
+class Assistant(AgentDefinition):
+    name = "{{project}}"
+    posture = "hybrid"
+
+    def define(self, agent: Agent) -> Agent:
+        return (
+            agent
+            .instructions(INSTRUCTIONS)
+            .tool(current_time)
+            .tool(add_note)
+            .tool(list_notes)
+            # Native toolkits are opt-in per capability; allow-lists stay empty by default.
+            # .database({"note": Note})          # expose allow-listed models to the agent
+            # .scheduler(["sync_notes"])         # expose allow-listed tasks
+            # .queue()                           # enqueue allow-listed jobs/tasks
+            .learning()                          # reflect -> learn -> apply (review-gated)
+            # The whole agent stack: persona + memory + skills + HITL + safety + todos
+            # (each layer skipped when its settings flag disables it).
+            .full()
+            # .code_execution()                  # opt in to the approval-gated run_code tool
+            .policy(assistant_policy())
+            .output(str)
+        )
 ''',
         "app/Console/Kernel.py": '''"""The console kernel: the schedule and the command list.
 
@@ -245,11 +251,11 @@ config = {"enabled": True, "reflect_cron": "0 4 * * *"}
 
 
 def _assistant_template(instructions: str, traits: str) -> str:
-    return f'''"""The agent, built declaratively with ``Agent.make(...).full()``."""
+    return f'''"""The agent, defined as a discoverable class."""
 
 from __future__ import annotations
 
-from agentkit import Agent
+from agentkit import Agent, AgentDefinition
 
 from app.Policies.AssistantPolicy import assistant_policy
 from app.Tools.notes import add_note, current_time, list_notes
@@ -259,19 +265,23 @@ INSTRUCTIONS = (
 )
 
 
-def build_assistant() -> Agent:
-    return (
-        Agent.make("{{{{project}}}}")
-        .instructions(INSTRUCTIONS)
-        .tool(current_time)
-        .tool(add_note)
-        .tool(list_notes)
+class Assistant(AgentDefinition):
+    name = "{{{{project}}}}"
+    posture = "hybrid"
+
+    def define(self, agent: Agent) -> Agent:
+        return (
+            agent
+            .instructions(INSTRUCTIONS)
+            .tool(current_time)
+            .tool(add_note)
+            .tool(list_notes)
 {traits}
-        .learning()
-        .full()
-        .policy(assistant_policy())
-        .output(str)
-    )
+            .learning()
+            .full()
+            .policy(assistant_policy())
+            .output(str)
+        )
 '''
 
 
@@ -280,7 +290,7 @@ _PRESETS: dict[str, dict[str, str]] = {
         "app/Agents/assistant.py": _assistant_template(
             "You are {{project}}, a calm support agent. Acknowledge the issue, "
             "answer from indexed knowledge, and escalate with a clear summary when unsure.",
-            "        .knowledge()  # search the knowledge base before answering\n",
+            "            .knowledge()  # search the knowledge base before answering\n",
         ),
         "evals/support.json": (
             "{\n"
@@ -296,7 +306,7 @@ _PRESETS: dict[str, dict[str, str]] = {
         "app/Agents/assistant.py": _assistant_template(
             "You are {{project}}, a research assistant. Gather sources, cite them, "
             "and prefer precise, well-structured summaries over speculation.",
-            "        .knowledge()  # search the knowledge base before answering\n",
+            "            .knowledge()  # search the knowledge base before answering\n",
         ),
         "evals/research.json": (
             "{\n"
@@ -312,7 +322,7 @@ _PRESETS: dict[str, dict[str, str]] = {
             "You are {{project}}, an operations agent. Diagnose from tools and audit "
             "trails, propose safe remediations, and never take destructive actions "
             "without approval.",
-            "        # .database(...) / .scheduler([...])  # opt in to allow-listed ops\n",
+            "            # .database(...) / .scheduler([...])  # opt in to allow-listed ops\n",
         ),
         "evals/ops.json": (
             "{\n"
@@ -344,13 +354,15 @@ def scaffold_project(
     force: bool = False,
     full: bool = True,
     preset: str | None = None,
+    posture: str | None = None,
 ) -> Path:
     """Write the skeleton for ``name`` into ``directory/name`` and return the path.
 
     ``full=True`` (the default) writes the full-stack project; ``full=False`` writes
     the minimal skeleton. ``preset`` overlays a composed blueprint
-    (``support`` | ``research`` | ``ops``). Refuses to write into a non-empty target
-    unless ``force=True``.
+    (``support`` | ``research`` | ``ops``). ``posture`` wires the generated agent's
+    ``.posture("<name>").full()`` (``specialized`` | ``hybrid`` | ``free``). Refuses
+    to write into a non-empty target unless ``force=True``.
     """
     package = package_name(name)
     target = Path(directory).expanduser() / name
@@ -360,6 +372,17 @@ def scaffold_project(
     files = dict(FULL_FILES if full else MINIMAL_FILES)
     if preset is not None:
         files.update(preset_files(preset))
+    if posture is not None:
+        from agentkit.posture import resolve_posture
+
+        resolve_posture(posture)  # validate the posture name
+        agent_file = "app/Agents/assistant.py"
+        if agent_file in files:
+            files[agent_file] = (
+                files[agent_file]
+                .replace('posture = "hybrid"', f'posture = "{posture}"')
+                .replace(".full()", f'.posture("{posture}").full()')
+            )
     replacements = {
         "{{project}}": name,
         "{{package}}": "app",  # Laravel-style flat `app/` package

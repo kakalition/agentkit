@@ -77,10 +77,10 @@ agentkit serve            # web UI + scheduler on http://127.0.0.1:8787
 ## Layout
 
 ```
-bootstrap.py                     # App(...) — the boot target
+bootstrap.py                     # Application.configure(...) — the boot target
 app/
   config.py                      # Settings + a layered config Section
-  Agents/assistant.py            # the agent builder (persona, tools, policy)
+  Agents/assistant.py            # the agent (a discoverable AgentDefinition class)
   Console/Kernel.py              # schedule() + commands()
   Console/Commands/PinNote.py    # a CLI command
   Events/NoteSaved.py            # an event payload
@@ -178,21 +178,21 @@ and load a skill when it is relevant.
 """,
         "bootstrap.py": '''"""The application entry point.
 
-``agentkit serve`` boots ``bootstrap:app``, so this is the single place your app is
-assembled: settings, the repository container, and the service providers.
+``agentkit serve`` boots ``bootstrap:app``. The app is assembled by convention:
+providers in ``app/Providers/``, agents in ``app/Agents/``, channels in
+``app/Channels/`` and commands in ``app/Console/Commands/`` are discovered
+automatically. Add explicit declarations with ``.withProviders(...)``.
 """
 
 from __future__ import annotations
 
-from agentkit import App
+from pathlib import Path
+
+from agentkit import Application
 
 from app.config import Settings
-from app.Providers.AppServiceProvider import AppServiceProvider
-from app.Providers.EventServiceProvider import EventServiceProvider
-from app.Repositories import AppRepositories
 
-app = App(name="{{project}}", settings=Settings, repos_factory=AppRepositories)
-app.providers([EventServiceProvider, AppServiceProvider])
+app = Application.configure(settings=Settings, base_path=Path(__file__).parent).create()
 ''',
         "app/__init__.py": '''"""The application: agents, tools, providers, models, and everything else."""
 ''',
@@ -224,8 +224,9 @@ class AppSection(Section):
 ''',
         "app/Providers/AppServiceProvider.py": '''"""The application service provider (mandatory).
 
-Bind the agent, config, middleware, commands, and schedule here. ``register`` is
-for declarations (no side effects); ``boot`` is for effects.
+Bind config, middleware, and the schedule here. ``register`` is for declarations
+(no side effects); ``boot`` is for effects. Agents under ``app/Agents/`` and
+commands under ``app/Console/Commands/`` are registered by convention.
 """
 
 from __future__ import annotations
@@ -234,7 +235,6 @@ from typing import Any
 
 from agentkit import Provider
 
-from app.Agents.assistant import build_assistant
 from app.config import AppSection
 from app.Console.Kernel import Kernel
 from app.Middleware.Timing import Timing
@@ -243,9 +243,7 @@ from app.Middleware.Timing import Timing
 class AppServiceProvider(Provider):
     def register(self, app: Any) -> None:
         app.config("app", AppSection)
-        app.agent(build_assistant())
         app.middleware(Timing())
-        app.commands(Kernel().commands())
         Kernel().schedule(app)
 
     def boot(self, app: Any) -> None:
@@ -409,11 +407,16 @@ class NoteService(Service):
         # -- Agents & tools ----------------------------------------------------
         "app/Agents/__init__.py": '''"""Agent builders."""
 ''',
-        "app/Agents/assistant.py": '''"""The agent, built declaratively with ``Agent.make(...)``."""
+        "app/Agents/assistant.py": '''"""The agent, defined as a discoverable class.
+
+Any :class:`~agentkit.AgentDefinition` subclass under ``app/Agents/`` is built and
+registered automatically — no ``app.agent(...)`` call is needed. ``posture``
+selects the default layer profile for ``.full()``.
+"""
 
 from __future__ import annotations
 
-from agentkit import Agent
+from agentkit import Agent, AgentDefinition
 
 from app.Policies.AssistantPolicy import assistant_policy
 from app.Tools.notes import add_note, current_time, list_notes
@@ -425,19 +428,23 @@ INSTRUCTIONS = (
 )
 
 
-def build_assistant() -> Agent:
-    return (
-        Agent.make("{{project}}")
-        .persona()                       # reads <AGENT_HOME>/SOUL.md
-        .instructions(INSTRUCTIONS)
-        .memory()                        # remember / recall / forget tools
-        .skills()                        # discover skills/*/SKILL.md
-        .tool(current_time)
-        .tool(add_note)
-        .tool(list_notes)
-        .policy(assistant_policy())      # safety policy
-        .output(str)
-    )
+class Assistant(AgentDefinition):
+    name = "{{project}}"
+    posture = "hybrid"
+
+    def define(self, agent: Agent) -> Agent:
+        return (
+            agent
+            .persona()                       # reads <AGENT_HOME>/SOUL.md
+            .instructions(INSTRUCTIONS)
+            .memory()                        # remember / recall / forget tools
+            .skills()                        # discover skills/*/SKILL.md
+            .tool(current_time)
+            .tool(add_note)
+            .tool(list_notes)
+            .policy(assistant_policy())      # safety policy
+            .output(str)
+        )
 ''',
         "app/Tools/__init__.py": '''"""Tool functions — how your agent acts."""
 ''',

@@ -145,12 +145,14 @@ class ChatRunner:
         conversation_id: str = "cli:default",
         max_history: int = DEFAULT_MAX_HISTORY,
         history_processor: Any = None,
+        persist: bool = True,
     ) -> None:
         self.deps = deps
         self.agent = agent
         self.conversation_id = conversation_id
         self.max_history = max_history
         self.history_processor = history_processor
+        self.persist = persist
         # Make the conversation id available to tools (e.g. to deliver later).
         self.deps.extras["conversation_id"] = conversation_id
 
@@ -215,8 +217,12 @@ class ChatRunner:
     async def _begin(self, text: Any) -> tuple[Any, str, list[ModelMessage]]:
         repos = self.deps.repos
         channel = self.conversation_id.split(":", 1)[0]
-        await repos.conversations.get_or_create(self.conversation_id, channel=channel)
-        history = await load_history(repos, self.conversation_id, max_messages=self.max_history)
+        self.deps.extras["ephemeral"] = not self.persist
+        if self.persist:
+            await repos.conversations.get_or_create(self.conversation_id, channel=channel)
+            history = await load_history(repos, self.conversation_id, max_messages=self.max_history)
+        else:
+            history = []
         if self.history_processor is not None:
             if _accepts_conversation(self.history_processor):
                 processed = self.history_processor(history, conversation_id=self.conversation_id)
@@ -244,9 +250,15 @@ class ChatRunner:
         output: Any,
         run_usage: Any,
     ) -> ChatResult:
-        await save_new_messages(repos, self.conversation_id, all_messages, start_index=len(history))
-        await repos.conversations.touch(self.conversation_id)
-        usage = await self._record_usage(repos, run_usage)
+        if self.persist:
+            self._offload_large_outputs(all_messages)
+            await save_new_messages(
+                repos, self.conversation_id, all_messages, start_index=len(history)
+            )
+            await repos.conversations.touch(self.conversation_id)
+            usage = await self._record_usage(repos, run_usage)
+        else:
+            usage = self._usage_totals(run_usage)
         artifacts = list(self.deps.artifacts)
         try:
             from agentkit.multimodal import collect_artifacts
@@ -284,31 +296,70 @@ class ChatRunner:
         except Exception:  # pragma: no cover - defensive
             return None
 
-    async def _record_usage(self, repos: Any, run_usage: Any) -> dict[str, Any] | None:
-        """Record token usage + estimated cost if the repos expose a usage store."""
-        store = getattr(repos, "usage", None)
-        if store is None or run_usage is None:
+    def _offload_large_outputs(self, all_messages: list[ModelMessage]) -> None:
+        """Move over-threshold tool returns to disk (see :mod:`agentkit.offload`)."""
+        settings = self.deps.settings
+        threshold = int(getattr(settings, "tool_output_offload_threshold", 0) or 0)
+        if threshold <= 0:
+            return
+        from agentkit.offload import offload_messages
+
+        offload_messages(
+            all_messages,
+            root=getattr(settings, "artifacts_dir", "."),
+            conversation_id=self.conversation_id,
+            threshold_tokens=threshold,
+        )
+
+    def _usage_totals(self, run_usage: Any) -> dict[str, Any] | None:
+        """Token/cost/context telemetry for a run (no persistence)."""
+        if run_usage is None:
             return None
         from agentkit.pricing import usage_cost
 
         model_name = self.deps.settings.model_name if self.deps.settings else ""
+        input_tokens = int(getattr(run_usage, "request_tokens", 0) or 0)
         totals: dict[str, Any] = {
             "requests": int(getattr(run_usage, "requests", 0) or 0),
-            "input_tokens": int(getattr(run_usage, "request_tokens", 0) or 0),
+            "input_tokens": input_tokens,
             "output_tokens": int(getattr(run_usage, "response_tokens", 0) or 0),
             "total_tokens": int(getattr(run_usage, "total_tokens", 0) or 0),
+            "cache_read_tokens": int(getattr(run_usage, "cache_read_tokens", 0) or 0),
+            "context_tokens": input_tokens,
+            "context_window": self._context_window(),
         }
-        cost = usage_cost(run_usage, model_name)
-        totals["cost_usd"] = cost
+        totals["cost_usd"] = usage_cost(run_usage, model_name)
+        return totals
+
+    def _context_window(self) -> int | None:
+        """Best-effort model context window (``None`` when unknown)."""
+        try:
+            profile = getattr(self.deps.model, "profile", None)
+            return int(getattr(profile, "max_input_tokens", 0) or 0) or None
+        except Exception:  # pragma: no cover - defensive
+            return None
+
+    async def _record_usage(self, repos: Any, run_usage: Any) -> dict[str, Any] | None:
+        """Record token usage + estimated cost if the repos expose a usage store."""
+        store = getattr(repos, "usage", None)
+        totals = self._usage_totals(run_usage)
+        if totals is None:
+            return None
         from agentkit import metrics
 
-        metrics.record_cost(cost)
+        metrics.record_cost(totals["cost_usd"])
+        if store is None:
+            return totals
+        model_name = self.deps.settings.model_name if self.deps.settings else ""
         await store.add(
             conversation_id=self.conversation_id,
             kind="turn",
             model=model_name,
-            cost_usd=cost,
-            **{key: totals[key] for key in ("requests", "input_tokens", "output_tokens", "total_tokens")},
+            cost_usd=totals["cost_usd"],
+            **{
+                key: totals[key]
+                for key in ("requests", "input_tokens", "output_tokens", "total_tokens")
+            },
         )
         return totals
 

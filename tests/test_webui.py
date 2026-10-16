@@ -65,6 +65,14 @@ def client(tmp_path):
     return TestClient(app)
 
 
+def test_search_endpoint(client):
+    resp = client.get("/api/search", params={"q": "hello"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["query"] == "hello"
+    assert data["hits"] and data["hits"][0]["conversation_id"] == "webui:default"
+
+
 def test_info_and_health(client):
     info = client.get("/api/info").json()
     assert info["name"] == "tester"

@@ -13,13 +13,15 @@ current interpreter — it is not a security boundary. Use ``docker``/``jupyter`
 from __future__ import annotations
 
 import asyncio
+import shlex
+import shutil
 import sys
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic_ai import RunContext
 
-from agentkit.contracts.codeexec import CodeExecutor
+from agentkit.contracts.codeexec import CodeExecutor, HibernatingExecutor
 from agentkit.errors import ConfigurationError, InvalidInput
 from agentkit.support import register_driver
 from agentkit.support.kinds import CodeExecDriver, DriverKind
@@ -28,11 +30,17 @@ from agentkit.support.manager import Manager
 __all__ = [
     "CodeExecManager",
     "CodeExecutor",
+    "DaytonaExecutor",
     "DockerExecutor",
     "E2BExecutor",
     "ExecResult",
+    "HibernatingExecutor",
     "JupyterExecutor",
     "LocalSubprocessExecutor",
+    "ModalExecutor",
+    "SingularityExecutor",
+    "SSHExecutor",
+    "VercelExecutor",
     "attach_code_executor",
 ]
 
@@ -123,26 +131,268 @@ class DockerExecutor:
         return ExecResult(stdout=result.decode("utf-8", errors="replace"))
 
 
-class JupyterExecutor:
+class _Hibernating:
+    """No-op ``hibernate``/``wake`` defaults for serverless-capable backends."""
+
+    async def hibernate(self) -> None:
+        return None
+
+    async def wake(self) -> None:
+        return None
+
+
+class JupyterExecutor(_Hibernating):
     """Run code in a Jupyter kernel (needs the ``jupyter`` extra)."""
 
-    async def run(self, code: str, **options: Any) -> ExecResult:  # pragma: no cover - optional
+    def __init__(self, *, kernel_name: str = "python3", default_timeout: float = 30.0) -> None:
+        self.kernel_name = kernel_name
+        self.default_timeout = default_timeout
+
+    async def run(
+        self, code: str, *, language: str = "python", timeout: float | None = None, **options: Any
+    ) -> ExecResult:
+        if language not in {"python", "py"}:
+            raise InvalidInput(f"unsupported language {language!r}; only python is supported")
         try:
-            import jupyter_client  # noqa: F401
+            import jupyter_client
         except ImportError as exc:
             raise _missing_extra("jupyter") from exc
-        raise ConfigurationError("the jupyter executor is not implemented yet")
+        limit = float(timeout if timeout is not None else self.default_timeout)
+        return await asyncio.to_thread(self._run_sync, jupyter_client, code, limit)
 
-
-class E2BExecutor:
-    """Run code on E2B (needs the ``e2b`` extra)."""
-
-    async def run(self, code: str, **options: Any) -> ExecResult:  # pragma: no cover - optional
+    def _run_sync(self, jupyter_client: Any, code: str, timeout: float) -> ExecResult:  # pragma: no cover
+        manager = jupyter_client.KernelManager(kernel_name=self.kernel_name)
+        manager.start_kernel()
+        client = manager.client()
+        client.start_channels()
         try:
-            import e2b  # noqa: F401
+            client.wait_for_ready(timeout=timeout)
+            msg_id = client.execute(code)
+            out: list[str] = []
+            err: list[str] = []
+            error: str | None = None
+            while True:
+                message = client.get_iopub_msg(timeout=timeout)
+                if message.get("parent_header", {}).get("msg_id") != msg_id:
+                    continue
+                kind = message["header"]["msg_type"]
+                content = message["content"]
+                if kind == "stream":
+                    (out if content.get("name") == "stdout" else err).append(content.get("text", ""))
+                elif kind == "error":
+                    error = "\n".join(content.get("traceback", [])) or str(content.get("evalue", ""))
+                elif kind == "status" and content.get("execution_state") == "idle":
+                    break
+            return ExecResult(
+                stdout="".join(out), stderr=error or "".join(err), exit_code=1 if error else 0
+            )
+        finally:
+            client.stop_channels()
+            manager.shutdown_kernel(now=True)
+
+
+class E2BExecutor(_Hibernating):
+    """Run code on E2B (needs the ``e2b`` extra); supports hibernate/wake."""
+
+    def __init__(self, *, api_key: str | None = None, sandbox: Any = None) -> None:
+        self.api_key = api_key
+        self._sandbox = sandbox
+
+    async def run(
+        self, code: str, *, language: str = "python", timeout: float | None = None, **options: Any
+    ) -> ExecResult:
+        if language not in {"python", "py"}:
+            raise InvalidInput(f"unsupported language {language!r}; only python is supported")
+        try:
+            from e2b_code_interpreter import Sandbox
         except ImportError as exc:
             raise _missing_extra("e2b") from exc
-        raise ConfigurationError("the e2b executor is not implemented yet")
+        return await asyncio.to_thread(self._run_sync, Sandbox, code)
+
+    def _run_sync(self, sandbox_cls: Any, code: str) -> ExecResult:  # pragma: no cover - needs e2b
+        if self._sandbox is None:
+            self._sandbox = sandbox_cls(api_key=self.api_key) if self.api_key else sandbox_cls()
+        execution = self._sandbox.run_code(code)
+        logs = execution.logs
+        return ExecResult(
+            stdout="\n".join(getattr(logs, "stdout", []) or []),
+            stderr="\n".join(getattr(logs, "stderr", []) or []),
+            exit_code=1 if getattr(execution, "error", None) else 0,
+        )
+
+    async def hibernate(self) -> None:  # pragma: no cover - needs e2b
+        if self._sandbox is not None and hasattr(self._sandbox, "pause"):
+            await asyncio.to_thread(self._sandbox.pause)
+
+    async def wake(self) -> None:  # pragma: no cover - needs e2b
+        try:
+            from e2b_code_interpreter import Sandbox
+        except ImportError as exc:
+            raise _missing_extra("e2b") from exc
+        if self._sandbox is not None and hasattr(self._sandbox, "connect"):
+            self._sandbox = await asyncio.to_thread(Sandbox.connect, self._sandbox.sandbox_id)
+
+
+class SSHExecutor(_Hibernating):
+    """Run code on a remote host over SSH (needs the ``ssh`` extra: paramiko)."""
+
+    def __init__(
+        self,
+        host: str | None = None,
+        *,
+        user: str | None = None,
+        key_filename: str | None = None,
+        port: int = 22,
+        default_timeout: float = 30.0,
+    ) -> None:
+        self.host = host
+        self.user = user
+        self.key_filename = key_filename
+        self.port = port
+        self.default_timeout = default_timeout
+
+    async def run(
+        self, code: str, *, language: str = "python", timeout: float | None = None, **options: Any
+    ) -> ExecResult:
+        if language not in {"python", "py"}:
+            raise InvalidInput(f"unsupported language {language!r}; only python is supported")
+        try:
+            import paramiko
+        except ImportError as exc:
+            raise _missing_extra("ssh") from exc
+        host = options.get("host") or self.host
+        if not host:
+            raise ConfigurationError("SSHExecutor needs a host (pass host= or SSHExecutor(host))")
+        limit = float(timeout if timeout is not None else self.default_timeout)
+        return await asyncio.to_thread(self._run_sync, paramiko, host, code, limit)
+
+    def _run_sync(self, paramiko: Any, host: str, code: str, timeout: float) -> ExecResult:  # pragma: no cover
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            host, port=self.port, username=self.user, key_filename=self.key_filename, timeout=timeout
+        )
+        try:
+            _, stdout, stderr = client.exec_command(f"python3 -c {shlex.quote(code)}", timeout=timeout)
+            out = stdout.read().decode("utf-8", "replace")
+            err = stderr.read().decode("utf-8", "replace")
+            exit_code = stdout.channel.recv_exit_status()
+        finally:
+            client.close()
+        return ExecResult(stdout=out, stderr=err, exit_code=int(exit_code))
+
+
+class ModalExecutor(_Hibernating):
+    """Run code in a Modal sandbox (needs the ``modal`` extra)."""
+
+    async def run(
+        self, code: str, *, language: str = "python", timeout: float | None = None, **options: Any
+    ) -> ExecResult:
+        if language not in {"python", "py"}:
+            raise InvalidInput(f"unsupported language {language!r}; only python is supported")
+        try:
+            import modal
+        except ImportError as exc:
+            raise _missing_extra("modal") from exc
+        return await asyncio.to_thread(self._run_sync, modal, code)
+
+    def _run_sync(self, modal: Any, code: str) -> ExecResult:  # pragma: no cover - needs modal
+        app = modal.App.lookup("agentkit-exec", create_if_missing=True)
+        sandbox = modal.Sandbox.create(app=app, image=modal.Image.debian_slim())
+        try:
+            process = sandbox.exec("python", "-c", code)
+            return ExecResult(
+                stdout=process.stdout.read(),
+                stderr=process.stderr.read(),
+                exit_code=int(process.wait() or 0),
+            )
+        finally:
+            sandbox.terminate()
+
+
+class DaytonaExecutor(_Hibernating):
+    """Run code in a Daytona sandbox (needs the ``daytona`` extra)."""
+
+    def __init__(self, *, api_key: str | None = None, image: str = "python:3.12-slim") -> None:
+        self.api_key = api_key
+        self.image = image
+
+    async def run(
+        self, code: str, *, language: str = "python", timeout: float | None = None, **options: Any
+    ) -> ExecResult:
+        if language not in {"python", "py"}:
+            raise InvalidInput(f"unsupported language {language!r}; only python is supported")
+        try:
+            from daytona import Daytona
+        except ImportError as exc:
+            raise _missing_extra("daytona") from exc
+        return await asyncio.to_thread(self._run_sync, Daytona, code)
+
+    def _run_sync(self, daytona_cls: Any, code: str) -> ExecResult:  # pragma: no cover - needs daytona
+        client = daytona_cls(api_key=self.api_key) if self.api_key else daytona_cls()
+        sandbox = client.create()
+        try:
+            response = sandbox.process.code_run(code)
+            return ExecResult(stdout=str(getattr(response, "result", response)))
+        finally:
+            client.delete(sandbox)
+
+
+class VercelExecutor(_Hibernating):
+    """Run code on Vercel Sandbox (needs the ``vercel`` extra / a configured sandbox)."""
+
+    async def run(
+        self, code: str, *, language: str = "python", timeout: float | None = None, **options: Any
+    ) -> ExecResult:
+        if language not in {"python", "py"}:
+            raise InvalidInput(f"unsupported language {language!r}; only python is supported")
+        try:
+            import vercel  # noqa: F401
+        except ImportError as exc:
+            raise _missing_extra("vercel") from exc
+        raise ConfigurationError(
+            "the vercel executor needs a configured sandbox; install the vercel SDK and "
+            "provide a sandbox via options"
+        )
+
+
+class SingularityExecutor(_Hibernating):
+    """Run code in a Singularity/Apptainer container (needs ``singularity`` on PATH)."""
+
+    def __init__(self, image: str, *, default_timeout: float = 30.0) -> None:
+        self.image = image
+        self.default_timeout = default_timeout
+
+    async def run(
+        self, code: str, *, language: str = "python", timeout: float | None = None, **options: Any
+    ) -> ExecResult:
+        if language not in {"python", "py"}:
+            raise InvalidInput(f"unsupported language {language!r}; only python is supported")
+        binary = shutil.which("singularity") or shutil.which("apptainer")
+        if binary is None:
+            raise _missing_extra("singularity")
+        proc = await asyncio.create_subprocess_exec(
+            binary,
+            "exec",
+            self.image,
+            "python3",
+            "-c",
+            code,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        limit = float(timeout if timeout is not None else self.default_timeout)
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=limit)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return ExecResult(stderr=f"timed out after {limit}s", exit_code=-1)
+        return ExecResult(
+            stdout=out.decode("utf-8", errors="replace"),
+            stderr=err.decode("utf-8", errors="replace"),
+            exit_code=int(proc.returncode or 0),
+        )
 
 
 class CodeExecManager(Manager):
@@ -150,6 +400,11 @@ class CodeExecManager(Manager):
 
     kind = DriverKind.CODEEXEC
     default_driver = CodeExecDriver.LOCAL
+
+    @property
+    def setting_name(self) -> str:
+        # The kind is ``codeexec`` but the setting is ``code_executor_driver``.
+        return "code_executor_driver"
 
 
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.LOCAL)
@@ -170,6 +425,31 @@ def _jupyter_executor_driver(app: Any) -> JupyterExecutor:
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.E2B)
 def _e2b_executor_driver(app: Any) -> E2BExecutor:
     return E2BExecutor()
+
+
+@register_driver(DriverKind.CODEEXEC, CodeExecDriver.SSH)
+def _ssh_executor_driver(app: Any) -> SSHExecutor:
+    return SSHExecutor(getattr(app.settings, "ssh_host", None))
+
+
+@register_driver(DriverKind.CODEEXEC, CodeExecDriver.MODAL)
+def _modal_executor_driver(app: Any) -> ModalExecutor:
+    return ModalExecutor()
+
+
+@register_driver(DriverKind.CODEEXEC, CodeExecDriver.DAYTONA)
+def _daytona_executor_driver(app: Any) -> DaytonaExecutor:
+    return DaytonaExecutor()
+
+
+@register_driver(DriverKind.CODEEXEC, CodeExecDriver.VERCEL)
+def _vercel_executor_driver(app: Any) -> VercelExecutor:
+    return VercelExecutor()
+
+
+@register_driver(DriverKind.CODEEXEC, CodeExecDriver.SINGULARITY)
+def _singularity_executor_driver(app: Any) -> SingularityExecutor:
+    return SingularityExecutor(getattr(app.settings, "singularity_image", "python:3.12-slim"))
 
 
 def attach_code_executor(agent: Any, *, executor: Any = None) -> Any:

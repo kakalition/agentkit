@@ -29,6 +29,8 @@ from agentkit.contracts.queue import QueueDriver
 from agentkit.contracts.rag import Chunker, Reranker, Retriever
 from agentkit.contracts.ratelimit import RateLimiterContract
 from agentkit.contracts.scheduler import SchedulerDriver
+from agentkit.contracts.search import SearchHit, SearchIndex
+from agentkit.contracts.speaker import SpeakerStrategy
 from agentkit.contracts.storage import FileSystem
 from agentkit.contracts.subagent import ContextStrategy
 from agentkit.contracts.tasks import PlanningStrategy, TaskStore
@@ -64,6 +66,9 @@ __all__ = [
     "Retriever",
     "Scanner",
     "SchedulerDriver",
+    "SearchHit",
+    "SearchIndex",
+    "SpeakerStrategy",
     "Speech",
     "Synthesizer",
     "TaskStore",

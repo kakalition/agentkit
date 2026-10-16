@@ -37,6 +37,12 @@ def test_generated_provider_names_classes(tmp_path: Path):
     exec(compile(compiled_model.read_text(), str(compiled_model), "exec"), {})
 
 
+def test_make_agent_is_discoverable(tmp_path: Path):
+    path = generate("agent", "Notes", directory=tmp_path)
+    assert path == tmp_path / "app" / "Agents" / "Notes.py"
+    assert "class Notes(AgentDefinition)" in path.read_text()
+
+
 def test_unknown_generator_raises():
     try:
         generate("nope", "x")
@@ -50,7 +56,7 @@ def test_cli_make_tool(tmp_path: Path):
     runner = CliRunner()
     result = runner.invoke(cli_app, ["make:tool", "add_note", "--path", str(tmp_path)])
     assert result.exit_code == 0, result.stdout
-    assert (tmp_path / "tools" / "add_note.py").exists()
+    assert (tmp_path / "app" / "Tools" / "add_note.py").exists()
 
     again = runner.invoke(cli_app, ["make:tool", "add_note", "--path", str(tmp_path)])
     assert again.exit_code == 1

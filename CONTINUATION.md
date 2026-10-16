@@ -1,375 +1,276 @@
-# CONTINUATION — Native Agent Tools + Self-Learning
+# CONTINUATION — Posture Duality & Gap-Fill
 
-Source-of-truth plan: `.kilo/plans/1791990000000-native-tools-and-self-learning-plan.md`
-(this file embeds the raw plan at the bottom).
+Source-of-truth plan: `.kilo/plans/1792103850196-posture-duality-and-gap-fill.md`
+(also read `.kilo/plans/1792071123307-competitive-improvement-roadmap.md`, the
+contracts+drivers roadmap this plan builds on).
 
-Branch: `main` (uncommitted work in the working tree). Do **not** commit `.kilo/` or `kilo.json` (untracked tooling).
+Branch: `main`, work in the tree (uncommitted at handoff time — see "Commit" below).
+Do **not** commit `.kilo/` or `kilo.json` (untracked tooling; they are git-ignored
+by convention, keep it that way).
 
 ---
 
-## Status at pause (2026-10-15)
+## Status at handoff (2026-10-16)
 
-Baseline at start: full `pytest` green. After the changes below:
-- `uv run pytest -q` → green (existing suite + `tests/toolkits/test_database_tools.py`, `test_scheduler_tools.py`, `test_queue_tools.py`, `test_notification_tools.py`, `test_history_tools.py`, `test_usage_tools.py`).
-- `uv run ruff check src tests` → clean (just re-sorted imports).
-- `uv run mypy src/agentkit` → clean (139 files).
-- NOT yet re-run: full `pytest` after the last new test files (they pass individually), coverage gate.
+All validation is **green** as of the last edit:
 
-Workstream order from the plan: 1 arch+settings+policy → 2 toolkits → 3 safety/config → 4 tests → 5 learning → 6 learning tests → 7 wiring/scaffold → 8 docs → 9 validation.
+| Check | Command | Result |
+| --- | --- | --- |
+| Lint | `uv run ruff check src tests` | clean |
+| Types | `uv run mypy src/agentkit` | clean (223 files) |
+| Tests | `uv run pytest --cov=agentkit --cov-report=term` | all pass, **coverage 81%** (gate ≥70%) |
+| Web build | `cd web && bun run build` | passes (bundles written to `src/agentkit/webui/static/`) |
+
+Workstreams WS0, WS-DX, WS1, WS2, WS3, WS4 are **complete**. WS5 is **mostly done**
+(see NOT DONE).
 
 ---
 
 ## DONE
 
-### A6 — Settings + policy
-- `src/agentkit/config.py`: added native-toolkit flags `db_tools_enabled`, `scheduler_tools_enabled`, `queue_tools_enabled`, `notification_tools_enabled`, `history_tools_enabled`, `usage_tools_enabled`, `knowledge_admin_enabled`, `skill_authoring_enabled` (all default **True**; safety comes from empty allow-lists + approval-gated writes). Added learning flags `learning_enabled=True`, `learning_reflect_cron="0 4 * * *"`, `learning_window=20`, `learning_skill_threshold=3`, `learning_auto_skills=False`, `learning_max_lessons=50`.
-- `src/agentkit/policy.py`: added `NATIVE_APPROVAL_TOOLS` (`db_create`, `db_update`, `db_delete`, `schedule_task`, `run_schedule_now`, `enqueue_task`, `notify`, `replace_document`, `forget_document`, `save_skill`, `update_skill`), `native_policy()`, `NATIVE_TOOLS_POLICY`; `default_policy()` now unions `DEFAULT_APPROVAL_TOOLS | NATIVE_APPROVAL_TOOLS`.
-- IMPORTANT: `ToolPolicy.require_approval` is **informational only** — `policy_hooks` enforces `deny` only. Real approval needs the tool registered with `requires_approval=True` (PydanticAI defers it) plus `approval_capability` from `Agent.approvals()`. Writes are registered with `requires_approval=True` accordingly.
+### WS0 — Posture backbone (`specialized | hybrid | free`, default `hybrid`)
+- **`src/agentkit/posture.py`** (new): `Posture`, `PostureProfile`, `POSTURES`,
+  `register_posture`, `resolve_posture`, `LAYER_KEYS`, preambles.
+- **`src/agentkit/policy.py`**: added `SPECIALIZED_DENY`, `FREE_APPROVAL_TOOLS`,
+  `specialized_policy()`, `free_policy()`.
+- **`src/agentkit/config.py`**: added `agent_posture: Posture = HYBRID`.
+- **`src/agentkit/foundation/agent.py`**: `.posture()/.specialized()/.free()`,
+  `posture_name`; `.full()` now resolves omitted layer toggles from the posture
+  profile via module-level `_FULL_DEFAULTS` (precedence: explicit arg > builder
+  method > posture > settings flag; settings flags still veto). `_resolve_profile`,
+  `_apply_preamble`, `_default_workspace` helpers. Safety uses
+  `profile.policy_factory()`; `free` also adds egress (web_search/web_fetch) and
+  workspace/subagents/code.
+- **`src/agentkit/foundation/application.py`**: `App.posture(...)`, `posture_name`,
+  seeds `deps.extras["posture"]`.
+- **`src/agentkit/webui/introspect.py`** + **`cli/commands/inspect.py`**: report
+  the active posture.
+- **`src/agentkit/foundation/scaffold/full.py`** + **`cli/commands/generators.py`**:
+  `agentkit new --posture <name>` writes `.posture("<name>").full()` and
+  `posture = "<name>"` into the generated `app/Agents/assistant.py`.
+- **Tests**: `tests/test_posture.py`. **Docs**: `docs/guide/posture.md`.
 
-### A1 — Toolkit architecture (`src/agentkit/toolkits/`)
-- `_common.py`: `app_of(ctx)` (reads `ctx.deps.extras["app"]`), `repos_of`, `settings_of`, `resolve_allow_list`, `resolve_list`, `emit_event(event, **payload)` (param is `event`, not `name`, to avoid kwarg collisions).
-- `__init__.py`: `TOOLKITS` (name → settings flag), `enabled_toolkits(settings)`, `attach_toolkit(agent, name, **opts)`, `attach_toolkits(agent, *, enabled, settings, models, tasks, jobs) -> set[str]`. Exports `RunRegisteredTask`.
-- `database.py` (`attach_database(agent, models)`): `db_list_models`, `db_describe`, `db_find`, `db_get`, `db_count` (reads) + `db_create`/`db_update`/`db_delete` (approval). Accepts `Model` **or** `Repository` subclasses; owner-scoped via `Repository`; validates fields against `model_fields`, rejects `owner_id`/unknown fields; audit + `db.*` events; limit cap 100.
-- `scheduler.py` (`attach_scheduler(agent, tasks)`): `schedule_task` (approval; cron validated with `croniter`; task restricted to allow-list), `list_schedules`, `get_schedule`, `cancel_schedule` (disable/delete), `run_schedule_now` (approval). CRUD on `ctx.deps.repos.schedules`; runs via `scheduler.invoke_task`.
-- `queue.py` (`attach_queue(agent, jobs, tasks)`): `RunRegisteredTask(Job)` (module scope, import-path serializable, `handle` awaits `scheduler.invoke_task`); `enqueue_task` (approval), `enqueue_job` (approval), `queue_status`, `list_failed_jobs`, `retry_job`. Uses `app.dispatch(...)` so `queue_enabled` semantics hold (inline when off).
-- `notifications.py` (`attach_notifications`): `notify` (approval), `notify_me`. `conversation` channel writes through the **current** repos session (avoids cross-thread SQLite write when calling the sync `Notifier` mid-loop); `log` logs; other channels go through `app.notifier.channel(...)` senders.
-- `history.py` (`attach_history`): `list_conversations`, `search_history` (bounded scan), `read_conversation` (owner-scoped via conversation owner check + `transcript`).
-- `usage.py` (`attach_usage`): `usage_summary(window)`, `audit_trail(limit)`, `verify_audit`.
-- `knowledge_admin.py` (`attach_knowledge_admin`): `index_document`, `replace_document` (approval), `forget_document` (approval), `list_documents`.
-- `skills_admin.py` (`attach_skill_authoring`): `save_skill` (approval), `update_skill` (approval); writes to first `SkillRegistry` root via shared helper, re-discovers, verifies parse.
+### WS-DX — Laravel front door
+- **`src/agentkit/foundation/application.py`**: `Application = App` alias;
+  `ApplicationBuilder` + `App.configure(...)` with
+  `withProviders/withConfig/withAgents/withChannels/withCommands/withPosture/withBasePath/create`.
+- **`src/agentkit/foundation/discovery.py`** (new): `discover_providers`,
+  `discover_agents`, `discover_channels`, `discover_commands`, `discover_config`,
+  `discover_repositories`, `CONVENTIONAL_DIRS`.
+- **`src/agentkit/foundation/agent.py`**: `AgentDefinition` base (class-based agents
+  under `app/Agents/`), `_snake_case`, `to_builder`.
+- **Scaffold rewrite**: `foundation/scaffold/minimal.py` + `full.py` now generate a
+  ~4-line fluent `bootstrap.py`, a class-based `app/Agents/assistant.py`, and rely
+  on convention discovery (no hand-listed providers, no `app.agent(...)` call).
+  **`tests/test_foundation_scaffold.py` still boots the generated project in a
+  subprocess and is green.**
+- **Generators**: `make:agent` now emits a discoverable `AgentDefinition` under
+  `app/Agents/`; paths use `app/…`; added `make:policy`; `cli/commands/generators.py`
+  + `tests/test_foundation_cli.py` updated.
+- **Exports**: `Application`, `ApplicationBuilder`, `AgentDefinition`,
+  `discover_*` in `foundation/__init__.py` and `agentkit/__init__.py`.
+- **Tests**: `tests/test_discovery.py`.
 
-### Shared skill-writing helpers
-- `src/agentkit/skills.py`: added `slugify_skill(name)`, `render_skill_file(...)` (yaml.safe_dump front matter), `write_skill_file(root, name, ...)`; exported.
+### WS1 — Context & memory parity
+- **Ephemeral conversations**: `session.ChatRunner(persist=False)` (skips
+  conversation/message/usage writes, sets `deps.extras["ephemeral"]`),
+  `App.run/stream(ephemeral=)`, `agentkit tinker --ephemeral`. Memory writes are
+  suppressed via `memory._writable`.
+- **Tool-output offload**: **`src/agentkit/offload.py`** (new) —
+  `offload_messages`, `attach_artifacts` (`read_artifact` tool), `estimate_tokens`;
+  `tool_output_offload_threshold` setting; applied in `ChatRunner._offload_large_outputs`.
+- **Indexed cross-session search**: **`src/agentkit/search.py`** (new) +
+  **`src/agentkit/contracts/search.py`** (`SearchIndex`, `SearchHit`) +
+  **`src/agentkit/db/fts.py`** (FTS5 `messages_fts` + triggers, created in
+  `db/migrations.py::init_db`); `DriverKind.SEARCH`, `SearchDriver(fts|scan)`,
+  `SearchManager`, `App.search`; `MessageRepo.search_text` (FTS5 with LIKE
+  fallback); tools `search_history` + `search_sessions` in `toolkits/history.py`;
+  `GET /api/search` in `webui/introspect.py`; web UI page
+  `web/src/routes/search.tsx` + `App.tsx`/`api.ts` wiring.
+- **Memory nudges**: **`src/agentkit/nudges.py`** (new) + `learning.propose_memories`
+  (review-gated). Setting `memory_nudge_every` (0 = off); registered in `App.boot`.
+- **Context telemetry**: `ChatRunner._usage_totals` adds `cache_read_tokens`,
+  `context_tokens`, `context_window` to `ChatResult.usage`.
+- **Exports**: `SearchIndex/SearchHit/SearchManager/FtsSearchIndex/ScanSearchIndex`,
+  `offload_messages/attach_artifacts/estimate_tokens`, `register_memory_nudges`,
+  `propose_memories`.
+- **Tests**: `tests/test_offload.py`, `tests/test_nudges.py`, `tests/test_search.py`,
+  additions in `tests/test_session.py`, `tests/test_webui.py`.
+- **Docs**: `docs/guide/search.md`.
 
-### A1 builder surface (`src/agentkit/foundation/agent.py`)
-- New methods: `.database(models)`, `.scheduler(tasks)`, `.queue(jobs)`, `.notifications()`, `.history()`, `.usage()`, `.knowledge_admin()`, `.skill_authoring()`, `.native(enabled=None, *, models, tasks, jobs)`, `.learning(enabled=True)`.
-- State: `_native_requested`, `_native_all`, `_agent_models`, `_agent_tasks`, `_agent_jobs`, `_learning_requested`.
-- `.full(...)` gained `native=True, learning=True, models, tasks, jobs` params; adds `"native"` (settings-gated via `enabled_toolkits`) and `"learning"` (only if `enabled("learning_enabled")`) layers through the existing `_full_layers` guard.
-- `build()` now calls `_attach_native(built, settings)` and `_attach_learning(built, settings)` after `_attach_workspace`.
-- Verified: `.full()` registers 43 tools, no name collisions.
+### WS2 — Multi-agent parity
+- **`src/agentkit/contracts/speaker.py`** (new): `SpeakerStrategy` Protocol.
+- **`src/agentkit/agents/speaker.py`** (new): `RoundRobinSpeaker`,
+  `ModeratorSpeaker`, `AllSpeaker`, `SelectorSpeaker`, `ManualSpeaker`,
+  `SpeakerManager`, drivers under `DriverKind.SPEAKER` / `SpeakerDriver`; setting
+  `speaker_driver`; `App.speaker`.
+- **`src/agentkit/agents/groupchat.py`** (new): `GroupChatRunner` (real turn loop,
+  shared transcript, max-turns/terminator/consensus, `agent.message` events),
+  `GroupChatResult`. `comms.GroupChatTopology.run()` delegates to it.
+- **`src/agentkit/agents/team.py`** (new): `MagenticTeam` (manager-led rounds,
+  replan-on-stall) + `TeamLedger` (facts/plan/tasks) + `TeamRunResult`.
+- **`src/agentkit/teams.py`**: `TeamSpec`, `TEAMS`, `register_team`, `resolve_team`,
+  `build_team`, `team_tool` (namespaced `team_<name>`); `Agent.team("name")`.
+- **Introspection**: `stack_view` reports `teams`; `inspect` prints them.
+- **Exports**: speakers, `GroupChatRunner`, `MagenticTeam`, `TeamLedger`, team regs.
+- **Tests**: `tests/test_multiagent.py`. **Docs**: `docs/guide/group-chat.md`.
 
-### App surface (`src/agentkit/foundation/application.py`)
-- `App.models(x)` is **overloaded**: a `Mapping` records the DB model allow-list (`_agent_models`); a callable is still an alias for `model_resolver`. Added `App.agent_tasks(tasks)` and `App.agent_jobs(jobs)`.
-- `App.deps(...)` now seeds `deps.extras["app"] = self` so toolkits see app-level allow-lists.
-- New state: `_agent_models`, `_agent_tasks`, `_agent_jobs`.
+### WS3 — Execution backends
+- **`src/agentkit/contracts/codeexec.py`**: added optional `HibernatingExecutor`
+  Protocol (kept separate so base conformance still holds).
+- **`src/agentkit/executors.py`**: real `JupyterExecutor` (jupyter_client) and
+  `E2BExecutor` (e2b, with `hibernate`/`wake`); new `SSHExecutor` (paramiko),
+  `ModalExecutor`, `DaytonaExecutor`, `VercelExecutor`, `SingularityExecutor`; all
+  import-guarded naming their extra. `CodeExecDriver` gained
+  ssh/modal/daytona/vercel/singularity. **Fixed a latent bug**: `CodeExecManager`
+  read `codeexec_driver`; now `setting_name = "code_executor_driver"`.
+- **`src/agentkit/foundation/storage.py`**: `S3FileSystem` (`StorageDriver.S3`, `s3`
+  extra), lazy boto3; `_boto()` resolved before try so a missing extra is not masked.
+- **`pyproject.toml`**: extras `jupyter`, `e2b`, `ssh`, `modal`, `daytona`,
+  `vercel`, `s3`, `tui`.
+- **Tests**: `tests/test_executors.py`. **Docs**: extended
+  `docs/guide/code-execution.md`.
 
-### Part B — Self-learning (`src/agentkit/learning.py`)
-- `LESSON_TASK = "learning:reflect"`, `LESSON_KIND = "procedural"`, `LESSON_GUIDE`.
-- `LearningSignals` (bounded, redacted ring buffer; `subscribe(dispatcher)`).
-- `reflect(repos, *, model=None, conversation_id=None, window=None, dry_run=False, settings=None, auto_skills=None, skill_threshold=None) -> dict`: idempotent per conversation+window via `learning_runs.signature`; extracts lessons/preferences/facts (model JSON extraction mirroring `Compactor._model_extract`, offline heuristic fallback); redacts PII (`redact_pii`) + secrets (`redact`) before storage; lessons → `kind="procedural"` memories, preferences → memory + merged into `OwnerProfile.preferences`, facts → memory; `_distill` (recurring lessons → skill candidates, optional SKILL.md when `learning_auto_skills`); emits `learning.lesson` / `learning.reflected`.
-- `lessons_digest(repos, *, limit=None)`: importance-ranked procedural digest.
-- `attach_learning(agent, settings=None)`: tools `learn`, `reflect`, `list_lessons`, `forget_lesson` + dynamic `@agent.instructions` injecting `lessons_digest`. Helper `_reflect_for_ctx` avoids the tool-named-`reflect` shadowing bug.
-- `register_reflect_task()` registers the durable `learning:reflect` task.
+### WS4 — Training & migration
+- **`src/agentkit/trajectory.py`** (new): `export_trajectory`, `compress_messages`,
+  `compress_content`, `iter_trajectories`, `render_jsonl`.
+- **`src/agentkit/migrate.py`** (new): `migrate_openclaw`, `MigrationReport`.
+- **CLI**: `agentkit trajectory …` and `agentkit generate …` in
+  `cli/commands/training.py`; `agentkit migrate openclaw <dir>` folded into the
+  existing DB `migrate` command in `cli/commands/ops.py`.
+- **Tests**: `tests/test_training.py`. **Docs**: `docs/guide/training.md`.
 
-### Learning storage
-- `src/agentkit/db/models.py`: `LearningRun` table (`learning_runs`).
-- `src/agentkit/db/repositories/learning.py`: `LearningRunRepo` (plain class — MUST NOT import `agentkit.foundation.*` at module level, circular). Methods `latest`, `seen`, `record`.
-- `container.py` attaches `self.learning_runs`; `repositories/__init__.py` exports `LearningRunRepo`.
+### WS5 — Surfaces & channels (partial)
+- **Channels**: `ChannelDriver` gained `mattermost`/`linear`/`webhook`;
+  **`gateways/mattermost.py`**, **`gateways/linear.py`**, **`gateways/webhook.py`**;
+  registered in `gateways/registry.py`. Settings: `mattermost_*`, `linear_api_key`,
+  `webhook_url`, `channel_pairing_enabled`.
+- **DM pairing**: **`gateways/pairing.py`** (`PairingRegistry`), wired into
+  `gateways/base.py` (`is_allowed`, `pair`, `confirm_pairing`).
+- **TUI**: **`src/agentkit/tui.py`** (`run_tui`, lazy `textual`) + `agentkit tui`
+  (`cli/commands/surfaces.py`).
+- **MCP serve**: `mcp/server.py` gained `build_agent_mcp_server`/`serve_agent`
+  (an `ask` tool) + `agentkit mcp:serve`.
+- **NL scheduling**: **`src/agentkit/scheduling_nl.py`** (`parse_when`,
+  `NaturalSchedule`) + approval-gated `schedule_natural` tool in
+  `toolkits/scheduler.py`.
+- **Exports**: `run_tui`, `build_agent_mcp_server`, `serve_agent`, `PairingRegistry`,
+  `NaturalSchedule`, `parse_when`.
+- **Tests**: `tests/test_surfaces.py`. **Docs**: `docs/guide/surfaces.md`.
 
-### C — Wiring (partial)
-- `src/agentkit/foundation/fullstack.py`: `LearningSection` (`AGENTKIT_LEARNING_`, `enabled=True`, `reflect_cron="0 4 * * *"`); `boot` calls `_register_learning` (registers + schedules `learning:reflect` when `learning_enabled`, never fatal).
-- `src/agentkit/webui/introspect.py`: `stack_view(settings, app=None)` now reports `native_tools` (enabled toolkits, flags, allow-listed models/tasks/jobs) and `learning` state.
-- `src/agentkit/webui/config_api.py`: `/api/info` passes `app=get_current_app()`.
-- `src/agentkit/cli/commands/inspect.py`: passes `app=booted`, prints native toolkits/allow-lists/learning.
-- `src/agentkit/cli/commands/learning.py`: `learning:reflect` (`--conversation`, `--window`, `--dry-run`), `learning:lessons` (`--limit`), `learning:forget <id>`; registered in `cli/commands/__init__.py`.
-- `src/agentkit/__init__.py`: exports `attach_learning`, `lessons_digest`, `reflect`, `register_reflect_task`, `LearningSignals`, `LESSON_TASK`, `attach_toolkits`, `enabled_toolkits`, `TOOLKITS`, `render_skill_file`, `slugify_skill`, `write_skill_file`, `NATIVE_TOOLS_POLICY`, `NATIVE_APPROVAL_TOOLS`, `native_policy`.
-
-### Tests written (passing)
-- `tests/toolkits/__init__.py` (empty), `test_database_tools.py`, `test_scheduler_tools.py`, `test_queue_tools.py`, `test_notification_tools.py`, `test_history_tools.py`, `test_usage_tools.py`.
-- `tests/test_fullstack.py`: updated `test_boot_registers_settings_list_flags` (now also disables learning) + added `test_learning_reflect_scheduled_and_registered`, `test_learning_disabled_skips_reflect`.
-- Test pattern used: call tools directly via `agent._function_toolset.tools[name].function` with a `SimpleNamespace(deps=deps)` context; assert `...requires_approval is True/False` for gating.
+### Cross-cutting
+- Public exports added to `src/agentkit/__init__.py` for every new name above.
+- `CHANGELOG.md` `## [Unreleased]` has an entry per workstream.
+- `README.md` front door updated (fluent `Application.configure()` + class-based
+  agent + posture). `docs/src/lib/nav.ts` gained posture/search/group-chat/training/
+  surfaces. `docs/guide/AGENTS.md` documents `.posture(...)` and `.team(...)`.
 
 ---
 
-## NOT DONE (next steps)
+## NOT DONE (next steps, in priority order)
 
-### Tests still to write
-1. `tests/toolkits/test_knowledge_admin.py` — `index_document`, `list_documents`, `replace_document`, `forget_document` (approval flags).
-2. `tests/toolkits/test_skills_admin.py` — point `deps.settings.skills_dir` at `tmp_path/"skills"`, call `save_skill`/`update_skill`, assert a valid `SKILL.md` is discovered and round-trips.
-3. `tests/toolkits/test_integration.py` — `.full()` attaches settings-enabled toolkits; `stack_view(settings, app)` reports toolkits + allow-lists.
-4. `tests/test_learning.py` — reflect extracts lessons/preferences/facts (heuristic + `FunctionModel` stub for `_model_extract`), idempotency via `learning_runs`, dedupe, PII redaction, `learning_enabled` off disables tools, `learn`/`list_lessons`/`forget_lesson` tools, skill distillation threshold (`_distill` runs before dedupe so identical lessons group), `learning:reflect` task registration + scheduling, CLI commands, `lessons_digest` in built instructions.
+1. **WS5 Studio MVP** — not started. The plan wants the web UI to drive the new
+   surfaces from `web/src/routes/`: a schedule create/edit form already exists;
+   add (a) a **context-usage chart** fed by the new `context_tokens`/
+   `context_window`/`cache_read_tokens` telemetry, (b) a **teams** view / run a team
+   from Chat (`TEAMS` is already in `stack_view`), (c) lessons approve/reject is
+   present — verify it still renders. Backend hooks: `/api/info` already includes
+   `posture`/`teams`; usage endpoint exists.
+2. **Channel delivery for scheduling** — the plan's "NL scheduling + delivery
+   (from any channel)" wants a scheduled/durable task result delivered back to the
+   originating channel. Only the scheduling half exists; no delivery target is
+   recorded on the schedule, and `scheduler.invoke_task` does not post results to a
+   channel. Decide a design (e.g. store `deliver_to` in `ScheduledJob.args` and
+   have the task wrapper call `app.notifier.channel(...)`).
+3. **Web UI ephemeral "temporary chat" toggle** — `App.run/stream(ephemeral=)` and
+   `tinker --ephemeral` exist, but `/api/chat` (`webui/app.py` `ChatBody`) does not
+   accept/pass `ephemeral`, and the Chat route has no toggle. Small, self-contained.
+4. **Posture `settings_overrides` are inert** — `PostureProfile.settings_overrides`
+   is declared and `free` sets `{}`; nothing consumes it. To make `free` auto-enable
+   `tool_output_offload_threshold` / `memory_nudge_every` (and `specialized` force
+   them off), apply overrides where the builder/app resolves settings (e.g. a
+   `model_copy(update=...)` before build) and test precedence. Do this carefully so
+   `hybrid` stays a byte-for-byte no-op.
+5. **Context-telemetry compaction event** — usage fields are added, but no
+   `compaction` `StreamEvent` is emitted when the history processor shrinks context.
+   Add a `StreamEvent` kind (and consume it in the web UI) if the context chart is to
+   show compaction.
+6. **Magentic LLM planner** — `MagenticTeam.manager` is a deterministic callable
+   hook, not an LLM planner, and there are no `write_ledger`/`read_ledger` LLM tools.
+   The plan's "plan, ledger, replan on stall" works, but the manager is not yet
+   model-driven.
+7. **Docs/web builds not re-run at handoff** — `docs/` (React Router) was not built;
+   `web/` was built once after the search page and not since (no web changes after,
+   but re-run `cd web && bun run build` if you touch `web/src`). Verify
+   `DOC_PATHS`/nav renders for the 5 new guide pages.
+8. **Optional-extra paths untested** — `jupyter`/`e2b`/`paramiko`/`modal`/`daytona`/
+   `vercel`/`boto3`/`textual` are not installed, so only the missing-extra and
+   driver-selection paths are covered. Spot-check each with its extra before claiming
+   parity.
+9. **`agentkit generate` batch CLI** — the `_read_prompts` helper and the CLI are
+   not unit-tested (trajectory export/compress are).
+10. **Version bump** — `pyproject.toml` version was not changed; decide whether this
+    release warrants one before tagging.
 
-### C — Scaffold (must keep `tests/test_foundation_scaffold.py` subprocess boot green)
-- `src/agentkit/foundation/scaffold/full.py`: add `config/learning.py` section; show `.database({...}).scheduler([...]).learning()` (commented allow-lists) in `app/Agents/assistant.py`; update README/env tables for native toolkits + learning.
-- Add any new files to `EXPECTED` in `tests/test_foundation_scaffold.py` if new scaffolding files are added.
+---
 
-### D — Docs (Laravel style: `# Title` → `## Introduction` → sections + `::: tip`/`::: warning`)
-- New `docs/guide/native-tools.md` (every toolkit, safety, allow-lists).
-- New `docs/guide/self-learning.md` (reflect→learn→apply, guardrails, CLI, scheduling).
-- Update: `agents.md`, `fullstack.md`, `memory.md`, `skills.md`, `scheduling.md`, `jobs.md`, `facades.md`.
-- `docs/.vitepress/config.mts` sidebar entries; `README.md` highlights; `CHANGELOG.md` `## [Unreleased]` Added entries.
-- Optional verify: `npm run build` in `docs/` (node_modules present).
+## Validation (run these first when you resume)
 
-### Final validation
-- `uv run ruff check src tests`
-- `uv run mypy src/agentkit`
-- `uv run pytest` (coverage gate ≥70%; was ~79.5%)
+```bash
+uv run ruff check src tests
+uv run mypy src/agentkit
+uv run pytest --cov=agentkit --cov-report=term        # expect ≥70% (currently 81%)
+cd web && bun run build                                # if web/src changed
+# docs (React Router) build, if node_modules present: (cd docs && bun run build)
+```
 
 ---
 
 ## Gotchas / decisions to remember
-- Approval is registration-based (`requires_approval=True`) + `approval_capability`; policy `require_approval` alone does nothing at runtime.
-- `db/repositories/learning.py` is a plain repo class (importing `agentkit.foundation.repository` there caused a circular import).
-- `attach_learning`'s tool named `reflect` would shadow the module function → use `_reflect_for_ctx`.
-- In `reflect`, `_distill` must run **before** `_dedupe_lessons` (merging identical lessons destroys the recurrence signal).
-- `attach_queue` needs the task allow-list too (`attach_toolkits` passes `tasks` to it) — `enqueue_task` checks it.
-- `App.models` is overloaded (Mapping = allow-list, callable = resolver).
-- `notify` (conversation channel) writes via current repos, not the sync `Notifier`, to avoid a worker-thread SQLite write while the turn's session is open.
-- `run_sync` offloads to a thread when a loop is running; don't call `asyncio.run` from async code.
+
+- **Posture precedence** lives in `Agent.full()`: explicit arg > builder method >
+  posture > settings flag; settings flags are a hard veto (AND). `hybrid` is the
+  no-op profile (`_FULL_DEFAULTS` == old defaults), asserted by
+  `test_hybrid_full_matches_unpostured_full`.
+- **Discovery runs at boot** (`ApplicationBuilder.create`), never at import; explicit
+  `with*` declarations are registered last and win. `discover_repositories` imports
+  `app/Repositories/__init__.py` (AppRepositories lives there, not in a non-underscore
+  module), so it does **not** skip `__init__`.
+- **`migrate` CLI name is shared** with DB schema migration; the hub import is folded
+  in as `agentkit migrate openclaw <dir>` (DB migrate stays `agentkit migrate`).
+- **`code_executor_driver`** is the real setting name (`CodeExecManager.setting_name`
+  override) — the kind is `codeexec`. Don't regress this.
+- **Approvals are registration-based**: `ToolPolicy.require_approval` is informational
+  only; real approval needs `requires_approval=True` (+ `approval_capability`).
+- **FTS5**: `messages_fts` (external content over `messages`, triggers) is created in
+  `init_db`; `MessageRepo.search_text` falls back to `LIKE` if FTS5 is unavailable.
+  Use `session.exec(statement)` with `.bindparams(...)` (not `execute`) to avoid
+  SQLModel's deprecation warning; the `TextClause` needs `# type: ignore[call-overload]`.
+- **Async discipline**: never `asyncio.run` from async code — use
+  `agentkit._sync.run_sync` for sync seams. SQLite single-writer: new writes go
+  through the async repos layer.
+- **`db/repositories/*` must not import `agentkit.foundation.*`** at module level
+  (circular). New repos inherit this constraint.
+- **Optional extras** are lazy-imported and raise `ConfigurationError` naming the
+  extra (`_missing_extra` in `executors.py`). Never add a hard dep to core.
+- **`web/` builds into `src/agentkit/webui/static/`** (tracked bundles): a rebuild
+  deletes old hashed assets and adds new ones — include both in the commit.
+- **Scaffold subprocess boot** (`tests/test_foundation_scaffold.py`) is the canary for
+  any scaffold/discovery change.
 
 ---
 
-# RAW PLAN (verbatim)
+## Commit
 
-# Native Agent Tools + Self-Learning — Plan
+The user asked for a commit + push at handoff. Stage source/tests/docs/bundles and
+`CONTINUATION.md`; **exclude** `.kilo/` and `kilo.json` (untracked tooling). Suggested:
 
-## Goal
+```bash
+git add -A ':!.kilo' ':!kilo.json'
+git status --short          # sanity-check nothing secret/unwanted is staged
+git commit -m "feat: posture duality + gap-fill (WS0–WS5 partial)"
+git push
+```
 
-Make **every agentkit capability first-class and agent-callable out of the box**
-(database, scheduling, queue, notifications, history, usage/audit, knowledge writes,
-skill authoring, self-learning), and add a real **self-learning mechanism** (a
-closed reflect → learn → apply loop) — both opt-in-able in one call via
-`Agent.make(...).full()` and `App(...).fullstack()`, safe by default, async-first,
-and documented Laravel-style.
-
-## Current state (audit)
-
-Agent-callable today:
-
-| Capability | Tools present |
-| --- | --- |
-| Memory | `remember`, `remember_person`, `recall`, `forget_memory`, `update_profile`, `get_profile` |
-| Knowledge | `search_knowledge` (read only) |
-| Skills | `list_skills`, `load_skill`, `read_skill_file` |
-| Workspace | `read_file`, `list_files`, `write_file`, `run_command` |
-| Peer agents | `send_to`, `ask_agent`, `broadcast`, `list_agents`, `handoff_to` |
-| HITL | `ask_user` |
-| Web/capabilities | PydanticAI `web_search`/`web_fetch`/`sandbox`/… |
-
-**Missing (not agent-callable):** database/`Model`/`Repository` CRUD, scheduler,
-queue, notifications, conversation history, usage/audit, knowledge writes, skill
-authoring, evals. **Self-learning:** none.
-
-Grounding facts: `Deps(repos, settings, model, extras, clock)`; `Repositories` has a
-`repositories: ClassVar[dict[str, type]]` of domain repos; `ToolPolicy`/
-`default_policy()` gate approvals; `scheduler.TASKS` is the named-callable registry
-(`scheduler.task`, `invoke_task`, `schedule_cron/once`, `list_jobs`, `set_enabled`,
-`remove_job`); `Queue`/`Job`/`serialize_job`; `Notifier`/`Notification`;
-`Memory(kind∈{fact,preference,person,date,episodic,procedural})`, `memory_digest`,
-`consolidate_memories`, `register_consolidate_task`; `SkillRegistry` (writeable
-`roots`) + `Skill`/front-matter; `KnowledgeRepo.add/replace/clear/search`;
-`FeedbackRepo`, `UsageRepo`, `AuditRepo`, `ConversationRepo`, `MessageRepo`;
-`Dispatcher` events; `FullStackProvider`; `Agent.full()`; `_sync.run_sync` for sync
-seams.
-
----
-
-## Part A — Native tools: everything is agent-callable
-
-### A1. Toolkit architecture
-
-New package `src/agentkit/toolkits/` — one module per capability, each exposing
-`<name>_tools(deps_source) -> list[callable]` plus an `attach_<name>(agent, …)`:
-
-- `toolkits/__init__.py` — `TOOLKITS` registry + `attach_toolkits(agent, *, enabled, models, tasks, jobs) -> set[str]`.
-- Tools read the live run context (`ctx.deps.repos`, `ctx.deps.settings`,
-  `ctx.deps.extras["app"]`) so they always see the current session/owner.
-
-Builder + app surface:
-
-- `Agent.database(models=…)`, `.scheduler(tasks=…)`, `.queue(jobs=…)`,
-  `.notifications()`, `.history()`, `.usage()`, `.knowledge_admin()`,
-  `.skill_authoring()` — each appends the toolkit's tools (idempotent).
-- `.full()` gains a `native=True` layer that attaches all toolkits whose settings
-  flags are on (see A6). A single `.native(...)` alias attaches the enabled set.
-- `App.models({...})`, `App.agent_tasks([...])`, `App.agent_jobs({...})` record the
-  allow-lists the toolkits read (so the app, not the model, decides what's reachable).
-- Introspection: `agentkit inspect` and `/api/info` list attached toolkits + the
-  exposed models/tasks/jobs.
-
-### A2. Database toolkit (`toolkits/database.py`)
-
-Agent CRUD over an explicit, owner-scoped, allow-listed set of models.
-
-- Input: `models: dict[str, type[Model] | type[Repository]]` (name → model/repo).
-  Nothing is exposed unless named.
-- Read tools (always on when the toolkit is on): `db_list_models`,
-  `db_describe(model)` (columns + types for the schema), `db_find(model, filters={},
-  limit=20)`, `db_get(model, id)`, `db_count(model, filters={})`.
-- Write tools (approval-gated): `db_create(model, values)`, `db_update(model, id,
-  values)`, `db_delete(model, id)`.
-- Safety: owner scoping via the repository; `values` validated against the SQLModel
-  schema (reject unknown fields); writes emit the `audit` entry and `db.*` events;
-  paging caps; no raw SQL; no cross-owner reads.
-
-### A3. Scheduler + queue toolkits
-
-- `toolkits/scheduler.py`: `schedule_task(name, *, cron=None, at=None, task, args={})`
-  (approval), `list_schedules`, `get_schedule`, `cancel_schedule`,
-  `run_schedule_now` (approval). Tasks restricted to the app's `agent_tasks`
-  allow-list; cron validated by `croniter`; async wrappers over `scheduler.*`.
-- `toolkits/queue.py`: `enqueue_task(task, args={}, delay=0, queue=None)` (approval),
-  `queue_status(queue=None)`, `list_failed_jobs`, `retry_job(id)`. Uses the existing
-  `Queue`/`Job` machinery with a new `RunRegisteredTask` job that invokes
-  `scheduler.invoke_task(name, args)` so one allow-list covers both.
-
-### A4. Notifications, history, usage/audit toolkits
-
-- `toolkits/notifications.py`: `notify(text, channels=["conversation"])` (approval),
-  `notify_me(text)` (to the current conversation). Built on `Notifier` (sync seam via
-  `run_sync`, already handled).
-- `toolkits/history.py`: `list_conversations(limit)`, `search_history(query)`,
-  `read_conversation(id, limit)` — owner-scoped reads.
-- `toolkits/usage.py`: `usage_summary(window="all")`, `audit_trail(limit)`,
-  `verify_audit()` — read-only.
-
-### A5. Knowledge-write + skill-authoring toolkits
-
-- `toolkits/knowledge_admin.py`: `index_document(text, source)`,
-  `replace_document(source, text)` (approval), `forget_document(source)` (approval),
-  `list_documents()`.
-- `toolkits/skills_admin.py`: `save_skill(name, description, body, allowed_tools=[])`
-  and `update_skill(name, body)` → write a valid `SKILL.md` into
-  `SkillRegistry.roots[0]` (approval), then `registry.discover(reload=True)`.
-
-### A6. Safety, policy, and config
-
-- Extend `default_policy()` / add `agentkit.policy.NATIVE_TOOLS_POLICY` requiring
-  approval for: `db_create`, `db_update`, `db_delete`, `schedule_task`,
-  `run_schedule_now`, `enqueue_task`, `notify`, `replace_document`,
-  `forget_document`, `save_skill`, `update_skill`.
-- New settings (all default-safe, `.full()`/`fullstack()` respect them):
-  `db_tools_enabled`, `scheduler_tools_enabled`, `queue_tools_enabled`,
-  `notification_tools_enabled`, `history_tools_enabled`, `usage_tools_enabled`,
-  `knowledge_admin_enabled`, `skill_authoring_enabled`.
-- Deny-by-default: no model/task/job reachable unless the app allow-lists it; writes
-  require approval; everything owner-scoped and audit-logged.
-
-### A7. Tests (Part A)
-
-`tests/toolkits/`: `test_database_tools.py` (allow-list, owner scoping, validation,
-approval flags, no cross-owner), `test_scheduler_tools.py`, `test_queue_tools.py`,
-`test_notification_tools.py`, `test_history_tools.py`, `test_usage_tools.py`,
-`test_knowledge_admin.py`, `test_skills_admin.py`; plus an integration test that
-`.full()` attaches the enabled toolkits and `inspect`/`/api/info` report them.
-
----
-
-## Part B — Self-learning mechanism
-
-New module `src/agentkit/learning.py` implementing a closed **reflect → learn →
-apply** loop, native (agent-callable) and durable (scheduled).
-
-### B1. Signals (event-driven, non-blocking)
-
-A `LearningSignals` collector subscribes to the `Dispatcher` and `FeedbackRepo`:
-`turn.end`, `agent.error`, tool failures/retries, budget exceedances, deferrals,
-compactions, and explicit user feedback/ratings; it also reads recent turns
-(`ConversationRepo`/`MessageRepo`) and the `Compactor` summary. Signals are cheap,
-bounded (ring buffer), and redacted (reuse `guardrails.redact_pii`).
-
-### B2. Reflection engine
-
-`async def reflect(repos, *, model=None, conversation_id=None, window=20, dry_run=False)`
-→ extracts **lessons** (procedural: "when X, do Y"), **preferences**, **facts**, and
-**skill candidates** from the signals with a model (mirrors `Compactor._model_extract`;
-JSON schema enforced; offline heuristic fallback). Idempotent per conversation+window
-via a `learning_runs` table (evidence + counts), so re-running is cheap.
-
-- Tool `reflect(...)` — the agent can learn immediately after a task.
-- Durable task `learning:reflect` (`scheduler.task`) registered by
-  `FullStackProvider` and scheduled (default daily, `learning_reflect_cron`).
-- CLI `agentkit learning:reflect [--conversation id] [--dry-run]`.
-
-### B3. Storage & application
-
-- Lessons stored as `Memory(kind="procedural")` (procedural already exists) with
-  `source_conversation_id`, `importance` from evidence, and dedupe via
-  `near_duplicates`/`merge`. Preferences merge into `OwnerProfile`; facts into memory.
-- **Application:** a new `lessons_digest(repos)` block (like `memory_digest` but
-  procedural/first-person guidance, capped, importance-ranked) injected into
-  instructions by `.learning()`/`.full()`, so learned behavior changes future turns.
-- **Skill distillation:** when the same lesson recurs ≥ `learning_skill_threshold`
-  times (embedding similarity), synthesize a `SKILL.md` into the skills dir
-  (reusing A5's `save_skill`); approval-gated or threshold-gated via
-  `learning_auto_skills`.
-- Events: `learning.reflected`, `learning.lesson`, `learning.skill`.
-
-### B4. Consolidation, decay, guardrails
-
-- `memory:consolidate` continues to dedupe/summarize/prune; learning feeds it and
-  adds lesson-specific decay (unused low-importance lessons fade).
-- Guardrails: `learning_enabled` flag, max lessons/window, reflection rate-limit,
-  PII redaction before storage, never learn credentials/secrets, importance decay,
-  and `--dry-run` everywhere. Learning is transparent (CLI + `/api/info` state).
-
-### B5. Tools, CLI, wiring
-
-- Tools attached by `.learning()` / `.full()`: `learn(insight, kind="lesson")`,
-  `reflect()`, `list_lessons()`, `forget_lesson(id)`.
-- CLI: `learning:reflect`, `learning:lessons`, `learning:forget`.
-- `FullStackProvider.boot` registers `learning:reflect` (schedule) when
-  `learning_enabled`; settings: `learning_enabled` (default true),
-  `learning_reflect_cron` (`0 4 * * *`), `learning_skill_threshold`,
-  `learning_auto_skills` (false), `learning_max_lessons`.
-
-### B6. Tests (Part B)
-
-`tests/test_learning.py`: reflect extracts lessons/preferences/facts (stub model),
-idempotency via `learning_runs`, dedupe/decay, PII redaction, `learning_enabled`
-off disables tools+task, `learn`/`list_lessons`/`forget_lesson` tools, skill
-distillation threshold, `learning:reflect` durable-task registration + schedule,
-CLI commands, and `lessons_digest` appearing in built instructions.
-
----
-
-## Part C — Wiring
-
-- `Agent.full()` gains `native=True` and `learning=True` layers (settings-aware),
-  both idempotent; `.full()` never double-registers (existing layer guard).
-- `FullStackProvider`: schedules `learning:reflect` alongside `memory:consolidate`;
-  fails gracefully when unconfigured.
-- Scaffold: full project shows `.database({...}).scheduler([...]).learning()`
-  (commented allow-lists) and a `config/learning.py` section; keep the generated
-  project booting (subprocess smoke test).
-- `App.models/agent_tasks/agent_jobs` recorded and surfaced by `inspect`/`/api/info`.
-
-## Part D — Docs (Laravel style)
-
-- New `docs/guide/native-tools.md` (title → `## Introduction` → sections + `::: tip`/
-  `::: warning` callouts) covering every toolkit, safety, and the allow-lists.
-- New `docs/guide/self-learning.md` (the reflect→learn→apply loop, guardrails,
-  CLI, scheduling).
-- Update `docs/guide/async.md`-adjacent guides: `agents.md` (builder methods),
-  `fullstack.md` (new layers/flags), `memory.md` (lessons), `skills.md`
-  (authoring/distillation), `scheduling.md`, `jobs.md`, `facades.md`;
-  `docs/.vitepress/config.mts` sidebar entries; README highlights + a short section;
-  CHANGELOG `Added` entries.
-
-## Workstream order
-
-1. A1 architecture + settings + policy (no behavior change) → 2. A2–A5 toolkits →
-3. A6 safety/config → 4. A7 tests → 5. B1–B5 learning → 6. B6 tests →
-7. C wiring/scaffold → 8. D docs → 9. full validation.
-
-## Risks & mitigations
-
-- **Model misuse of write tools** → allow-lists + approvals + audit + owner scoping.
-- **Self-learning drift / prompt bloat** → caps, decay, dedupe, importance ranking,
-  `learning_enabled` flag, dry-run.
-- **PII leakage into lessons** → redact before storage; never store secrets.
-- **Naming collisions** (e.g. `queue`/`schedule` tools vs. existing) → prefix tools
-  (`db_*`, `schedule_*`, `enqueue_*`, `notify*`) and check `_function_toolset` keys.
-- **Sync seams** (`Notifier`, queuing) → `_sync.run_sync`, never on the loop.
-- **Test/coverage** → keep ruff/mypy/pytest green and coverage ≥70%.
-
-## Acceptance criteria
-
-- With `Agent.make("x").full()` and `App(...).fullstack()`, an agent can natively
-  read/write allow-listed DB rows, schedule/cancel tasks, enqueue jobs, notify,
-  read history/usage/audit, write knowledge/skills, and **learn** — all owner-scoped,
-  approval-gated for writes, and audited.
-- Reflection runs durably (`learning:reflect`) and on demand (`reflect` tool/CLI);
-  lessons change future behavior via the instructions digest and can distill skills.
-- `agentkit inspect` / `/api/info` report toolkits, exposed models/tasks/jobs, and
-  learning state; docs/README/CHANGELOG updated; ruff, mypy, pytest, coverage green.
+Note: `.kilo/plans/1792103850196-posture-duality-and-gap-fill.md` (the plan this doc
+references) stays untracked by design.

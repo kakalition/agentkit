@@ -26,12 +26,31 @@ def _drivers_view(app: Any) -> dict[str, Any]:
         return {}
 
 
+def _posture_view(settings: Any, app: Any = None) -> dict[str, Any]:
+    """The active posture and the layers its profile derives."""
+    from agentkit.posture import resolve_posture
+
+    name = getattr(app, "_posture", None) or getattr(settings, "agent_posture", "hybrid")
+    try:
+        profile = resolve_posture(name)
+    except ValueError:  # pragma: no cover - defensive
+        profile = None
+    return {
+        "name": str(name),
+        "layers": dict(profile.layers) if profile is not None else {},
+        "preamble": bool(profile.preamble) if profile is not None else False,
+    }
+
+
 def stack_view(settings: Any, app: Any = None) -> dict[str, Any]:
     """A read-only summary of the enabled capability stack (".full()" observability)."""
     from agentkit.model_providers import supported_prefixes
+    from agentkit.teams import TEAMS
     from agentkit.toolkits import TOOLKITS, enabled_toolkits
 
     return {
+        "posture": _posture_view(settings, app),
+        "teams": sorted(TEAMS),
         "model_name": settings.model_name,
         "model_providers": supported_prefixes(),
         "drivers": _drivers_view(app),
@@ -217,6 +236,25 @@ async def clear_messages(
     async with repositories(ctx.runtime) as repos:
         await repos.messages.clear(conversation_id)
     return {"conversation_id": conversation_id, "cleared": True}
+
+
+@router.get("/search")
+async def search_history(
+    q: str = Query(..., min_length=1, description="The text to search for."),
+    limit: int = Query(20, ge=1, le=100),
+    ctx: WebUIContext = Depends(get_context),
+) -> dict[str, Any]:
+    """Indexed cross-session search over past messages (``search_driver``)."""
+    from agentkit.runtime import repositories
+    from agentkit.search import ScanSearchIndex
+
+    index = getattr(ctx.app, "search", None) or ScanSearchIndex()
+    async with repositories(ctx.runtime) as repos:
+        hits = await index.search(repos, q, limit=limit)
+    return {
+        "query": q,
+        "hits": [{"conversation_id": h.conversation_id, "text": h.text} for h in hits],
+    }
 
 
 @router.get("/usage")

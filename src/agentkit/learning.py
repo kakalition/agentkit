@@ -58,6 +58,7 @@ __all__ = [
     "approve_lesson",
     "attach_learning",
     "lessons_digest",
+    "propose_memories",
     "proposed_lessons",
     "reflect",
     "register_reflect_task",
@@ -414,6 +415,53 @@ async def reflect(
         facts=len(facts),
     )
     return result
+
+
+async def propose_memories(
+    repos: Any,
+    *,
+    model: Any = None,
+    conversation_id: str | None = None,
+    window: int | None = None,
+    settings: Any = None,
+) -> list[int]:
+    """Queue durable facts/preferences from a conversation for review.
+
+    Unlike :func:`reflect` (which applies facts immediately), every candidate is
+    stored ``proposed`` and only applied once approved — this is the "nudge" path
+    used by :mod:`agentkit.nudges`. Returns the ids of the proposed memories.
+    """
+    if settings is None:
+        from agentkit.config import get_settings
+
+        settings = get_settings()
+    window = int(window or getattr(settings, "learning_window", DEFAULT_WINDOW) or DEFAULT_WINDOW)
+    store = getattr(repos, "memories", None)
+    if conversation_id is None or store is None:
+        return []
+    payloads = [row.payload for row in await repos.messages.list(conversation_id, limit=window)]
+    if not payloads:
+        return []
+    from agentkit.session import deserialize_messages
+
+    extracted = await _extract(deserialize_messages(payloads), model)
+    proposed: list[int] = []
+    for fact in _redact_items(extracted.get("facts", []))[:10]:
+        row = await store.add(
+            fact, kind="fact", status="proposed", source_conversation_id=conversation_id
+        )
+        proposed.append(row.id)
+    for preference in _redact_items(extracted.get("preferences", []))[:10]:
+        row = await store.add(
+            preference,
+            kind="preference",
+            status="proposed",
+            source_conversation_id=conversation_id,
+        )
+        proposed.append(row.id)
+    if proposed:
+        await _emit("memory.nudge", conversation_id=conversation_id, proposed=len(proposed))
+    return proposed
 
 
 async def lessons_digest(repos: Any, *, limit: int | None = None) -> str | None:

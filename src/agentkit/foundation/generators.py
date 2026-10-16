@@ -9,42 +9,53 @@ from __future__ import annotations
 
 from pathlib import Path
 
-AGENT_TEMPLATE = '''"""The {name} agent."""
+AGENT_TEMPLATE = '''"""The {pascal} agent (a discoverable ``AgentDefinition``)."""
 
 from __future__ import annotations
 
-from agentkit import Agent
+from agentkit import Agent, AgentDefinition
 
 
-def build() -> Agent:
-    return (
-        Agent.make("{name}")
-        .persona()
-        .instructions("Describe what the {name} agent does.")
-        .memory()
-        .output(str)
-    )
-'''
+class {pascal}(AgentDefinition):
+    name = "{name}"
 
-PROVIDER_TEMPLATE = '''"""The {pascal} provider."""
-
-from __future__ import annotations
-
-from agentkit import Agent, App, Provider
-
-
-class {pascal}Provider(Provider):
-    def register(self, app: App) -> None:
-        app.agent(
-            Agent.make("{name}")
+    def define(self, agent: Agent) -> Agent:
+        return (
+            agent
             .persona()
             .instructions("Describe what the {name} agent does.")
             .memory()
             .output(str)
         )
+'''
 
-    def boot(self, app: App) -> None:
-        app.on("turn.end", lambda event: None)
+PROVIDER_TEMPLATE = '''"""The {pascal} service provider."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from agentkit import Provider
+
+
+class {pascal}Provider(Provider):
+    def register(self, app: Any) -> None:
+        # Declare bindings, config sections, middleware, or schedules here.
+        return None
+
+    def boot(self, app: Any) -> None:
+        return None
+'''
+
+POLICY_TEMPLATE = '''"""The {pascal} tool policy."""
+
+from __future__ import annotations
+
+from agentkit import ToolPolicy
+
+
+def {name}_policy() -> ToolPolicy:
+    return ToolPolicy(deny=set())
 '''
 
 TOOL_TEMPLATE = '''"""The {name} tool."""
@@ -110,12 +121,13 @@ class {pascal}(Model, table=True):
 '''
 
 _GENERATORS: dict[str, tuple[str, str]] = {
-    "agent": ("agents/{name}.py", AGENT_TEMPLATE),
-    "provider": ("providers/{name}.py", PROVIDER_TEMPLATE),
-    "tool": ("tools/{name}.py", TOOL_TEMPLATE),
-    "channel": ("channels/{name}.py", CHANNEL_TEMPLATE),
-    "command": ("commands/{name}.py", COMMAND_TEMPLATE),
-    "model": ("models/{name}.py", MODEL_TEMPLATE),
+    "agent": ("app/Agents/{pascal}.py", AGENT_TEMPLATE),
+    "provider": ("app/Providers/{pascal}Provider.py", PROVIDER_TEMPLATE),
+    "tool": ("app/Tools/{name}.py", TOOL_TEMPLATE),
+    "policy": ("app/Policies/{pascal}Policy.py", POLICY_TEMPLATE),
+    "channel": ("app/Channels/{pascal}Channel.py", CHANNEL_TEMPLATE),
+    "command": ("app/Console/Commands/{pascal}Command.py", COMMAND_TEMPLATE),
+    "model": ("app/Models/{pascal}.py", MODEL_TEMPLATE),
 }
 
 KINDS = tuple(_GENERATORS)
@@ -134,7 +146,7 @@ def target_path(kind: str, name: str, directory: str | Path = ".") -> Path:
     if kind not in _GENERATORS:
         raise KeyError(kind)
     relative, _ = _GENERATORS[kind]
-    return Path(directory) / relative.format(name=_snake(name))
+    return Path(directory) / relative.format(name=_snake(name), pascal=_pascal(name))
 
 
 def generate(kind: str, name: str, *, directory: str | Path = ".", force: bool = False) -> Path:
@@ -143,7 +155,7 @@ def generate(kind: str, name: str, *, directory: str | Path = ".", force: bool =
         raise KeyError(f"unknown generator: {kind}")
     relative, template = _GENERATORS[kind]
     snake = _snake(name)
-    path = Path(directory) / relative.format(name=snake)
+    path = Path(directory) / relative.format(name=snake, pascal=_pascal(name))
     if path.exists() and not force:
         raise FileExistsError(f"{path} already exists (pass force=True to overwrite)")
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -19,6 +19,17 @@ from agentkit.agents import (
     handoff_tool,
     mailbox_tools,
 )
+from agentkit.agents.groupchat import GroupChatResult, GroupChatRunner
+from agentkit.agents.speaker import (
+    AllSpeaker,
+    ManualSpeaker,
+    ModeratorSpeaker,
+    RoundRobinSpeaker,
+    SelectorSpeaker,
+    SpeakerManager,
+    SpeakerStrategy,
+)
+from agentkit.agents.team import MagenticTeam, TeamLedger, TeamRunResult
 from agentkit.app import AgentApp
 from agentkit.approvals import (
     ApprovalQueue,
@@ -51,10 +62,27 @@ from agentkit.errors import (
     UpstreamError,
 )
 from agentkit.evals import Case, CaseResult, EvalSuite, Report, capture_turns, load_captured
+from agentkit.executors import (
+    CodeExecManager,
+    DaytonaExecutor,
+    DockerExecutor,
+    E2BExecutor,
+    ExecResult,
+    JupyterExecutor,
+    LocalSubprocessExecutor,
+    ModalExecutor,
+    SingularityExecutor,
+    SSHExecutor,
+    VercelExecutor,
+    attach_code_executor,
+)
 from agentkit.foundation import (
     DB,
     Agent,
+    AgentDefinition,
     App,
+    Application,
+    ApplicationBuilder,
     Cache,
     CacheStore,
     ChannelSpec,
@@ -83,6 +111,7 @@ from agentkit.foundation import (
     Repository,
     RepositoryQuery,
     Rule,
+    S3FileSystem,
     Schedule,
     ScheduleBuilder,
     Section,
@@ -91,7 +120,12 @@ from agentkit.foundation import (
     Turn,
     ValidationError,
     current_app,
+    discover_agents,
+    discover_channels,
+    discover_commands,
+    discover_config,
     discover_providers,
+    discover_repositories,
     emit,
     load_bootstrap,
     package_name,
@@ -100,6 +134,7 @@ from agentkit.foundation import (
     using,
     validate,
 )
+from agentkit.gateways.pairing import PairingRegistry
 from agentkit.graph import END, GraphError, StateGraph
 from agentkit.guardrails import (
     check_egress,
@@ -140,6 +175,7 @@ from agentkit.learning import (
     approve_lesson,
     attach_learning,
     lessons_digest,
+    propose_memories,
     proposed_lessons,
     reflect,
     register_reflect_task,
@@ -148,7 +184,9 @@ from agentkit.learning import (
 from agentkit.limits import Budget
 from agentkit.logging import get_logger, request_context, setup_logging
 from agentkit.logging import redact as redact_text
+from agentkit.mcp.server import build_agent_mcp_server, serve_agent
 from agentkit.memory import attach_memory, memory_digest
+from agentkit.migrate import MigrationReport, migrate_openclaw
 from agentkit.model_providers import (
     register_model_provider,
     resolve_model,
@@ -162,17 +200,30 @@ from agentkit.moderation import (
     moderation_middleware,
 )
 from agentkit.multimodal import audio, content, document, image, text
+from agentkit.nudges import register_memory_nudges
 from agentkit.observability import setup_logfire, setup_observability, start_phoenix
+from agentkit.offload import attach_artifacts, estimate_tokens, offload_messages
 from agentkit.orchestrator import Orchestrator, delegate, make_delegate
 from agentkit.planning import Plan, Planner, PlanStep
 from agentkit.policy import (
     ALLOW,
     APPROVE,
     DENY,
+    FREE_APPROVAL_TOOLS,
     NATIVE_APPROVAL_TOOLS,
     NATIVE_TOOLS_POLICY,
+    SPECIALIZED_DENY,
     ToolPolicy,
+    free_policy,
     native_policy,
+    specialized_policy,
+)
+from agentkit.posture import (
+    POSTURES,
+    Posture,
+    PostureProfile,
+    register_posture,
+    resolve_posture,
 )
 from agentkit.pricing import (
     ModelPrice,
@@ -187,6 +238,14 @@ from agentkit.ratelimit import RateDecision, RateLimiter, build_limiter
 from agentkit.routing import ModelRouter, Route
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.sandbox import CommandResult, Sandbox, SandboxError
+from agentkit.scheduling_nl import NaturalSchedule, parse_when
+from agentkit.search import (
+    FtsSearchIndex,
+    ScanSearchIndex,
+    SearchHit,
+    SearchIndex,
+    SearchManager,
+)
 from agentkit.security import Actor, system_actor
 from agentkit.security.authenticator import Authenticator, AuthError, require_roles
 from agentkit.security.credentials import Credentials, VaultError, hydrate_credentials
@@ -210,13 +269,31 @@ from agentkit.soul import (
 )
 from agentkit.supervise import Service, run_all
 from agentkit.support import DriverKind, Manager, register_driver
-from agentkit.teams import Supervisor, spawn_tool, team_tools
+from agentkit.teams import (
+    TEAMS,
+    Supervisor,
+    TeamSpec,
+    build_team,
+    register_team,
+    resolve_team,
+    spawn_tool,
+    team_tool,
+    team_tools,
+)
 from agentkit.toolkits import TOOLKITS, attach_toolkits, enabled_toolkits
 from agentkit.tools_from_openapi import (
     OpenAPIToolkit,
     register_openapi_tools,
     tools_from_openapi,
 )
+from agentkit.trajectory import (
+    compress_content,
+    compress_messages,
+    export_trajectory,
+    iter_trajectories,
+    render_jsonl,
+)
+from agentkit.tui import run_tui
 from agentkit.webhooks import WebhookDispatcher
 from agentkit.webhooks import sign as sign_webhook
 from agentkit.webui import build_webui_app, serve_webui, webui_service
@@ -235,7 +312,15 @@ __all__ = [
     "AgentApp",
     # framework foundation (Laravel-style front door)
     "Agent",
+    "AgentDefinition",
     "App",
+    "Application",
+    "ApplicationBuilder",
+    "discover_agents",
+    "discover_channels",
+    "discover_commands",
+    "discover_config",
+    "discover_repositories",
     "Provider",
     "DeferrableProvider",
     "FullStackProvider",
@@ -376,6 +461,27 @@ __all__ = [
     "approve_lesson",
     "reject_lesson",
     "proposed_lessons",
+    "propose_memories",
+    # memory nudges + tool-output offload (context/memory parity)
+    "register_memory_nudges",
+    "offload_messages",
+    "attach_artifacts",
+    "estimate_tokens",
+    # training + migration
+    "export_trajectory",
+    "compress_messages",
+    "compress_content",
+    "iter_trajectories",
+    "render_jsonl",
+    "migrate_openclaw",
+    "MigrationReport",
+    # surfaces & channels (WS5)
+    "run_tui",
+    "build_agent_mcp_server",
+    "serve_agent",
+    "PairingRegistry",
+    "NaturalSchedule",
+    "parse_when",
     # native toolkits (first-class agent-callable capabilities)
     "attach_toolkits",
     "enabled_toolkits",
@@ -394,6 +500,12 @@ __all__ = [
     # retrieval-augmented generation
     "KnowledgeBase",
     "chunk_text",
+    # conversation search (indexed cross-session search)
+    "SearchIndex",
+    "SearchHit",
+    "SearchManager",
+    "FtsSearchIndex",
+    "ScanSearchIndex",
     # evaluations
     "EvalSuite",
     "Case",
@@ -421,6 +533,25 @@ __all__ = [
     "Supervisor",
     "spawn_tool",
     "team_tools",
+    # multi-agent group chat + manager-led teams
+    "GroupChatRunner",
+    "GroupChatResult",
+    "SpeakerStrategy",
+    "SpeakerManager",
+    "RoundRobinSpeaker",
+    "ModeratorSpeaker",
+    "AllSpeaker",
+    "SelectorSpeaker",
+    "ManualSpeaker",
+    "MagenticTeam",
+    "TeamLedger",
+    "TeamRunResult",
+    "register_team",
+    "resolve_team",
+    "build_team",
+    "team_tool",
+    "TeamSpec",
+    "TEAMS",
     # tooling
     "cached_tool",
     # safety
@@ -445,6 +576,21 @@ __all__ = [
     "text",
     "transcribe",
     "synthesize",
+    # code execution (sandbox backends)
+    "CodeExecManager",
+    "LocalSubprocessExecutor",
+    "DockerExecutor",
+    "JupyterExecutor",
+    "E2BExecutor",
+    "SSHExecutor",
+    "ModalExecutor",
+    "DaytonaExecutor",
+    "VercelExecutor",
+    "SingularityExecutor",
+    "ExecResult",
+    "attach_code_executor",
+    # remote filesystem
+    "S3FileSystem",
     # sandboxed workspace
     "Sandbox",
     "CommandResult",
@@ -481,6 +627,16 @@ __all__ = [
     "NATIVE_TOOLS_POLICY",
     "NATIVE_APPROVAL_TOOLS",
     "native_policy",
+    "specialized_policy",
+    "free_policy",
+    "SPECIALIZED_DENY",
+    "FREE_APPROVAL_TOOLS",
+    # posture (specialized | hybrid | free)
+    "Posture",
+    "PostureProfile",
+    "POSTURES",
+    "register_posture",
+    "resolve_posture",
     # model routing + pricing
     "ModelRouter",
     "Route",

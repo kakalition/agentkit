@@ -34,13 +34,14 @@ def inspect(
     if as_json:
         typer.echo(json.dumps(data, indent=2))
         return
+    stack = data["stack"]
     typer.echo(f"app: {data['name']}")
     typer.echo(f"agent: {data['agent']}")
+    typer.echo(f"posture: {stack['posture']['name']}")
     typer.echo(f"tools: {', '.join(data['tools']) or '(none)'}")
     typer.echo(f"channels: {', '.join(data['channels']) or '(none)'}")
     typer.echo(f"commands: {', '.join(data['commands']) or '(none)'}")
     typer.echo(f"config: {', '.join(data['config']) or '(none)'}")
-    stack = data["stack"]
     active = [name for name, on in stack["channels"].items() if on]
     drivers = stack.get("drivers", {})
     if drivers:
@@ -58,4 +59,6 @@ def inspect(
             f"jobs: {', '.join(native['jobs']) or '(none)'}"
         )
     typer.echo(f"learning: {'on' if stack['learning']['enabled'] else 'off'}")
+    if stack.get("teams"):
+        typer.echo(f"teams: {', '.join(stack['teams'])}")
     typer.echo(f"active channels: {', '.join(active) or '(none)'}")

@@ -31,6 +31,11 @@ export interface Conversation {
   message_count: number | null
 }
 
+export interface SearchHit {
+  conversation_id: string
+  text: string
+}
+
 export interface MessagePart {
   kind: string
   text?: string
@@ -229,6 +234,11 @@ export const api = {
     request<{ tool_call_id: string; approved: boolean }>(
       `/approvals/${encodeURIComponent(toolCallId)}`,
       json("POST", { approved }),
+    ),
+
+  search: (q: string, limit = 20) =>
+    request<{ query: string; hits: SearchHit[] }>(
+      `/search?q=${encodeURIComponent(q)}&limit=${limit}`,
     ),
 
   conversations: () => request<{ conversations: Conversation[] }>("/conversations"),

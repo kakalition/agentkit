@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlmodel import delete, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -107,6 +107,34 @@ class MessageRepo:
         for message in await self.list(conversation_id):
             await self.session.delete(message)
         await self.session.flush()
+
+    async def search_text(self, query: str, *, limit: int = 10) -> list[tuple[str, str]]:
+        """Owner-scoped full-text search over message payloads.
+
+        Uses the FTS5 index (``messages_fts``) when present, else a ``LIKE`` scan.
+        Returns ``(conversation_id, payload)`` pairs, best matches first.
+        """
+        safe_limit = max(1, int(limit))
+        owner = self.owner_id
+        try:
+            statement = text(
+                "SELECT m.conversation_id AS conversation_id, m.payload AS payload "
+                "FROM messages_fts f JOIN messages m ON m.rowid = f.rowid "
+                "JOIN conversations c ON c.id = m.conversation_id "
+                "WHERE messages_fts MATCH :q AND c.owner_id = :owner "
+                "ORDER BY rank LIMIT :limit"
+            ).bindparams(q=query, owner=owner, limit=safe_limit)
+            rows = (await self.session.exec(statement)).all()  # type: ignore[call-overload]
+            return [(row[0], row[1]) for row in rows]
+        except Exception:  # noqa: BLE001 - FTS unavailable / syntax: fall back
+            statement = text(
+                "SELECT m.conversation_id AS conversation_id, m.payload AS payload "
+                "FROM messages m JOIN conversations c ON c.id = m.conversation_id "
+                "WHERE m.payload LIKE :like AND c.owner_id = :owner "
+                "ORDER BY m.created_at DESC LIMIT :limit"
+            ).bindparams(like=f"%{query}%", owner=owner, limit=safe_limit)
+            rows = (await self.session.exec(statement)).all()  # type: ignore[call-overload]
+            return [(row[0], row[1]) for row in rows]
 
 
 class A2ATaskRepo:

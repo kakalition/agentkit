@@ -98,3 +98,39 @@ NATIVE_TOOLS_POLICY = native_policy()
 def default_policy() -> ToolPolicy:
     """The default safety policy: approve destructive/egress tools, allow the rest."""
     return ToolPolicy(require_approval=set(DEFAULT_APPROVAL_TOOLS) | set(NATIVE_APPROVAL_TOOLS))
+
+
+# Egress + reach tools a closed specialist must never call (see ``Posture``).
+SPECIALIZED_DENY = frozenset(
+    {
+        "web_search",
+        "web_fetch",
+        "x_search",
+        "run_code",
+        "send_email",
+        "send_to",
+        "broadcast",
+    }
+)
+
+# Destructive or non-recoverable egress still gated in the ``free`` posture;
+# recoverable writes inside the sandbox are allowed.
+FREE_APPROVAL_TOOLS = (
+    "delete_file",
+    "db_delete",
+    "send_email",
+    "send_to",
+)
+
+
+def specialized_policy() -> ToolPolicy:
+    """Closed posture: deny egress/code/peer tools; approve destructive writes."""
+    return ToolPolicy(
+        deny=set(SPECIALIZED_DENY),
+        require_approval=set(DEFAULT_APPROVAL_TOOLS) | set(NATIVE_APPROVAL_TOOLS),
+    )
+
+
+def free_policy() -> ToolPolicy:
+    """Open posture: only destructive or non-recoverable egress requires approval."""
+    return ToolPolicy(require_approval=set(FREE_APPROVAL_TOOLS))

@@ -68,3 +68,24 @@ def _discord_channel_driver(app: Any) -> Any:
     from agentkit.gateways.discord import DiscordGateway
 
     return DiscordGateway(app, settings=getattr(app, "settings", None))
+
+
+@register_driver(DriverKind.CHANNEL, ChannelDriver.MATTERMOST)
+def _mattermost_channel_driver(app: Any) -> Any:
+    from agentkit.gateways.mattermost import MattermostGateway
+
+    return MattermostGateway(app, settings=getattr(app, "settings", None))
+
+
+@register_driver(DriverKind.CHANNEL, ChannelDriver.LINEAR)
+def _linear_channel_driver(app: Any) -> Any:
+    from agentkit.gateways.linear import LinearGateway
+
+    return LinearGateway(app, settings=getattr(app, "settings", None))
+
+
+@register_driver(DriverKind.CHANNEL, ChannelDriver.WEBHOOK)
+def _webhook_channel_driver(app: Any) -> Any:
+    from agentkit.gateways.webhook import WebhookGateway
+
+    return WebhookGateway(app, settings=getattr(app, "settings", None))

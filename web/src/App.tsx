@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   MessageCircle,
   Network,
+  Search as SearchIcon,
   Settings,
   ShieldCheck,
   UserCog,
@@ -30,12 +31,14 @@ import Lessons from "@/routes/lessons"
 import Overview from "@/routes/overview"
 import Persona from "@/routes/persona"
 import Scheduler from "@/routes/scheduler"
+import Search from "@/routes/search"
 import Usage from "@/routes/usage"
 import Workflows from "@/routes/workflows"
 
 const baseItems: NavItem[] = [
   { title: "Overview", url: "/", icon: LayoutDashboard },
   { title: "Conversations", url: "/conversations", icon: Inbox },
+  { title: "Search", url: "/search", icon: SearchIcon },
   { title: "Lessons", url: "/lessons", icon: GraduationCap },
   { title: "Scheduler", url: "/scheduler", icon: CalendarClock },
   { title: "Workflows", url: "/workflows", icon: Workflow },
@@ -79,6 +82,7 @@ export default function App() {
             <Route path="/" element={<Overview />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/conversations" element={<Conversations />} />
+            <Route path="/search" element={<Search />} />
             <Route path="/lessons" element={<Lessons />} />
             <Route path="/scheduler" element={<Scheduler />} />
             <Route path="/workflows" element={<Workflows />} />

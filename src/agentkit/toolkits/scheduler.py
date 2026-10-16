@@ -95,6 +95,44 @@ def attach_scheduler(
         await emit_event("schedule.upsert", name=name, task=task)
         return f"scheduled {name!r} -> {task}"
 
+    @agent.tool(requires_approval=True)
+    async def schedule_natural(
+        ctx: RunContext[Deps], when: str, task: str, name: str | None = None
+    ) -> str:
+        """Schedule a task from a natural-language time (requires approval).
+
+        Args:
+            when: e.g. "every day at 9am", "every monday at 8:30", "in 2 hours".
+            task: The registered task name to run.
+            name: Optional schedule name (default: task + a short time hash).
+        """
+        from agentkit.scheduling_nl import parse_when
+
+        repos = repos_of(ctx)
+        if repos is None:
+            return "ERROR: no repositories"
+        allowed = _allowed(ctx)
+        if allowed and task not in allowed:
+            return f"ERROR: task {task!r} is not allowed; choose from {', '.join(allowed)}"
+        parsed = parse_when(when)
+        if parsed is None:
+            return f"ERROR: could not understand {when!r}; try 'every day at 9am' or 'in 2 hours'"
+        resolved = name or f"{task}-{abs(hash(when)) % 100000}"
+        if parsed.kind == "cron":
+            await repos.schedules.upsert(
+                resolved, kind="cron", schedule=parsed.schedule, task=task, args="{}"
+            )
+        else:
+            await repos.schedules.upsert(
+                resolved,
+                kind="once",
+                schedule=(parsed.at or datetime.now()).isoformat(),
+                task=task,
+                args="{}",
+            )
+        await emit_event("schedule.upsert", name=resolved, task=task)
+        return f"scheduled {resolved!r} -> {task} ({parsed.describe()})"
+
     @agent.tool
     async def list_schedules(ctx: RunContext[Deps]) -> str:
         """List the durable schedules owned by this agent."""

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from agentkit.contracts.storage import FileSystem
-from agentkit.errors import InvalidInput
+from agentkit.errors import ConfigurationError, InvalidInput
 from agentkit.support import register_driver
 from agentkit.support.kinds import DriverKind, StorageDriver
 from agentkit.support.manager import Manager
@@ -25,6 +25,7 @@ __all__ = [
     "FileSystem",
     "Filesystem",
     "MemoryFilesystem",
+    "S3FileSystem",
     "StorageManager",
 ]
 
@@ -170,6 +171,129 @@ class MemoryFilesystem:
         return {"path": key, "size": len(self._files[key]), "modified": 0.0}
 
 
+class S3FileSystem:
+    """A :class:`FileSystem` over an S3 bucket (needs the ``s3`` extra: boto3).
+
+    Same root-confined surface as :class:`Filesystem`; ``disk(name)`` maps to a key
+    prefix. Constructing it does not import boto3 — the client is created lazily on
+    first use, so the class is import-safe when the extra is absent.
+    """
+
+    def __init__(
+        self,
+        bucket: str,
+        *,
+        prefix: str = "",
+        region: str | None = None,
+        endpoint_url: str | None = None,
+        client: Any = None,
+    ) -> None:
+        self.bucket = bucket
+        self.prefix = prefix.strip("/")
+        self.region = region
+        self.endpoint_url = endpoint_url
+        self._client = client
+
+    def _boto(self) -> Any:
+        if self._client is not None:
+            return self._client
+        try:
+            import boto3
+        except ImportError as exc:
+            raise ConfigurationError(
+                "this storage driver needs the 's3' extra (pip install agentkit[s3])"
+            ) from exc
+        self._client = boto3.client("s3", region_name=self.region, endpoint_url=self.endpoint_url)
+        return self._client
+
+    def _key(self, relative: str | Path) -> str:
+        key = Path(relative).as_posix().lstrip("/")
+        if ".." in Path(key).parts:
+            raise InvalidInput(f"path {relative!r} escapes storage")
+        return f"{self.prefix}/{key}" if self.prefix else key
+
+    def disk(self, name: str) -> S3FileSystem:
+        prefix = f"{self.prefix}/{name}".strip("/")
+        return S3FileSystem(
+            self.bucket,
+            prefix=prefix,
+            region=self.region,
+            endpoint_url=self.endpoint_url,
+            client=self._client,
+        )
+
+    def put(self, relative: str | Path, data: str | bytes) -> str:
+        body = data.encode("utf-8") if isinstance(data, str) else bytes(data)
+        key = self._key(relative)
+        self._boto().put_object(Bucket=self.bucket, Key=key, Body=body)
+        return key
+
+    def get(self, relative: str | Path) -> str:
+        return self.get_bytes(relative).decode("utf-8")
+
+    def get_bytes(self, relative: str | Path) -> bytes:
+        client = self._boto()  # resolve first so a missing extra is not masked
+        try:
+            response = client.get_object(Bucket=self.bucket, Key=self._key(relative))
+        except Exception as exc:  # noqa: BLE001 - map any S3 error to a domain error
+            raise InvalidInput(f"file not found: {relative}") from exc
+        return response["Body"].read()
+
+    def exists(self, relative: str | Path) -> bool:
+        client = self._boto()
+        try:
+            client.head_object(Bucket=self.bucket, Key=self._key(relative))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def list(self, prefix: str = "") -> list[str]:
+        scope = self._key(prefix) if prefix else self.prefix
+        scope = f"{scope}/" if scope else ""
+        client = self._boto()
+        found: list[str] = []
+        token: str | None = None
+        while True:
+            kwargs: dict[str, Any] = {"Bucket": self.bucket, "Prefix": scope}
+            if token:
+                kwargs["ContinuationToken"] = token
+            response = client.list_objects_v2(**kwargs)
+            for obj in response.get("Contents", []):
+                key = obj["Key"]
+                if self.prefix and key.startswith(f"{self.prefix}/"):
+                    key = key[len(self.prefix) + 1 :]
+                found.append(key)
+            if not response.get("IsTruncated"):
+                break
+            token = response.get("NextContinuationToken")
+        return sorted(found)
+
+    def delete(self, relative: str | Path) -> bool:
+        client = self._boto()
+        try:
+            client.delete_object(Bucket=self.bucket, Key=self._key(relative))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def metadata(self, relative: str | Path) -> dict[str, Any]:
+        client = self._boto()
+        try:
+            head = client.head_object(Bucket=self.bucket, Key=self._key(relative))
+        except Exception as exc:  # noqa: BLE001
+            raise InvalidInput(f"file not found: {relative}") from exc
+        return {
+            "path": self._key(relative),
+            "size": head.get("ContentLength", 0),
+            "modified": head.get("LastModified"),
+        }
+
+    def glob(self, pattern: str) -> list[str]:
+        import fnmatch
+
+        return sorted(rel for rel in self.list() if fnmatch.fnmatch(rel, pattern))
+
+
 class StorageManager(Manager):
     """Resolves the configured storage driver (``storage_driver``, default ``local``)."""
 
@@ -239,3 +363,17 @@ def _local_storage_driver(app: Any) -> Filesystem:
 @register_driver(DriverKind.STORAGE, StorageDriver.MEMORY)
 def _memory_storage_driver(app: Any) -> MemoryFilesystem:
     return MemoryFilesystem()
+
+
+@register_driver(DriverKind.STORAGE, StorageDriver.S3)
+def _s3_storage_driver(app: Any) -> S3FileSystem:
+    settings = app.settings
+    bucket = getattr(settings, "s3_bucket", None)
+    if not bucket:
+        raise ConfigurationError("storage_driver=s3 requires S3_BUCKET to be set")
+    return S3FileSystem(
+        bucket,
+        prefix=getattr(settings, "s3_prefix", ""),
+        region=getattr(settings, "s3_region", None),
+        endpoint_url=getattr(settings, "s3_endpoint_url", None),
+    )

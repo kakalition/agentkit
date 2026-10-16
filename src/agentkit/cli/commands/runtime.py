@@ -54,6 +54,9 @@ def up(
 def tinker(
     bootstrap: str | None = typer.Option(None, "--bootstrap"),
     conversation_id: str = typer.Option("cli:tinker", help="Conversation id to keep history under."),
+    ephemeral: bool = typer.Option(
+        False, "--ephemeral", help="Temporary chat: nothing is persisted (tool side effects still run)."
+    ),
 ) -> None:
     """Interactive REPL: chat with the booted app."""
     import asyncio
@@ -71,5 +74,7 @@ def tinker(
             continue
         if line.strip().lower() in {"exit", "quit", ":q"}:
             break
-        result = asyncio.run(booted.run(line, conversation_id=conversation_id))
+        result = asyncio.run(
+            booted.run(line, conversation_id=conversation_id, ephemeral=ephemeral)
+        )
         typer.echo(result.output)

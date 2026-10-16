@@ -172,27 +172,47 @@ thin `Model`/`DB` layer.
 
 ```python
 # bootstrap.py  —  `agentkit serve` boots bootstrap:app
-from agentkit import App
-from nudge.providers import NudgeProvider
+from pathlib import Path
+from agentkit import Application
 
-app = App(name="nudge", settings=Settings)
-app.providers([NudgeProvider])          # package providers auto-load via entry points
+app = Application.configure(settings=Settings, base_path=Path(__file__).parent).create()
 ```
 
+Providers under `app/Providers/`, class-based agents under `app/Agents/`, channels
+under `app/Channels/`, commands under `app/Console/Commands/`, config under
+`config/`, and your `Repositories` subclass under `app/Repositories/` are
+discovered at boot. `.withProviders([...])` still wins when you need to be
+explicit. `App` remains an alias for `Application`, and every existing signature
+keeps working.
+
 ```python
-# providers/nudge.py
-from agentkit import Agent, Provider
+# app/Agents/Assistant.py  —  discovered and registered automatically
+from agentkit import Agent, AgentDefinition
+
+class Assistant(AgentDefinition):
+    name = "assistant"
+    posture = "hybrid"          # "specialized" (closed) | "hybrid" | "free"
+
+    def define(self, agent: Agent) -> Agent:
+        return (
+            agent
+            .persona()          # SOUL.md (read live every run)
+            .instructions(ORCHESTRATOR)
+            .memory()           # remember/recall/forget tools
+            .full()             # persona + memory + skills + HITL + safety + todos
+            .output(str)
+        )
+```
+
+A **posture** picks the default layer set for `.full()` — see
+[Postures](docs/guide/posture.md). Providers still own lifecycle:
+
+```python
+# app/Providers/NudgeProvider.py
+from agentkit import Provider
 
 class NudgeProvider(Provider):
     def register(self, app):
-        app.agent(
-            Agent.make("nudge")
-            .persona()                  # SOUL.md (read live every run)
-            .instructions(ORCHESTRATOR)
-            .memory()                   # remember/recall/forget tools
-            .tool(handle_reminders)
-            .output(str)
-        )
         app.config("memory", MemorySection)
 
     def boot(self, app):

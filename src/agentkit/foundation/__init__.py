@@ -5,12 +5,26 @@ low-level modules (``agentkit.runtime``, ``agentkit.session`` …) keep working
 unchanged.
 """
 
-from agentkit.foundation.agent import Agent
-from agentkit.foundation.application import App, ChannelSpec, Turn, discover_providers
+from agentkit.foundation.agent import Agent, AgentDefinition
+from agentkit.foundation.application import (
+    App,
+    Application,
+    ApplicationBuilder,
+    ChannelSpec,
+    Turn,
+    discover_providers,
+)
 from agentkit.foundation.commands import Command, load_bootstrap
 from agentkit.foundation.config import Section
 from agentkit.foundation.container import Container
 from agentkit.foundation.db import active_repos, session_scope, using_repos
+from agentkit.foundation.discovery import (
+    discover_agents,
+    discover_channels,
+    discover_commands,
+    discover_config,
+    discover_repositories,
+)
 from agentkit.foundation.events import Dispatcher, Event, Listener
 from agentkit.foundation.facade import (
     Facade,
@@ -48,12 +62,20 @@ from agentkit.foundation.repository import Repository, RepositoryQuery
 from agentkit.foundation.scaffold import package_name, scaffold_project
 from agentkit.foundation.schedule import ScheduleBuilder
 from agentkit.foundation.service import Service
-from agentkit.foundation.storage import Filesystem
+from agentkit.foundation.storage import Filesystem, S3FileSystem
 from agentkit.foundation.validation import Rule, ValidationError, validate
 
 __all__ = [
     "Agent",
+    "AgentDefinition",
     "App",
+    "Application",
+    "ApplicationBuilder",
+    "discover_agents",
+    "discover_channels",
+    "discover_commands",
+    "discover_config",
+    "discover_repositories",
     "Cache",
     "CacheManager",
     "CacheStore",
@@ -87,6 +109,7 @@ __all__ = [
     "Rule",
     "Schedule",
     "ScheduleBuilder",
+    "S3FileSystem",
     "Section",
     "SentNotification",
     "Service",

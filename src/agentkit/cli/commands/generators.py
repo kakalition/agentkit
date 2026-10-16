@@ -26,6 +26,9 @@ def new_project(
     preset: str | None = typer.Option(
         None, "--preset", help="Blueprint overlay: support | research | ops."
     ),
+    posture: str | None = typer.Option(
+        None, "--posture", help="Agent posture: specialized | hybrid | free."
+    ),
 ) -> None:
     """Create a new agentkit project from the default skeleton."""
     from agentkit.foundation.scaffold import scaffold_project
@@ -34,7 +37,7 @@ def new_project(
         typer.echo("--preset requires the full-stack project (drop --minimal)", err=True)
         raise typer.Exit(code=2)
     try:
-        target = scaffold_project(name, path, force=force, full=full, preset=preset)
+        target = scaffold_project(name, path, force=force, full=full, preset=preset, posture=posture)
     except (FileExistsError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -89,6 +92,16 @@ def make_tool(
 ) -> None:
     """Scaffold a tool function."""
     _run_generate("tool", name, path, force)
+
+
+@app.command("make:policy")
+def make_policy(
+    name: str = typer.Argument(..., help="Policy name, e.g. Assistant."),
+    path: Path = typer.Option(Path("."), "--path"),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    """Scaffold a tool policy."""
+    _run_generate("policy", name, path, force)
 
 
 @app.command("make:channel")

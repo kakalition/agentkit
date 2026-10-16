@@ -285,6 +285,17 @@ class GroupChatTopology(TopologyBase):
             self._cursor += 1
         return {speaker: await self._deliver(speaker, message)}
 
+    async def run(self, task: str, *, speaker: Any = None, max_turns: int = 12) -> Any:
+        """Delegate to a :class:`~agentkit.agents.groupchat.GroupChatRunner`.
+
+        Handlers are callables ``(str) -> reply``; the runner runs a real turn loop
+        over them and returns a ``GroupChatResult`` (output + transcript).
+        """
+        from agentkit.agents.groupchat import GroupChatRunner
+
+        runner = GroupChatRunner(dict(self.handlers), speaker=speaker, max_turns=max_turns)
+        return await runner.run(task)
+
 
 class CommsManager(Manager):
     """Resolves the configured comms topology (``comms_driver``, default ``mailbox``)."""

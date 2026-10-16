@@ -39,10 +39,12 @@ class Gateway(abc.ABC):
         timeout: float = APPROVAL_TIMEOUT,
         status_interval_s: float = 2.5,
         typing_interval_s: float = 4.0,
+        pairing: Any = None,
     ) -> None:
         self.app = app
         self.settings = settings if settings is not None else getattr(app, "settings", None)
         self.allowed = list(allowed_channel_ids or [])
+        self.pairing = pairing
         self.timeout = timeout
         self.status_interval_s = status_interval_s
         self.typing_interval_s = typing_interval_s
@@ -51,8 +53,28 @@ class Gateway(abc.ABC):
 
     # -- identity -------------------------------------------------------
     def is_allowed(self, external_id: Any) -> bool:
-        """Whether ``external_id`` may talk to the bot (empty allow-list = all)."""
-        return not self.allowed or external_id in self.allowed
+        """Whether ``external_id`` may talk to the bot.
+
+        With an allow-list, only listed ids pass. With no allow-list, everyone
+        passes *unless* pairing is enabled, in which case only paired users pass.
+        """
+        if self.allowed:
+            return external_id in self.allowed
+        if self.pairing is not None:
+            return bool(self.pairing.is_paired(external_id))
+        return True
+
+    def pair(self, external_id: Any, *, code: str | None = None) -> str:
+        """Issue (and optionally send) a pairing code for ``external_id``."""
+        if self.pairing is None:
+            from agentkit.gateways.pairing import PairingRegistry
+
+            self.pairing = PairingRegistry()
+        return self.pairing.request(external_id, code=code)
+
+    def confirm_pairing(self, external_id: Any, code: str) -> bool:
+        """Confirm a pairing code, admitting ``external_id`` on success."""
+        return self.pairing is not None and bool(self.pairing.confirm(external_id, code))
 
     def conversation_id(self, external_id: Any) -> str:
         """Stable conversation id for an external chat/thread (memoized)."""

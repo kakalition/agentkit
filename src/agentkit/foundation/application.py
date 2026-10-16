@@ -19,6 +19,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
+from pathlib import Path
 from typing import Any
 
 from agentkit.config import AgentSettings, build_model, get_settings
@@ -65,6 +66,7 @@ _BUILTIN_DRIVER_MODULES = (
     "agentkit.db.engine",  # database dialect
     "agentkit.foundation.queue",  # queue
     "agentkit.scheduler",  # scheduler
+    "agentkit.search",  # conversation search indexes
     "agentkit.observability",  # observability
     "agentkit.foundation.storage",  # storage
     "agentkit.guardrails",  # guardrails
@@ -78,6 +80,7 @@ _BUILTIN_DRIVER_MODULES = (
     "agentkit.comms",  # comms topologies
     "agentkit.tasks",  # task store + planning strategy
     "agentkit.agents.subagent",  # subagent context strategies
+    "agentkit.agents.speaker",  # group-chat speaker strategies
     "agentkit.foundation.agent_middleware",  # agent middleware
     "agentkit.graph",  # graph executors
     "agentkit.executors",  # code executors
@@ -156,12 +159,43 @@ class App:
         self._credential_service: Any = None
         self._running: dict[str, Any] = {}
         self._approval_queue: Any = None
+        self._posture: str | None = None
 
         self.container.instance("app", self)
         _load_builtin_drivers()
         self._bind_facades()
         if discover:
             self._providers.extend(discover_providers())
+
+    # -- fluent entry point ---------------------------------------------
+    @classmethod
+    def configure(
+        cls,
+        name: str | None = None,
+        settings: AgentSettings | type[AgentSettings] | None = None,
+        base_path: str | Path | None = None,
+        *,
+        discover: bool = True,
+        repos_factory: type[Repositories] | None = None,
+        model: Any = None,
+        mcp: Any = None,
+        a2a: Any = None,
+    ) -> ApplicationBuilder:
+        """Start a fluent build (Laravel's ``Application::configure()``).
+
+        Returns an :class:`ApplicationBuilder`; discovery of ``app/``/``config/``
+        runs when :meth:`ApplicationBuilder.create` is called (never here).
+        """
+        return ApplicationBuilder(
+            name=name,
+            settings=settings,
+            base_path=base_path,
+            discover=discover,
+            repos_factory=repos_factory,
+            model=model,
+            mcp=mcp,
+            a2a=a2a,
+        )
 
     # -- settings -------------------------------------------------------
     @property
@@ -216,6 +250,11 @@ class App:
             provider.boot(self)
 
         self._apply_schedules()
+
+        if int(getattr(self.settings, "memory_nudge_every", 0) or 0) > 0:
+            from agentkit.nudges import register_memory_nudges
+
+            register_memory_nudges(self)
 
         self._booted = True
         set_current_app(self)
@@ -446,6 +485,21 @@ class App:
         self._budget = budget
         return self
 
+    def posture(self, name: Any) -> App:
+        """Select the app-wide posture (``specialized`` | ``hybrid`` | ``free``)."""
+        from agentkit.posture import resolve_posture
+
+        profile = resolve_posture(name)
+        self._posture = str(profile.name) if profile is not None else None
+        return self
+
+    @property
+    def posture_name(self) -> str:
+        """The active posture name (explicit, else the ``agent_posture`` setting)."""
+        if self._posture is not None:
+            return self._posture
+        return str(getattr(self.settings, "agent_posture", "hybrid"))
+
     # -- running turns / approvals -------------------------------------
     @property
     def approvals(self) -> Any:
@@ -667,6 +721,11 @@ class App:
         return self.manager("reranker").driver()
 
     @property
+    def search(self) -> Any:
+        """The configured conversation search index (``search_driver``, default ``fts``)."""
+        return self.manager("search").driver()
+
+    @property
     def extractor(self) -> Any:
         """The configured learning extractor (``learning_extractor_driver``)."""
         return self.manager("learning_extractor").driver()
@@ -685,6 +744,11 @@ class App:
     def comms(self) -> Any:
         """The configured agent comms topology (``comms_driver``, default ``mailbox``)."""
         return self.manager("comms").driver()
+
+    @property
+    def speaker(self) -> Any:
+        """The configured group-chat speaker strategy (``speaker_driver``)."""
+        return self.manager("speaker").driver()
 
     @property
     def tasks(self) -> Any:
@@ -775,6 +839,7 @@ class App:
         if self._clarify_handler is not None:
             deps.extras["clarify"] = self._clarify_handler
         deps.extras["app"] = self
+        deps.extras.setdefault("posture", self.posture_name)
         deps.extras.setdefault("task_store", self.manager("tasks").driver())
         deps.extras.setdefault("code_executor", self.manager("codeexec").driver())
         return deps
@@ -793,6 +858,7 @@ class App:
         conversation_id: str = "cli:default",
         approve: ApprovalCallback | None = None,
         actor: Actor | None = None,
+        ephemeral: bool = False,
     ) -> ChatResult:
         from agentkit.foundation.pipeline import Pipeline
 
@@ -810,6 +876,7 @@ class App:
                     agent=self._require_agent(),
                     conversation_id=current.conversation_id,
                     history_processor=self._history_processor,
+                    persist=not ephemeral,
                 )
                 current.result = await runner.send(current.text)
             return current
@@ -829,6 +896,7 @@ class App:
         conversation_id: str = "cli:default",
         approve: ApprovalCallback | None = None,
         actor: Actor | None = None,
+        ephemeral: bool = False,
     ) -> Any:
         """Stream one turn as :class:`~agentkit.session.StreamEvent` increments."""
         owner_id = actor.owner_id if actor is not None else None
@@ -844,6 +912,7 @@ class App:
                     agent=self._require_agent(),
                     conversation_id=conversation_id,
                     history_processor=self._history_processor,
+                    persist=not ephemeral,
                 )
                 async for event in runner.stream(text):
                     yield event
@@ -928,6 +997,138 @@ class App:
         self.container.instance("queue", QueueService(self))
 
 
+#: ``Application`` is the canonical container name; ``App`` stays as an alias.
+Application = App
+
+
+class ApplicationBuilder:
+    """Fluent assembly for an :class:`App` (see :meth:`App.configure`).
+
+    Convention discovery of ``app/`` and ``config/`` runs in :meth:`create`; a
+    provider/agent/channel/command passed explicitly to a ``with*`` method always
+    wins over the discovered one.
+    """
+
+    def __init__(
+        self,
+        name: str | None = None,
+        settings: AgentSettings | type[AgentSettings] | None = None,
+        base_path: str | Path | None = None,
+        *,
+        discover: bool = True,
+        repos_factory: type[Repositories] | None = None,
+        model: Any = None,
+        mcp: Any = None,
+        a2a: Any = None,
+    ) -> None:
+        self.name = name
+        self.settings = settings
+        self.base_path = Path(base_path).expanduser() if base_path is not None else Path.cwd()
+        self.discover = discover
+        self.repos_factory = repos_factory
+        self.model = model
+        self.mcp = mcp
+        self.a2a = a2a
+        self._providers: list[Any] = []
+        self._config: dict[str, Any] = {}
+        self._agents: list[Any] = []
+        self._channels: dict[str, Any] = {}
+        self._commands: list[Any] = []
+        self._posture: Any = None
+
+    def withProviders(self, *providers: Any) -> ApplicationBuilder:
+        for provider in providers:
+            if isinstance(provider, (list, tuple)):
+                self._providers.extend(provider)
+            else:
+                self._providers.append(provider)
+        return self
+
+    def withConfig(
+        self, sections: Mapping[str, Any] | None = None, **kwargs: Any
+    ) -> ApplicationBuilder:
+        if sections:
+            self._config.update(sections)
+        self._config.update(kwargs)
+        return self
+
+    def withAgents(self, *agents: Any) -> ApplicationBuilder:
+        self._agents.extend(agents)
+        return self
+
+    def withChannels(
+        self, channels: Mapping[str, Any] | None = None, **kwargs: Any
+    ) -> ApplicationBuilder:
+        if channels:
+            self._channels.update(channels)
+        self._channels.update(kwargs)
+        return self
+
+    def withCommands(self, *commands: Any) -> ApplicationBuilder:
+        self._commands.extend(commands)
+        return self
+
+    def withPosture(self, name: Any) -> ApplicationBuilder:
+        self._posture = name
+        return self
+
+    def withBasePath(self, path: str | Path) -> ApplicationBuilder:
+        self.base_path = Path(path).expanduser()
+        return self
+
+    def create(self) -> App:
+        """Build the :class:`App`, running convention discovery here (at boot)."""
+        from agentkit.foundation import discovery
+
+        repos_factory = self.repos_factory
+        if repos_factory is None and self.discover:
+            repos_factory = discovery.discover_repositories(self.base_path)
+        kwargs: dict[str, Any] = {"discover": True}
+        if repos_factory is not None:
+            kwargs["repos_factory"] = repos_factory
+        if self.model is not None:
+            kwargs["model"] = self.model
+        if self.mcp is not None:
+            kwargs["mcp"] = self.mcp
+        if self.a2a is not None:
+            kwargs["a2a"] = self.a2a
+        app = App(name=self._resolved_name(), settings=self.settings, **kwargs)
+        if self._posture is not None:
+            app.posture(self._posture)
+        if self.discover:
+            self._discover_into(app)
+        # Explicit declarations win over discovered ones (registered last).
+        app.providers(self._providers)
+        for builder in self._agents:
+            app.agent(builder)
+        for name, factory in self._channels.items():
+            app.channel(name, factory)
+        app.commands(self._commands)
+        for section, schema in self._config.items():
+            app.config(section, schema)
+        return app
+
+    def _resolved_name(self) -> str | None:
+        if self.name is not None:
+            return self.name
+        settings = self.settings() if isinstance(self.settings, type) else self.settings
+        if settings is None or not hasattr(settings, "agent_name"):
+            return None
+        return getattr(settings, "agent_name", None)
+
+    def _discover_into(self, app: App) -> None:
+        from agentkit.foundation import discovery
+
+        app.providers(discovery.discover_providers(self.base_path))
+        for definition in discovery.discover_agents(self.base_path):
+            app.agent(definition.to_builder(settings=app.settings, events=app.events))
+        for name, factory in discovery.discover_channels(self.base_path):
+            app.channel(name, factory)
+        app.commands(discovery.discover_commands(self.base_path))
+        for section, schema in discovery.discover_config(self.base_path).items():
+            app.config(section, schema)
+
+
 class ChannelSpec:
     """A registered channel: its factory and any options."""
 
@@ -983,4 +1184,11 @@ def _as_services(name: str, produced: Any) -> list[Any]:
     raise TypeError(f"channel {name!r} factory returned {type(produced)!r}")
 
 
-__all__ = ["App", "ChannelSpec", "PROVIDER_ENTRY_POINT_GROUP", "discover_providers"]
+__all__ = [
+    "App",
+    "Application",
+    "ApplicationBuilder",
+    "ChannelSpec",
+    "PROVIDER_ENTRY_POINT_GROUP",
+    "discover_providers",
+]
