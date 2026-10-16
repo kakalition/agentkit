@@ -25,15 +25,20 @@ __all__ = [
     "AudioDriver",
     "AuthDriver",
     "CacheDriver",
+    "CatalogDriver",
     "ChannelDriver",
+    "CheckpointDriver",
     "ChunkerDriver",
     "CodeExecDriver",
     "CommsDriver",
+    "ComputerDriver",
     "ContextDriver",
     "DatabaseDriver",
+    "DatasetDriver",
     "DriverKind",
     "DurabilityDriver",
     "EmbeddingsDriver",
+    "EvalGraderDriver",
     "EvalsReporterDriver",
     "GraphDriver",
     "GuardrailDriver",
@@ -49,6 +54,7 @@ __all__ = [
     "PromptsDriver",
     "QueueDriverKind",
     "RateLimitDriver",
+    "RealtimeDriver",
     "RecallDriver",
     "RerankerDriver",
     "RetrieverDriver",
@@ -68,14 +74,19 @@ class DriverKind(StrEnum):
     AUDIO = "audio"
     AUTH = "auth"
     CACHE = "cache"
+    CATALOG = "catalog"
     CHANNEL = "channel"
+    CHECKPOINT = "checkpoint"
     CHUNKER = "chunker"
     CODEEXEC = "codeexec"
     COMMS = "comms"
+    COMPUTER = "computer"
     CONTEXT = "context"
     DATABASE = "database"
+    DATASET = "dataset"
     DURABILITY = "durability"
     EMBEDDINGS = "embeddings"
+    EVAL_GRADER = "eval_grader"
     EVALS_REPORTER = "evals_reporter"
     GRAPH = "graph"
     GUARDRAILS = "guardrails"
@@ -92,6 +103,7 @@ class DriverKind(StrEnum):
     PROMPTS = "prompts"
     QUEUE = "queue"
     RATELIMIT = "ratelimit"
+    REALTIME = "realtime"
     RERANKER = "reranker"
     RETRIEVER = "retriever"
     SCHEDULER = "scheduler"
@@ -313,3 +325,38 @@ class NotificationChannelDriver(StrEnum):
     LOG = "log"
     CONVERSATION = "conversation"
     TELEGRAM = "telegram"
+
+
+class CheckpointDriver(StrEnum):
+    MEMORY = "memory"
+    REPOSITORY = "repository"
+    FILE = "file"
+
+
+class ComputerDriver(StrEnum):
+    LOOPBACK = "loopback"
+    PLAYWRIGHT = "playwright"
+
+
+class RealtimeDriver(StrEnum):
+    LOOPBACK = "loopback"
+    PYDANTIC_AI = "pydantic_ai"
+
+
+class CatalogDriver(StrEnum):
+    LOCAL = "local"
+    SKILLS = "skills"
+    GIT = "git"
+    HTTP = "http"
+
+
+class DatasetDriver(StrEnum):
+    MEMORY = "memory"
+    REPOSITORY = "repository"
+
+
+class EvalGraderDriver(StrEnum):
+    EXACT = "exact"
+    CONTAINS = "contains"
+    SCHEMA = "schema"
+    LLM_JUDGE = "llm_judge"

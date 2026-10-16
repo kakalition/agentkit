@@ -147,6 +147,8 @@ class ChatRunner:
         max_history: int = DEFAULT_MAX_HISTORY,
         history_processor: Any = None,
         persist: bool = True,
+        recorder: Any = None,
+        checkpointer: Any = None,
     ) -> None:
         self.deps = deps
         self.agent = agent
@@ -154,15 +156,86 @@ class ChatRunner:
         self.max_history = max_history
         self.history_processor = history_processor
         self.persist = persist
+        # Optional run-trace recorder (see ``agentkit.runs``); no-op when absent.
+        self.recorder = recorder
+        # Optional checkpoint store (see ``agentkit.checkpoints``); no-op when absent.
+        self.checkpointer = checkpointer
+        self._checkpoint_seq = 0
         # Set by ``_begin`` when a history processor shrank the window.
         self._compaction: dict[str, int] | None = None
         # Make the conversation id available to tools (e.g. to deliver later).
         self.deps.extras["conversation_id"] = conversation_id
 
+    # -- run tracing ----------------------------------------------------
+    def _record(self, kind: str, **fields: Any) -> None:
+        if self.recorder is None:
+            return
+        try:
+            from agentkit.runs import RunEvent
+
+            self.recorder.record(RunEvent(kind=kind, **fields))
+        except Exception:  # pragma: no cover - recorder errors are swallowed
+            pass
+
+    def _record_final(self, chat_result: ChatResult) -> None:
+        if self.recorder is None:
+            return
+        for tool in chat_result.tool_calls:
+            self._record("tool", tool=tool)
+        self._record(
+            "final",
+            text=chat_result.output,
+            data={
+                "output": chat_result.output,
+                "usage": chat_result.usage,
+                "tool_calls": list(chat_result.tool_calls),
+                "history_length": chat_result.history_length,
+            },
+        )
+
+    async def _flush_recorder(self) -> None:
+        if self.recorder is None:
+            return
+        try:
+            flush = getattr(self.recorder, "flush", None)
+            if flush is not None:
+                await flush()
+        except Exception:  # pragma: no cover - recorder errors are swallowed
+            pass
+
+    async def _checkpoint(self, label: str, state: Any) -> None:
+        if self.checkpointer is None:
+            return
+        try:
+            await self.checkpointer.put(
+                self.conversation_id, self._checkpoint_seq, state, label=label
+            )
+            self._checkpoint_seq += 1
+        except Exception:  # pragma: no cover - checkpoint errors are swallowed
+            pass
+
+    def _history_state(self, messages: list[ModelMessage], **extra: Any) -> dict[str, Any]:
+        return {
+            "conversation_id": self.conversation_id,
+            "messages": len(messages),
+            "history": [serialize_message(message) for message in messages],
+            **extra,
+        }
+
+    def _finish_state(self, chat_result: ChatResult) -> dict[str, Any]:
+        return {
+            "conversation_id": self.conversation_id,
+            "output": chat_result.output,
+            "history_length": chat_result.history_length,
+            "tool_calls": list(chat_result.tool_calls),
+        }
+
     async def send(self, text: Any) -> ChatResult:
         from agentkit import metrics
 
         repos, channel, history = await self._begin(text)
+        self._record("start", text=text if isinstance(text, str) else _content_repr(text))
+        await self._checkpoint("start", self._history_state(history))
         self.deps.artifacts.clear()
         try:
             result = await self.agent.run(
@@ -175,17 +248,26 @@ class ChatRunner:
             )
         except Exception:
             metrics.record_turn("error")
+            self._record("error", text=str(text)[:200])
+            await self._flush_recorder()
             raise
-        return await self._finish(
+        chat_result = await self._finish(
             repos, channel, history, result.all_messages(), result.output, self._usage_of(result)
         )
+        await self._checkpoint("finish", self._finish_state(chat_result))
+        self._record_final(chat_result)
+        await self._flush_recorder()
+        return chat_result
 
     async def stream(self, text: Any) -> AsyncIterator[StreamEvent]:
         """Run one turn, yielding :class:`StreamEvent` increments then the final result."""
         repos, channel, history = await self._begin(text)
+        self._record("start", text=text if isinstance(text, str) else _content_repr(text))
+        await self._checkpoint("start", self._history_state(history))
         self.deps.artifacts.clear()
         if self._compaction:
             dropped = self._compaction["messages"]
+            self._record("compaction", text=f"context compacted ({dropped} messages)")
             yield StreamEvent("compaction", text=f"context compacted ({dropped} messages)")
         async with self.agent.run_stream(
             text,
@@ -202,11 +284,16 @@ class ChatRunner:
             all_messages = streamed.all_messages()
             run_usage = getattr(streamed, "usage", None)
         chat_result = await self._finish(repos, channel, history, all_messages, output, run_usage)
+        await self._checkpoint("finish", self._finish_state(chat_result))
+        self._record_final(chat_result)
+        await self._flush_recorder()
         yield StreamEvent("final", result=chat_result)
 
     async def resume(self, deferred_tool_results: Any, text: str | None = None) -> ChatResult:
         """Continue a turn that deferred tool calls (approvals/clarification)."""
         repos, channel, history = await self._begin(text or "")
+        self._record("start", text=text or "")
+        await self._checkpoint("start", self._history_state(history))
         result = await self.agent.run(
             text,
             deps=self.deps,
@@ -216,9 +303,13 @@ class ChatRunner:
             model_settings=model_settings(self.deps.settings),
             usage_limits=usage_limits(self.deps.settings),
         )
-        return await self._finish(
+        chat_result = await self._finish(
             repos, channel, history, result.all_messages(), result.output, self._usage_of(result)
         )
+        await self._checkpoint("finish", self._finish_state(chat_result))
+        self._record_final(chat_result)
+        await self._flush_recorder()
+        return chat_result
 
     async def _begin(self, text: Any) -> tuple[Any, str, list[ModelMessage]]:
         repos = self.deps.repos

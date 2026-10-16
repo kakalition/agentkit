@@ -42,7 +42,31 @@ from agentkit.approvals import (
 )
 from agentkit.audio import synthesize, transcribe
 from agentkit.cache import cached_tool
+from agentkit.catalog import (
+    CATALOGS,
+    Catalog,
+    CatalogItem,
+    CatalogManager,
+    HttpCatalog,
+    LocalCatalog,
+    SkillsCatalog,
+    register_catalog_source,
+)
+from agentkit.checkpoints import (
+    Checkpoint,
+    CheckpointManager,
+    CheckpointStore,
+    FileCheckpointStore,
+    MemoryCheckpointStore,
+    RepositoryCheckpointStore,
+)
 from agentkit.compaction import Compactor, summarize_older, transcript, truncating_processor
+from agentkit.computer import (
+    ComputerManager,
+    LoopbackComputer,
+    PlaywrightComputer,
+    attach_computer,
+)
 from agentkit.config import (
     AgentSettings,
     build_model,
@@ -78,6 +102,18 @@ from agentkit.executors import (
     SSHExecutor,
     VercelExecutor,
     attach_code_executor,
+)
+from agentkit.extensions import (
+    ACTIONS,
+    EXTENSIONS,
+    PANELS,
+    ExtensionManifest,
+    PanelSpec,
+    discover_manifests,
+    register_action,
+    register_manifest,
+    register_panel,
+    run_action,
 )
 from agentkit.foundation import (
     DB,
@@ -138,6 +174,15 @@ from agentkit.foundation import (
     validate,
 )
 from agentkit.gateways.pairing import PairingRegistry
+from agentkit.graders import (
+    ContainsGrader,
+    ExactMatchGrader,
+    Grader,
+    LLMJudgeGrader,
+    SchemaGrader,
+    TraceGrader,
+    register_grader,
+)
 from agentkit.graph import END, GraphError, StateGraph
 from agentkit.guardrails import (
     check_egress,
@@ -238,7 +283,20 @@ from agentkit.pricing import (
 )
 from agentkit.prompts import Prompt, PromptManager, PromptRegistry
 from agentkit.ratelimit import RateDecision, RateLimiter, build_limiter
+from agentkit.realtime import (
+    LoopbackRealtime,
+    PydanticAIRealtime,
+    RealtimeManager,
+)
 from agentkit.routing import ModelRouter, Route
+from agentkit.runs import (
+    CompositeRecorder,
+    InMemoryRecorder,
+    RepositoryRunRecorder,
+    RunEvent,
+    RunRecorder,
+    recorder_for,
+)
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.sandbox import CommandResult, Sandbox, SandboxError
 from agentkit.scheduling_nl import NaturalSchedule, parse_when
@@ -269,6 +327,32 @@ from agentkit.soul import (
     ensure_soul,
     load_soul,
     soul_path,
+)
+from agentkit.specs import (
+    SPECS,
+    RepositorySpecStore,
+    SpecKind,
+    SpecModel,
+    SpecRegistry,
+    SpecStore,
+    register_codegen,
+    register_spec,
+    render_spec,
+)
+from agentkit.specs import (
+    AgentDefinition as AgentSpec,
+)
+from agentkit.specs import (
+    EvalDefinition as EvalSpec,
+)
+from agentkit.specs import (
+    TeamDefinition as TeamDefinitionSpec,
+)
+from agentkit.specs import (
+    WorkflowDefinition as WorkflowSpec,
+)
+from agentkit.specs import (
+    WorkflowNode as WorkflowSpecNode,
 )
 from agentkit.studio import (
     TeamDefinition,
@@ -314,7 +398,7 @@ from agentkit.workspace import (
     workspace_dir,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "__version__",
@@ -571,6 +655,72 @@ __all__ = [
     "materialize_team",
     "render_team_code",
     "run_team_definition",
+    # extension substrate
+    "ACTIONS",
+    "EXTENSIONS",
+    "PANELS",
+    "ExtensionManifest",
+    "PanelSpec",
+    "discover_manifests",
+    "register_action",
+    "register_manifest",
+    "register_panel",
+    "run_action",
+    # spec layer
+    "SPECS",
+    "AgentSpec",
+    "EvalSpec",
+    "RepositorySpecStore",
+    "SpecKind",
+    "SpecModel",
+    "SpecRegistry",
+    "SpecStore",
+    "TeamDefinitionSpec",
+    "WorkflowSpec",
+    "WorkflowSpecNode",
+    "register_codegen",
+    "register_spec",
+    "render_spec",
+    # run tracing
+    "CompositeRecorder",
+    "InMemoryRecorder",
+    "RepositoryRunRecorder",
+    "RunEvent",
+    "RunRecorder",
+    "recorder_for",
+    # checkpoints (time travel)
+    "Checkpoint",
+    "CheckpointManager",
+    "CheckpointStore",
+    "FileCheckpointStore",
+    "MemoryCheckpointStore",
+    "RepositoryCheckpointStore",
+    # computer-use (optional browser extra)
+    "ComputerManager",
+    "LoopbackComputer",
+    "PlaywrightComputer",
+    "attach_computer",
+    # realtime voice (optional realtime extra)
+    "LoopbackRealtime",
+    "PydanticAIRealtime",
+    "RealtimeManager",
+    # eval graders
+    "ContainsGrader",
+    "ExactMatchGrader",
+    "Grader",
+    "LLMJudgeGrader",
+    "SchemaGrader",
+    "TraceGrader",
+    "register_grader",
+    # catalog / gallery
+    "CATALOGS",
+    "Catalog",
+    "CatalogItem",
+    "CatalogManager",
+    "HttpCatalog",
+    "LocalCatalog",
+    "SkillsCatalog",
+    "register_catalog_source",
     # tooling
     "cached_tool",
     # safety

@@ -14,6 +14,12 @@ from __future__ import annotations
 
 from agentkit.db.repositories.container import Repositories
 from agentkit.db.repositories.conversations import A2ATaskRepo, ConversationRepo, MessageRepo
+from agentkit.db.repositories.definitions import DefinitionRepo
+from agentkit.db.repositories.eval_suites import (
+    EvalDatasetRepo,
+    EvalGraderRepo,
+    EvalRunRepo,
+)
 from agentkit.db.repositories.feedback import FeedbackRepo
 from agentkit.db.repositories.knowledge import KnowledgeRepo
 from agentkit.db.repositories.learning import LearningRunRepo
@@ -26,6 +32,10 @@ __all__ = [
     "A2ATaskRepo",
     "AuditRepo",
     "ConversationRepo",
+    "DefinitionRepo",
+    "EvalDatasetRepo",
+    "EvalGraderRepo",
+    "EvalRunRepo",
     "FeedbackRepo",
     "KnowledgeRepo",
     "LearningRunRepo",

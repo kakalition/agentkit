@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from agentkit.cli.commands import (
     auth,
+    catalog,
     core,
     credentials,
     data,
     evals,
+    extensions,
     generators,
     inspect,
     knowledge,
@@ -18,6 +20,7 @@ from agentkit.cli.commands import (
     runtime,
     schedule,
     skills,
+    spec,
     surfaces,
     training,
     webhooks,
@@ -26,10 +29,12 @@ from agentkit.cli.commands import (
 
 __all__ = [
     "auth",
+    "catalog",
     "core",
     "credentials",
     "data",
     "evals",
+    "extensions",
     "generators",
     "inspect",
     "knowledge",
@@ -40,6 +45,7 @@ __all__ = [
     "runtime",
     "schedule",
     "skills",
+    "spec",
     "surfaces",
     "training",
     "webhooks",

@@ -1,6 +1,6 @@
 [project]
 name = "agentkit"
-version = "0.2.0"
+version = "0.3.0"
 description = "Opinionated, batteries-included building blocks for PydanticAI personal-assistant agents (CLI + Telegram, MCP + A2A, durable execution)"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -79,6 +79,10 @@ vercel = ["vercel>=0.3"]
 s3 = ["boto3>=1.35"]
 # interactive terminal UI
 tui = ["textual>=0.80"]
+# computer-use: a headless Playwright browser (``computer_driver=playwright``)
+browser = ["playwright>=1.48"]
+# realtime voice: PydanticAI's realtime transport (``realtime_driver=pydantic_ai``)
+realtime = ["pydantic-ai-slim[realtime]>=2.55.0,<3"]
 
 [project.scripts]
 agentkit = "agentkit.cli:main"

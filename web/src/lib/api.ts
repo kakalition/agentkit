@@ -154,6 +154,74 @@ export interface TeamRun {
   ledger: { facts: string[]; plan: string[]; tasks: TeamLedgerTask[] } | null
 }
 
+export interface StudioPanel {
+  id: string
+  title: string
+  spec_kind: string | null
+  actions: string[]
+  layout: string
+  order: number
+  description: string
+}
+
+export interface StudioSpecRecord {
+  kind: string
+  name: string
+  version: number
+  spec: Record<string, unknown>
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface RunSummary {
+  run_id: string
+  events: number
+  started_at: string | null
+  updated_at: string | null
+}
+
+export interface RunEvent {
+  kind: string
+  run_id: string
+  seq: number
+  text: string
+  tool: string
+  node: string
+  data: Record<string, unknown>
+  created_at: string
+}
+
+export interface CatalogItem {
+  id: string
+  name: string
+  kind: string
+  description: string
+  version: string
+  source: string
+}
+
+export interface StudioAppView {
+  name: string
+  model: string | null
+  posture: string | null
+  agent: {
+    name: string | null
+    description: string | null
+    model: string | null
+    tools: string[]
+    instructions: string
+  } | null
+  agents: { name: string; description: string; capabilities: string[]; remote: boolean }[]
+  teams: { name: string; kind: string; roster: string[] }[]
+  comms: { driver: string; available: string[] } | null
+  speaker: { driver: string; available: string[] } | null
+  graph: { driver: string; available: string[] } | null
+  specs: Record<string, string[]>
+  specs_kinds: string[]
+  drivers: Record<string, { driver: string; available: string[] }>
+  extensions: Record<string, unknown>[]
+}
+
 export interface AuditEntry {
   id: number
   seq: number
@@ -354,6 +422,59 @@ export const api = {
     ),
   runStudioTeam: (name: string, prompt: string) =>
     request<TeamRun>(`/studio/teams/${encodeURIComponent(name)}/run`, json("POST", { prompt })),
+
+  // -- Studio: panels, specs, live app, traces ----------------------------
+  studioPanels: () => request<{ panels: StudioPanel[] }>("/studio/panels"),
+  studioApp: () => request<StudioAppView>("/studio/app"),
+  studioExtensions: () =>
+    request<{ extensions: Record<string, unknown>[]; applied: Record<string, unknown>[] }>(
+      "/studio/extensions",
+    ),
+  studioSpecs: () => request<{ specs: Record<string, unknown>; kinds: string[] }>("/studio/specs"),
+  studioSpecKind: (kind: string) =>
+    request<{ kind: string; specs: StudioSpecRecord[] }>(`/studio/specs/${encodeURIComponent(kind)}`),
+  saveStudioSpec: (kind: string, spec: Record<string, unknown>) =>
+    request<{ kind: string; name: string; created: boolean }>(
+      `/studio/specs/${encodeURIComponent(kind)}`,
+      json("POST", spec),
+    ),
+  deleteStudioSpec: (kind: string, name: string) =>
+    request<{ removed: boolean }>(
+      `/studio/specs/${encodeURIComponent(kind)}/${encodeURIComponent(name)}`,
+      { method: "DELETE" },
+    ),
+  studioSpecCode: (kind: string, name: string, target = "python") =>
+    request<{ code: string; target: string }>(
+      `/studio/specs/${encodeURIComponent(kind)}/${encodeURIComponent(name)}/code?target=${target}`,
+    ),
+  runStudioSpec: (kind: string, name: string, prompt: string) =>
+    request<{ result: Record<string, unknown> }>(
+      `/studio/specs/${encodeURIComponent(kind)}/${encodeURIComponent(name)}/run`,
+      json("POST", { prompt }),
+    ),
+  studioRuns: (limit = 50) => request<{ runs: RunSummary[] }>(`/studio/runs?limit=${limit}`),
+  studioRun: (runId: string) =>
+    request<{ run_id: string; events: RunEvent[] }>(
+      `/studio/runs/${encodeURIComponent(runId)}`,
+    ),
+  checkpoints: (runId: string) =>
+    request<{ run_id: string; checkpoints: Record<string, unknown>[] }>(
+      `/studio/checkpoints/${encodeURIComponent(runId)}`,
+    ),
+  studioAction: (actionId: string, body: Record<string, unknown>) =>
+    request<{ action: string; result: unknown }>(
+      `/studio/actions/${encodeURIComponent(actionId)}`,
+      json("POST", body),
+    ),
+  studioCatalog: (q = "", driver?: string) =>
+    request<{ driver: string; items: CatalogItem[] }>(
+      `/studio/catalog?q=${encodeURIComponent(q)}${driver ? `&driver=${encodeURIComponent(driver)}` : ""}`,
+    ),
+  installCatalogItem: (itemId: string, into = "definitions") =>
+    request<Record<string, unknown>>(
+      `/studio/catalog/${encodeURIComponent(itemId)}/install`,
+      json("POST", { into }),
+    ),
   audit: () => request<{ entries: AuditEntry[] }>("/audit"),
   verifyAudit: () => request<{ ok: boolean }>("/audit/verify"),
 

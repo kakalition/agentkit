@@ -12,6 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { api } from "@/lib/api"
 import type { TeamDefinition, TeamMember, TeamRun } from "@/lib/api"
+import { PanelHost } from "@/lib/panel-host"
+import { AppInspector, TracesView } from "@/lib/studio-panels"
 
 const EMPTY: TeamDefinition = {
   name: "",
@@ -373,6 +375,9 @@ export default function Studio() {
             <TabsTrigger value="json">JSON</TabsTrigger>
             <TabsTrigger value="code">Python</TabsTrigger>
             <TabsTrigger value="playground">Playground</TabsTrigger>
+            <TabsTrigger value="app">App</TabsTrigger>
+            <TabsTrigger value="traces">Traces</TabsTrigger>
+            <TabsTrigger value="panels">Panels</TabsTrigger>
           </TabsList>
 
           <TabsContent value="builder" className="space-y-4">
@@ -598,6 +603,18 @@ export default function Studio() {
               </CardContent>
             </Card>
             {run ? <ResultView run={run} /> : null}
+          </TabsContent>
+
+          <TabsContent value="app" className="space-y-4">
+            <AppInspector />
+          </TabsContent>
+
+          <TabsContent value="traces" className="space-y-4">
+            <TracesView />
+          </TabsContent>
+
+          <TabsContent value="panels" className="space-y-4">
+            <PanelHost />
           </TabsContent>
         </Tabs>
       </div>

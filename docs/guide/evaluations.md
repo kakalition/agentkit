@@ -133,3 +133,25 @@ assert_trajectory(result, calls=["search"], forbid=["delete"], order=["search", 
 ```
 
 See [Contracts & Drivers](/guide/drivers).
+
+## Datasets and graders
+
+Named **datasets** (`eval_datasets`) hold cases; **graders** score a case output or
+a stored run trace:
+
+```python
+from agentkit.graders import ExactMatchGrader, run_grader
+
+result = await run_grader(ExactMatchGrader(), case, output)
+assert result.passed
+```
+
+Reference graders: `exact`, `contains`, `schema`, `trace`, and `llm_judge` (async).
+`trace` grades a stored [`RunEvent`](/guide/studio) stream. Manage datasets and
+grade from the CLI:
+
+```bash
+agentkit eval:dataset smoke --conversation cli:default
+agentkit eval:grade smoke --grader exact
+agentkit eval:grade smoke --grader trace --run webui:default
+```

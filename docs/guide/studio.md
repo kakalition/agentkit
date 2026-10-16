@@ -76,3 +76,42 @@ Definitions are stored per owner in the `team_definitions` table.
 
 See also [Group Chat & Teams](/guide/group-chat) for the runtime pieces and
 [Native Tools](/guide/native-tools) for running a team as a `team_<name>` tool.
+
+## The App inspector
+
+The **App** tab inspects the live internal app: the primary agent (name, model,
+tools), the peer agent roster, live teams, the comms/speaker/graph drivers, the
+stored specs, and loaded extensions. It is served by `GET /api/studio/app` and is
+read-only and tolerant of partial wiring.
+
+## Traces
+
+The **Traces** tab browses recorded **run traces** — every runner emits a uniform
+`RunEvent` stream (`start` · `turn` · `tool` · `compaction` · `checkpoint` ·
+`approval` · `error` · `final`) persisted to the `run_events` table when
+`run_trace_enabled` is set.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/studio/runs` | list recent runs |
+| `GET` | `/api/studio/runs/{run_id}` | a run's events |
+| `GET` | `/api/studio/runs/{run_id}/stream` | replay the events as SSE |
+
+## Specs and panels
+
+Studio is spec-driven: `GET /api/studio/specs` returns the JSON Schema per kind,
+`GET /api/studio/panels` the panel descriptors, and
+`POST /api/studio/actions/{id}` invokes named server-side actions. Generic spec
+CRUD lives under `/api/studio/specs/{kind}[/{name}]` (with `/code?target=` and
+`/run`). See [Specs & Codegen](/guide/specs) and [Extensions](/guide/extensions).
+
+## The Panels tab (server-declared UI)
+
+The **Panels** tab is a *panel host*: it reads `GET /api/studio/panels` and renders
+each descriptor. Known layouts get rich UIs (Traces, Catalog); a panel with a
+`spec_kind` renders the **generic schema-driven form** built from
+`GET /api/studio/specs` (JSON Schema), with list/save/delete/run/code wired to
+`/api/studio/specs/{kind}`; a panel with only `actions` renders body inputs that
+`POST /api/studio/actions/{id}`. Because the generic renderer is schema-driven,
+an extension that registers a new spec kind shows a working builder panel with no
+SPA rebuild (see [Extensions](/guide/extensions)).

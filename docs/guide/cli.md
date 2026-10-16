@@ -109,6 +109,31 @@ agentkit eval evals/smoke.yaml --bootstrap bootstrap:app
 
 Runs a suite against the booted app and exits non-zero on failure — ideal in CI.
 
+```bash
+agentkit eval:capture --conversation cli:default        # cases from real turns
+agentkit eval:gate                                      # run captured cases
+agentkit eval:dataset smoke --conversation cli:default  # save a dataset
+agentkit eval:dataset smoke --file evals/smoke.yaml
+agentkit eval:grade smoke --grader exact                # grade a dataset
+agentkit eval:grade smoke --grader trace --run webui:default
+```
+
+## Extensions, specs & catalog
+
+```bash
+agentkit extensions list                     # discovered extensions + contributions
+agentkit spec list                           # stored definitions
+agentkit spec schema team                    # JSON Schema for a spec kind
+agentkit spec export team squad --target yaml -o squad.yaml
+agentkit spec import squad.yaml
+agentkit catalog list -q team                # browse the configured catalog source
+agentkit catalog install team1 --into definitions
+```
+
+`spec export --target` accepts `python` | `yaml` | `json`; `catalog install --into`
+accepts `definitions` | `skills` | `none`. See [Specs & Codegen](/guide/specs),
+[Extensions](/guide/extensions), and [Catalog & Gallery](/guide/catalog).
+
 ## Workspace
 
 ```bash

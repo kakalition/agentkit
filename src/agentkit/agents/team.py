@@ -98,6 +98,7 @@ class ManagedTeam:
         instructions: str | None = None,
         planner_model: Any = None,
         planner_agent: Any = None,
+        recorder: Any = None,
     ) -> None:
         self.roster = dict(roster)
         self.manager = manager
@@ -108,6 +109,7 @@ class ManagedTeam:
         self.instructions = instructions
         self.planner_model = planner_model
         self.planner_agent = planner_agent
+        self.recorder = recorder
 
     async def run(self, task: str, *, ctx: Any = None) -> TeamRunResult:
         """Run the team on ``task``; returns the output, ledger, and transcript."""
@@ -122,6 +124,7 @@ class ManagedTeam:
             speaker=self.speaker,
             max_turns=1,
             instructions=self.instructions,
+            recorder=self.recorder,
         )
         transcript: list[dict[str, str]] = [{"speaker": "user", "text": task}]
         last = ""
@@ -139,6 +142,7 @@ class ManagedTeam:
             self._reset_write_marker(ctx)
             reply = await runner._reply(name, prompt, ctx)  # noqa: SLF001 - shared runner helper
             transcript.append({"speaker": name, "text": reply})
+            self._record("turn", text=reply, data={"speaker": name, "round": round_index})
             progressed = bool(reply.strip()) and reply.strip() != last.strip()
             if progressed:
                 if not self._took_write_marker(ctx):
@@ -157,6 +161,16 @@ class ManagedTeam:
         return TeamRunResult(output=output, ledger=self.ledger, transcript=transcript, rounds=rounds)
 
     # -- shared ledger wiring -------------------------------------------
+    def _record(self, kind: str, **fields: Any) -> None:
+        if self.recorder is None:
+            return
+        try:
+            from agentkit.runs import RunEvent
+
+            self.recorder.record(RunEvent(kind=kind, **fields))
+        except Exception:  # pragma: no cover - recorder errors are swallowed
+            pass
+
     def _attach_ledger(self, ctx: Any) -> None:
         """Share the ledger with members and attach their ledger tools."""
         deps = getattr(ctx, "deps", None) if ctx is not None else None

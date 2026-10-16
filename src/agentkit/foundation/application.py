@@ -85,6 +85,13 @@ _BUILTIN_DRIVER_MODULES = (
     "agentkit.graph",  # graph executors
     "agentkit.executors",  # code executors
     "agentkit.evals",  # eval reporters
+    "agentkit.checkpoints",  # checkpoint stores
+    "agentkit.computer",  # computer-use drivers
+    "agentkit.realtime",  # realtime voice drivers
+    "agentkit.graders",  # eval graders
+    "agentkit.catalog",  # catalog sources
+    "agentkit.specs",  # spec kinds + built-in Studio panels
+    "agentkit.extensions",  # extension registry + panel/action SPI
     "agentkit.gateways.registry",  # chat channels
     "agentkit.foundation.notifications",  # notification channels
 )
@@ -160,6 +167,9 @@ class App:
         self._running: dict[str, Any] = {}
         self._approval_queue: Any = None
         self._posture: str | None = None
+        self._extension_manifests: list[Any] = []
+        self._extensions_loaded = False
+        self._applied_extensions: list[dict[str, Any]] = []
 
         self.container.instance("app", self)
         _load_builtin_drivers()
@@ -220,11 +230,48 @@ class App:
 
         return self.providers([FullStackProvider])
 
+    # -- extensions -----------------------------------------------------
+    def extensions(self, *manifests: Any) -> App:
+        """Register programmatic extension manifests (applied at ``boot``).
+
+        Discovery (entry points, ``AGENTKIT_EXTENSIONS``) is layered underneath so
+        a programmatic manifest of the same name wins (D9).
+        """
+        from agentkit.extensions.discovery import resolve_manifest
+
+        for manifest in manifests:
+            items = manifest if isinstance(manifest, (list, tuple)) else [manifest]
+            for item in items:
+                try:
+                    self._extension_manifests.append(resolve_manifest(item))
+                except Exception:  # pragma: no cover - never fatal
+                    log.exception("could not resolve extension manifest %r", item)
+        return self
+
+    def extension_info(self) -> list[dict[str, Any]]:
+        """A description of the applied extensions (empty before ``boot``)."""
+        return list(self._applied_extensions)
+
+    def _apply_extensions(self) -> None:
+        """Register discovered + programmatic manifests and apply them (once)."""
+        if self._extensions_loaded:
+            return
+        from agentkit.extensions import EXTENSIONS
+        from agentkit.extensions.discovery import discover_manifests
+
+        for manifest in discover_manifests():
+            EXTENSIONS.register_manifest(manifest)
+        for manifest in self._extension_manifests:
+            EXTENSIONS.register_manifest(manifest)
+        self._applied_extensions = EXTENSIONS.apply(self)
+        self._extensions_loaded = True
+
     def boot(self) -> App:
         """Run the register/boot lifecycle once (idempotent)."""
         if self._booted:
             return self
         self._apply_posture_settings()
+        self._apply_extensions()
         from agentkit import scheduler as _scheduler
 
         _scheduler.set_result_sink(self._deliver_result)
@@ -897,6 +944,22 @@ class App:
             raise RuntimeError("no primary agent registered on the app")
         return agent
 
+    def _make_recorder(self, run_id: str, repos: Any) -> Any:
+        """A run-trace recorder for a turn (repository-backed when enabled)."""
+        from agentkit.runs import recorder_for
+
+        enabled = bool(getattr(self.settings, "run_trace_enabled", True))
+        return recorder_for(repos, run_id or "run", enabled=enabled)
+
+    def _make_checkpointer(self, repos: Any) -> Any:
+        """A checkpoint store for a turn (over the live repos; off by default)."""
+        if not bool(getattr(self.settings, "checkpoints_enabled", False)):
+            return None
+        from agentkit.checkpoints import checkpointer_for
+
+        retention = int(getattr(self.settings, "checkpoint_retention", 50) or 50)
+        return checkpointer_for(repos, enabled=True, retention=retention)
+
     # -- run / serve ----------------------------------------------------
     async def run(
         self,
@@ -924,6 +987,8 @@ class App:
                     conversation_id=current.conversation_id,
                     history_processor=self._history_processor,
                     persist=not ephemeral,
+                    recorder=self._make_recorder(current.conversation_id, repos),
+                    checkpointer=self._make_checkpointer(repos),
                 )
                 current.result = await runner.send(current.text)
             return current
@@ -960,6 +1025,8 @@ class App:
                     conversation_id=conversation_id,
                     history_processor=self._history_processor,
                     persist=not ephemeral,
+                    recorder=self._make_recorder(conversation_id, repos),
+                    checkpointer=self._make_checkpointer(repos),
                 )
                 async for event in runner.stream(text):
                     yield event
@@ -984,6 +1051,8 @@ class App:
                     agent=self._require_agent(),
                     conversation_id=conversation_id,
                     history_processor=self._history_processor,
+                    recorder=self._make_recorder(conversation_id, repos),
+                    checkpointer=self._make_checkpointer(repos),
                 )
                 return await runner.resume(deferred_tool_results)
         finally:

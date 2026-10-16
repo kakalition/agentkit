@@ -39,6 +39,21 @@ WEBUI_ENABLED=true
 WEBUI_HOST=127.0.0.1
 WEBUI_PORT=8787
 
+# --- Studio: run traces, checkpoints, computer-use, catalog ------------------
+RUN_TRACE_ENABLED=true
+RUN_EVENTS_RETENTION=2000
+CHECKPOINTS_ENABLED=false
+CHECKPOINT_RETENTION=50
+# loopback | playwright (needs `pip install agentkit[browser]`)
+COMPUTER_DRIVER=loopback
+# loopback | pydantic_ai (needs `pip install agentkit[realtime]`)
+REALTIME_DRIVER=loopback
+# local | skills | http | git
+CATALOG_DRIVER=local
+CATALOG_DIR=
+CATALOG_URL=
+CATALOG_REPO=
+
 # --- Observability ----------------------------------------------------------
 # phoenix | console | otlp | off
 OBSERVABILITY=phoenix

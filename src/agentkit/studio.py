@@ -14,8 +14,9 @@ This powers the operator Studio: the persisted definition lives in
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -62,7 +63,16 @@ class TeamMember(BaseModel):
 
 
 class TeamDefinition(BaseModel):
-    """A serializable team definition (the Studio team-builder payload)."""
+    """A serializable team definition (the Studio team-builder payload).
+
+    Registered as the ``team`` spec kind in :mod:`agentkit.specs.team`; ``kind``
+    here is the *runner* kind (``groupchat`` | ``supervisor`` | ``managed``), which
+    is why the spec protocol uses ``spec_kind`` (see
+    :class:`~agentkit.contracts.spec.Spec`).
+    """
+
+    #: The spec kind this model satisfies (see :class:`~agentkit.contracts.spec.Spec`).
+    spec_kind: ClassVar[str] = "team"
 
     name: str
     kind: str = "groupchat"
@@ -108,6 +118,19 @@ class TeamDefinition(BaseModel):
         if unknown:
             raise ValueError(f"manual_order names not in roster: {', '.join(unknown)}")
         return self
+
+    @classmethod
+    def from_json(cls, data: str) -> TeamDefinition:
+        return cls.model_validate_json(data)
+
+    @classmethod
+    def json_schema(cls) -> dict[str, Any]:
+        return cls.model_json_schema()
+
+    def render(self, target: str = "python") -> str:
+        from agentkit.specs.codegen import render_spec
+
+        return render_spec(self, target)
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +184,10 @@ def resolve_from_app(app: Any) -> Callable[[str], Any]:
 
 
 def materialize_team(
-    definition: TeamDefinition, resolve: Callable[[str], Any] | None = None
+    definition: TeamDefinition,
+    resolve: Callable[[str], Any] | None = None,
+    *,
+    recorder: Any = None,
 ) -> Any:
     """Build a runnable runner (``run(task, ctx=...)``) for a definition."""
     resolve = resolve or (lambda name: stub_member(name))
@@ -173,6 +199,7 @@ def materialize_team(
             speaker=speaker,
             max_rounds=definition.max_rounds,
             instructions=definition.instructions,
+            recorder=recorder,
         )
     from agentkit.agents.groupchat import GroupChatRunner
 
@@ -181,6 +208,7 @@ def materialize_team(
         speaker=speaker,
         max_turns=definition.max_turns,
         instructions=definition.instructions,
+        recorder=recorder,
     )
 
 
@@ -194,15 +222,19 @@ async def run_team_definition(
     *,
     resolve: Callable[[str], Any] | None = None,
     ctx: Any = None,
+    recorder: Any = None,
 ) -> dict[str, Any]:
     """Run a definition and return a plain result (output/transcript/ledger)."""
-    runner = materialize_team(definition, resolve)
+    runner = materialize_team(definition, resolve, recorder=recorder)
     result = await runner.run(prompt, ctx=ctx)
     transcript = list(getattr(result, "transcript", []))
     rounds = getattr(result, "rounds", None)
     if rounds is None:
         rounds = getattr(result, "turns", 0)
     ledger = getattr(result, "ledger", None)
+    if recorder is not None:
+        with contextlib.suppress(Exception):
+            await recorder.flush()
     return {
         "team": definition.name,
         "kind": definition.kind,

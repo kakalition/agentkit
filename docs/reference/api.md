@@ -76,6 +76,23 @@ Related: `discover_providers`, `load_bootstrap`, `scaffold_project`,
 `Planner`, `Plan`, `PlanStep`, `StateGraph`, `END`, `GraphError`, `Supervisor`,
 `spawn_tool`, `team_tools`.
 
+## Extensions, specs & runs
+
+`ExtensionManifest`, `PanelSpec`, `EXTENSIONS`, `PANELS`, `ACTIONS`,
+`register_manifest`, `register_panel`, `register_action`, `run_action`,
+`discover_manifests`; `SPECS`, `SpecKind`, `SpecModel`, `SpecRegistry`,
+`SpecStore`, `RepositorySpecStore`, `register_spec`, `register_codegen`,
+`render_spec`, `AgentSpec`, `TeamDefinitionSpec`, `WorkflowSpec`, `EvalSpec`,
+`WorkflowSpecNode`; `RunEvent`, `RunRecorder`, `recorder_for`, `InMemoryRecorder`,
+`RepositoryRunRecorder`, `CompositeRecorder`; `Checkpoint`, `CheckpointManager`,
+`CheckpointStore`, `MemoryCheckpointStore`, `FileCheckpointStore`,
+`RepositoryCheckpointStore`; `ComputerManager`, `LoopbackComputer`,
+`PlaywrightComputer`, `attach_computer`; `LoopbackRealtime`, `PydanticAIRealtime`,
+`RealtimeManager`; graders `ExactMatchGrader`, `ContainsGrader`, `SchemaGrader`,
+`TraceGrader`, `LLMJudgeGrader`, `register_grader`; `CatalogManager`,
+`LocalCatalog`, `SkillsCatalog`, `HttpCatalog`, `CatalogItem`,
+`register_catalog_source`.
+
 ## Contracts & drivers
 
 Every subsystem's contract lives in `agentkit.contracts` (runtime-checkable
@@ -86,7 +103,8 @@ Protocols): `CacheContract`, `PromptStore`, `EmbedderContract`, `MemoryStore`,
 `Speech`/`Transcriber`/`Synthesizer`, `Extractor`/`LearningStrategy`/
 `LearningSink`, `Topology`, `ContextStrategy`, `TaskStore`, `PlanningStrategy`,
 `AgentMiddleware`, `GraphExecutor`, `CodeExecutor`, `Reporter`, `Channel`,
-`NotificationChannel`.
+`NotificationChannel`, `Spec`, `CheckpointStore`, `RunRecorder`, `RunStore`,
+`Computer`, `RealtimeSession`, `Dataset`, `Grader`, `Catalog`.
 
 The registry and the typed identifiers:
 
@@ -95,7 +113,7 @@ The registry and the typed identifiers:
 | `DriverKind` | the `StrEnum` of every subsystem kind |
 | `Manager` | base class resolving a settings-selected driver per kind |
 | `register_driver`, `register`, `resolve`, `unregister` | the global driver registry |
-| `CacheDriver`, `EmbeddingsDriver`, `CommsDriver`, … | per-subsystem driver `StrEnum`s (`agentkit.support.kinds`) |
+| `CacheDriver`, `EmbeddingsDriver`, `CommsDriver`, … | per-subsystem driver `StrEnum`s (`agentkit.support.kinds`), incl. `CheckpointDriver`, `ComputerDriver`, `RealtimeDriver`, `CatalogDriver`, `DatasetDriver`, `EvalGraderDriver` |
 
 `App.manager(kind)`, `App.extend(kind, name, factory)` and `App.drivers()` expose
 the layer, and each subsystem has a convenience accessor (`app.cache`,

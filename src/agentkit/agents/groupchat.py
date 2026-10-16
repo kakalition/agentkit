@@ -46,6 +46,7 @@ class GroupChatRunner:
         stop_on_consensus: bool = True,
         instructions: str | None = None,
         events: Any = None,
+        recorder: Any = None,
     ) -> None:
         self.agents = dict(agents)
         self.speaker = speaker or RoundRobinSpeaker()
@@ -54,6 +55,7 @@ class GroupChatRunner:
         self.stop_on_consensus = stop_on_consensus
         self.instructions = instructions
         self.events = events
+        self.recorder = recorder
 
     async def run(self, task: str, *, ctx: Any = None) -> GroupChatResult:
         """Run the chat thread on ``task`` and return the transcript + last reply."""
@@ -106,11 +108,22 @@ class GroupChatRunner:
         return await AgentHandle.local(target, name=name).invoke(ctx, prompt)
 
     async def _emit(self, speaker: str, text: str) -> None:
+        self._record("turn", text=text, data={"speaker": speaker})
         try:
             from agentkit.foundation.facade import emit
 
             await emit("agent.message", speaker=speaker, text=text)
         except Exception:  # pragma: no cover - events are best-effort
+            pass
+
+    def _record(self, kind: str, **fields: Any) -> None:
+        if self.recorder is None:
+            return
+        try:
+            from agentkit.runs import RunEvent
+
+            self.recorder.record(RunEvent(kind=kind, **fields))
+        except Exception:  # pragma: no cover - recorder errors are swallowed
             pass
 
     @staticmethod

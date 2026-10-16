@@ -168,6 +168,12 @@ need to.
 | `evals_reporter` | `EVALS_REPORTER_DRIVER` | `text`, `json`, `pydantic` |
 | `channel` | `CHANNEL_DRIVER` | `log`, `telegram`, `slack`, `email`, `discord` |
 | `notification_channel` | `NOTIFICATION_CHANNEL_DRIVER` | `log`, `conversation`, `telegram` |
+| `checkpoint` | `CHECKPOINT_DRIVER` | `repository` (the database), `file`, `memory` |
+| `computer` | `COMPUTER_DRIVER` | `loopback`, `playwright` (needs the `browser` extra) |
+| `realtime` | `REALTIME_DRIVER` | `loopback`, `pydantic_ai` (needs the `realtime` extra) |
+| `catalog` | `CATALOG_DRIVER` | `local`, `skills`, `http`, `git` |
+| `dataset` | `DATASET_DRIVER` | `repository`, `memory` |
+| `eval_grader` | `EVAL_GRADER_DRIVER` | `exact`, `contains`, `schema`, `trace`, `llm_judge` |
 
 ::: tip Modern conveniences
 Some of these run the *newer* agent features: `tasks` (a to-do list),

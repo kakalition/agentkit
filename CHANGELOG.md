@@ -4,6 +4,53 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-10-16
+
+### Added
+- **Extension substrate** (`agentkit.extensions`): a declarative
+  `ExtensionManifest` (specs, panels, actions, drivers, catalogs, codegen)
+  discovered from the `agentkit.extensions` entry-point group, an
+  `AGENTKIT_EXTENSIONS` env var, or `app.extensions(...)`, applied idempotently at
+  `App.boot()` with failures logged and isolated (never fatal). The Studio panel
+  SPI (`GET /api/studio/panels`, `POST /api/studio/actions/{id}`) ships a
+  schema-driven renderer so a new spec kind shows a builder panel with no SPA
+  rebuild. New `DriverKind`s: `CHECKPOINT`, `COMPUTER`, `REALTIME`, `CATALOG`,
+  `DATASET`, `EVAL_GRADER`.
+- **Unified spec layer** (`agentkit.specs`): a `Spec` contract + `SpecRegistry`
+  (kind → model, JSON Schema, materializer, runner) and a `RepositorySpecStore`
+  over the new `definitions` table. `studio.TeamDefinition` is re-expressed as the
+  `team` spec (public alias + `/api/studio/teams` preserved); agent/workflow/eval
+  specs materialize to live agents / `StateGraph` / `EvalSuite`, and `StateGraph`
+  gained `to_spec`/`from_spec`. Idempotent `team_definitions` → `definitions`
+  copy at `init_db`. Codegen targets `python`/`yaml`/`json` + `agentkit spec`
+  CLI (`list`/`schema`/`export`/`import`).
+- **Run traces** (`agentkit.runs`): a uniform `RunEvent` emitted by every runner
+  (`ChatRunner`, `GroupChatRunner`, `ManagedTeam`) with an optional `recorder`
+  (no behavior change when absent), persisted to `run_events` and served by
+  `GET /api/studio/runs[/{id}][/stream]`.
+- **Checkpoints / time travel** (`agentkit.checkpoints`): a `CheckpointStore`
+  contract with `memory`/`file`/`repository` drivers, `checkpoints_enabled`
+  integration into `ChatRunner` and `CheckpointedGraphExecutor`, and
+  `/api/studio/checkpoints/{run_id}`.
+- **Browser / computer-use** (`agentkit.computer` + `toolkits.computer`): a
+  `Computer` contract with an in-process `LoopbackComputer` and a lazy
+  `PlaywrightComputer` (the `browser` extra), plus approval-gated `browser_*`
+  tools.
+- **Realtime voice** (`agentkit.realtime`): a `RealtimeSession` contract with an
+  in-process `LoopbackRealtime` and a lazy `PydanticAIRealtime` (the `realtime`
+  extra).
+- **Eval UX** (`agentkit.graders`): `Grader` reference drivers (`exact`,
+  `contains`, `schema`, `trace`, `llm_judge`), `eval_datasets`/`eval_graders`/
+  `eval_runs` tables, and `eval:dataset`/`eval:grade` CLI commands.
+- **Catalog / gallery** (`agentkit.catalog`): a `Catalog` contract with
+  `local`/`skills`/`http`/`git` source drivers and definitions/skills install
+  targets (+ `agentkit catalog` CLI).
+- **Studio App inspector**: `GET /api/studio/app` reports the live app (primary
+  agent + tools, peer roster, teams, comms/speaker/graph drivers, specs,
+  extensions); the Studio SPA gained **App** and **Traces** tabs.
+- Docs: `/guide/extensions`, `/guide/specs`, `/guide/computer-use`,
+  `/guide/realtime`, `/guide/catalog`; updates to studio/evaluations.
+
 ## [0.2.0] - 2026-10-16
 
 ### Added

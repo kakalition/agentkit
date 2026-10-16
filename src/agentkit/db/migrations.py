@@ -81,12 +81,64 @@ def _ensure_fts(connection: Connection) -> bool:
     return ensure_fts(connection)
 
 
+def copy_team_definitions(connection: Connection) -> int:
+    """Copy legacy ``team_definitions`` rows into ``definitions`` (``kind="team"``).
+
+    Idempotent: rows already present for ``(owner_id, 'team', name)`` are skipped,
+    and the old table is never modified or dropped. Returns the number copied.
+    """
+    inspector = inspect(connection)
+    tables = set(inspector.get_table_names())
+    if "team_definitions" not in tables or "definitions" not in tables:
+        return 0
+    rows = (
+        connection.execute(
+            text(
+                "SELECT name, owner_id, kind, definition, created_at, updated_at "
+                "FROM team_definitions"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    copied = 0
+    for row in rows:
+        exists = connection.execute(
+            text(
+                "SELECT 1 FROM definitions "
+                "WHERE owner_id = :owner_id AND kind = 'team' AND name = :name"
+            ),
+            {"owner_id": row["owner_id"], "name": row["name"]},
+        ).first()
+        if exists is not None:
+            continue
+        connection.execute(
+            text(
+                "INSERT INTO definitions "
+                "(owner_id, kind, name, version, spec, created_at, updated_at) "
+                "VALUES (:owner_id, 'team', :name, 1, :spec, "
+                "COALESCE(:created_at, CURRENT_TIMESTAMP), "
+                "COALESCE(:updated_at, CURRENT_TIMESTAMP))"
+            ),
+            {
+                "owner_id": row["owner_id"],
+                "name": row["name"],
+                "spec": row["definition"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            },
+        )
+        copied += 1
+    return copied
+
+
 async def init_db(engine: AsyncEngine, metadata: Any = None) -> None:
     """Create all tables (first-run convenience), then reconcile drift + FTS."""
     meta = metadata or SQLModel.metadata
     async with engine.begin() as connection:
         await connection.run_sync(meta.create_all)
         await connection.run_sync(apply_missing_columns, meta)
+        await connection.run_sync(copy_team_definitions)
         await connection.run_sync(_ensure_fts)
 
 

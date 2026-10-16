@@ -26,6 +26,36 @@ def _drivers_view(app: Any) -> dict[str, Any]:
         return {}
 
 
+def _extensions_view(app: Any) -> list[dict[str, Any]]:
+    """Registered extensions (empty on failure)."""
+    try:
+        from agentkit.extensions import EXTENSIONS
+
+        return EXTENSIONS.describe()
+    except Exception:  # pragma: no cover - never break introspection
+        return []
+
+
+def _specs_view(app: Any) -> dict[str, list[str]]:
+    """Registered spec kinds (empty on failure)."""
+    try:
+        from agentkit.specs import SPECS
+
+        return {kind: [] for kind in SPECS.kinds()}
+    except Exception:  # pragma: no cover - never break introspection
+        return {}
+
+
+def _panels_view() -> list[dict[str, Any]]:
+    """Registered Studio panels (empty on failure)."""
+    try:
+        from agentkit.extensions.panels import PANELS
+
+        return [panel.to_dict() for panel in PANELS.list()]
+    except Exception:  # pragma: no cover - never break introspection
+        return []
+
+
 def _posture_view(settings: Any, app: Any = None) -> dict[str, Any]:
     """The active posture and the layers its profile derives."""
     from agentkit.posture import resolve_posture
@@ -54,6 +84,14 @@ def stack_view(settings: Any, app: Any = None) -> dict[str, Any]:
         "model_name": settings.model_name,
         "model_providers": supported_prefixes(),
         "drivers": _drivers_view(app),
+        "extensions": _extensions_view(app),
+        "specs": _specs_view(app),
+        "panels": _panels_view(),
+        "runs": {"enabled": bool(getattr(settings, "run_trace_enabled", True))},
+        "checkpoints": {
+            "enabled": bool(getattr(settings, "checkpoints_enabled", False)),
+            "retention": int(getattr(settings, "checkpoint_retention", 50) or 50),
+        },
         "memory": {
             "enabled": settings.memory_enabled,
             "embedding_backend": settings.memory_embedding_backend,

@@ -24,6 +24,28 @@ All validation is **green** as of the last edit:
 
 Workstreams WS0, WS-DX, WS1, WS2, WS3, WS4 and WS5 are **complete** (see RESOLVED).
 
+## Later plane — Extension Substrate (0.3.0, 2026-10-16)
+
+The follow-on plan `.kilo/plans/1792131022744-agentkit-extension-substrate.md`
+(extension substrate + gap-fill) is implemented and green:
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Lint | `uv run ruff check src tests` | clean |
+| Types | `uv run mypy src/agentkit` | clean (263 files) |
+| Tests | `uv run pytest --cov=agentkit` | 743 pass / 11 skip, **coverage 79%** (gate ≥70%) |
+| Web build | `cd web && bun run build` | passes (App + Traces tabs added) |
+| Docs build | `cd docs && bun run build` | passes (new guide pages prerender) |
+
+Delivered: `agentkit.extensions` (manifest + registry + discovery + panel/action
+SPI), `agentkit.specs` (spec registry, `definitions` store + migration, codegen,
+spec CLI), run traces (`agentkit.runs`), checkpoints (`agentkit.checkpoints`),
+computer-use (`agentkit.computer`), realtime (`agentkit.realtime`), graders
+(`agentkit.graders`), catalog (`agentkit.catalog`), the Studio **App inspector**
+(`GET /api/studio/app`) and **Traces** panel, plus `browser`/`realtime` extras and
+`CHANGELOG.md` `[0.3.0]`. The `0.2.0` validation numbers above describe the
+*earlier* handoff, not the current tree.
+
 ---
 
 ## DONE

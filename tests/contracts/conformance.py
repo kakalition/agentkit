@@ -361,3 +361,70 @@ def notification_channel_conformance(channel: Any) -> None:
 
     assert isinstance(channel, NotificationChannel)
     assert isinstance(channel.send(_Note()), str)
+
+
+async def checkpoint_store_conformance(store: Any) -> None:
+    from agentkit.contracts import CheckpointStore
+
+    assert isinstance(store, CheckpointStore)
+    await store.put("conformance:run", 0, {"x": 1}, label="n0")
+    await store.put("conformance:run", 1, {"x": 2}, label="n1")
+    latest = await store.latest("conformance:run")
+    assert latest is not None
+    assert len(await store.list("conformance:run")) == 2
+    assert await store.get("conformance:run", 0) is not None
+    assert await store.delete("conformance:run") == 2
+    assert await store.latest("conformance:run") is None
+
+
+def run_recorder_conformance(recorder: Any) -> None:
+    from agentkit.contracts import RunRecorder
+    from agentkit.runs import RunEvent
+
+    assert isinstance(recorder, RunRecorder)
+    event = recorder.record(RunEvent(kind="start", text="hi"))
+    assert event.seq == 0
+    assert recorder.events[0].kind == "start"
+
+
+def spec_conformance(spec: Any) -> None:
+    from agentkit.contracts import Spec
+
+    assert isinstance(spec, Spec)
+    assert isinstance(spec.spec_kind, str) and spec.spec_kind
+    assert isinstance(spec.name, str)
+    assert isinstance(spec.model_dump_json(), str)
+    assert isinstance(spec.json_schema(), dict)
+    assert isinstance(spec.render("json"), str)
+    assert isinstance(spec.render("yaml"), str)
+
+
+async def computer_conformance(computer: Any) -> None:
+    from agentkit.contracts import Computer
+
+    assert isinstance(computer, Computer)
+    assert isinstance(await computer.goto("https://example.test"), str)
+    assert isinstance(await computer.snapshot(), str)
+    assert isinstance(await computer.click("#a"), str)
+    assert isinstance(await computer.type("#a", "x"), str)
+    assert await computer.evaluate("1 + 1") is not None
+    await computer.close()
+
+
+async def grader_conformance(grader: Any, case: Any, output: Any) -> None:
+    from agentkit.contracts import Grader
+    from agentkit.graders import run_grader
+
+    assert isinstance(grader, Grader)
+    assert isinstance(grader.name, str) and grader.name
+    await run_grader(grader, case, output)  # must not raise
+
+
+async def catalog_conformance(catalog: Any) -> None:
+    from agentkit.contracts import Catalog
+
+    assert isinstance(catalog, Catalog)
+    assert isinstance(catalog.name, str)
+    assert isinstance(await catalog.search(""), list)
+    assert await catalog.get("does-not-exist") is None
+

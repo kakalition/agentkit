@@ -19,14 +19,19 @@ from agentkit.support.kinds import (
     AudioDriver,
     AuthDriver,
     CacheDriver,
+    CatalogDriver,
     ChannelDriver,
+    CheckpointDriver,
     ChunkerDriver,
     CodeExecDriver,
     CommsDriver,
+    ComputerDriver,
     ContextDriver,
     DatabaseDriver,
+    DatasetDriver,
     DurabilityDriver,
     EmbeddingsDriver,
+    EvalGraderDriver,
     EvalsReporterDriver,
     GraphDriver,
     GuardrailDriver,
@@ -42,6 +47,7 @@ from agentkit.support.kinds import (
     PromptsDriver,
     QueueDriverKind,
     RateLimitDriver,
+    RealtimeDriver,
     RecallDriver,
     RerankerDriver,
     RetrieverDriver,
@@ -254,6 +260,31 @@ class AgentSettings(BaseSettings):
     evals_reporter_driver: EvalsReporterDriver = EvalsReporterDriver.TEXT
     channel_driver: ChannelDriver = ChannelDriver.LOG
     notification_channel_driver: NotificationChannelDriver = NotificationChannelDriver.LOG
+    checkpoint_driver: CheckpointDriver = CheckpointDriver.REPOSITORY
+    computer_driver: ComputerDriver = ComputerDriver.LOOPBACK
+    realtime_driver: RealtimeDriver = RealtimeDriver.LOOPBACK
+    catalog_driver: CatalogDriver = CatalogDriver.LOCAL
+    dataset_driver: DatasetDriver = DatasetDriver.REPOSITORY
+    eval_grader_driver: EvalGraderDriver = EvalGraderDriver.EXACT
+
+    # run tracing — uniform RunEvents for the Playground + trace grading. Cheap
+    # (in-memory buffered) and flushed to the ``run_events`` table when enabled.
+    run_trace_enabled: bool = True
+    run_events_retention: int = 2000
+
+    # checkpoints — time travel over graph/session runs (opt-in; bounded retention).
+    checkpoints_enabled: bool = False
+    checkpoint_retention: int = 50
+
+    # computer-use / realtime / catalog (see the corresponding driver kinds)
+    computer_headless: bool = True
+    computer_timeout_ms: int = 30_000
+    realtime_model: str | None = None
+    catalog_dir: str | None = None
+    catalog_url: str | None = None
+    catalog_repo: str | None = None
+    catalog_ref: str = "main"
+    catalog_path: str = "catalog.json"
 
     # chat channels — extra gateways + DM pairing
     mattermost_webhook_url: str | None = None

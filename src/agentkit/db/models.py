@@ -283,6 +283,9 @@ class TeamDefinitionRecord(SQLModel, table=True):
     The roster is stored by name; members are resolved to live agents at run
     time (see :mod:`agentkit.studio`). Distinct from the in-process
     ``agentkit.teams.TEAMS`` registry, which holds live, code-registered teams.
+
+    Superseded by :class:`DefinitionRecord` (``kind="team"``); rows are copied
+    there at ``init_db`` and this table stays read-only for one release.
     """
 
     __tablename__ = "team_definitions"
@@ -293,3 +296,101 @@ class TeamDefinitionRecord(SQLModel, table=True):
     definition: str = "{}"  # JSON-serialized agentkit.studio.TeamDefinition
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class DefinitionRecord(SQLModel, table=True):
+    """A unified, owner-scoped declarative definition (the spec store).
+
+    One row per ``(owner_id, kind, name)`` where ``kind`` is a spec kind
+    (``agent`` | ``team`` | ``workflow`` | ``eval``) and ``spec`` is the
+    JSON-serialized spec model. Legacy ``team_definitions`` rows are copied in
+    with ``kind="team"`` at ``init_db`` (idempotent; the old table is kept).
+    """
+
+    __tablename__ = "definitions"
+    __table_args__ = (Index("ix_definition_owner_kind_name", "owner_id", "kind", "name"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    kind: str = Field(default="", index=True)
+    name: str = Field(default="")
+    version: int = 1
+    spec: str = "{}"
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class RunEventRecord(SQLModel, table=True):
+    """A persisted run-trace event (Playground v2 + trace grading).
+
+    One row per event in a run, keyed by ``(owner_id, run_id, seq)``; ``data`` is
+    the JSON-serialized :class:`~agentkit.runs.RunEvent`.
+    """
+
+    __tablename__ = "run_events"
+    __table_args__ = (Index("ix_run_event_owner_run_seq", "owner_id", "run_id", "seq"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    run_id: str = Field(default="", index=True)
+    seq: int = 0
+    kind: str = ""
+    data: str = "{}"
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class CheckpointRecord(SQLModel, table=True):
+    """A persisted run checkpoint (time travel over graph/session runs)."""
+
+    __tablename__ = "checkpoints"
+    __table_args__ = (Index("ix_checkpoint_owner_run_seq", "owner_id", "run_id", "seq"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    run_id: str = Field(default="", index=True)
+    seq: int = 0
+    label: str = ""
+    state: str = "{}"
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class EvalDatasetRecord(SQLModel, table=True):
+    """A named evaluation dataset (inline cases + optional source ref)."""
+
+    __tablename__ = "eval_datasets"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    name: str = Field(default="", index=True)
+    source: str = ""
+    cases: str = "[]"  # JSON list of Case dicts
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class EvalGraderRecord(SQLModel, table=True):
+    """A named grader configuration (driver + options)."""
+
+    __tablename__ = "eval_graders"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    name: str = Field(default="", index=True)
+    driver: str = "exact"
+    options: str = "{}"
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class EvalRunRecord(SQLModel, table=True):
+    """A recorded eval run (dataset + report summary + graded trace ref)."""
+
+    __tablename__ = "eval_runs"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    dataset: str = Field(default="", index=True)
+    run_id: str = ""
+    passed: bool = False
+    report: str = "{}"
+    created_at: datetime = Field(default_factory=_utcnow)

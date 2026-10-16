@@ -25,6 +25,7 @@ mutable mapping falls back to a built-in async loop.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import inspect
 from collections.abc import Callable, Mapping, MutableMapping
@@ -83,6 +84,27 @@ class StateGraph:
     def set_entry(self, name: str) -> StateGraph:
         self._entry = name
         return self
+
+    # -- specs ----------------------------------------------------------
+    def to_spec(self, name: str = "workflow", **extra: Any) -> Any:
+        """Describe this graph as a :class:`~agentkit.specs.workflow.WorkflowDefinition`."""
+        from agentkit.specs.workflow import WorkflowDefinition, WorkflowNode
+
+        return WorkflowDefinition(
+            name=name,
+            nodes=[WorkflowNode(name=node) for node in self._nodes],
+            edges=dict(self._edges),
+            routers={source: f"{source}__router" for source in self._routers},
+            entry=self._entry or "",
+            **extra,
+        )
+
+    @classmethod
+    def from_spec(cls, spec: Any, **options: Any) -> StateGraph:
+        """Build a graph from a workflow spec (see ``specs.workflow.materialize_workflow``)."""
+        from agentkit.specs.workflow import materialize_workflow
+
+        return materialize_workflow(spec, **options)  # type: ignore[return-value]
 
     # -- run ------------------------------------------------------------
     async def run(self, state: Any) -> Any:
@@ -287,14 +309,29 @@ class ParallelGraphExecutor:
 
 
 class CheckpointedGraphExecutor:
-    """Records a state snapshot after every node (in-process checkpointing)."""
+    """Records a state snapshot after every node.
 
-    def __init__(self) -> None:
+    With a :class:`~agentkit.checkpoints.CheckpointStore` the snapshots persist
+    (``store.put(run_id, seq, state, label=node)``) so a run can be inspected and
+    resumed; without one they stay in the in-process ``checkpoints`` dict.
+    """
+
+    def __init__(self, store: Any = None, *, run_id: str = "run") -> None:
         self.checkpoints: dict[str, Any] = {}
+        self.store = store
+        self.run_id = run_id
+        self._seq = 0
 
     async def run(self, graph: Any, state: Any, **options: Any) -> Any:
+        store = options.get("store", self.store)
+        run_id = options.get("run_id", self.run_id)
+
         async def save(node: str, current: Any) -> None:
             self.checkpoints[node] = copy.deepcopy(current)
+            if store is not None:
+                with contextlib.suppress(Exception):
+                    await store.put(run_id, self._seq, copy.deepcopy(current), label=node)
+                self._seq += 1
 
         return await graph.run_steps(state, on_step=save)
 
@@ -318,4 +355,10 @@ def _parallel_graph_driver(app: Any) -> ParallelGraphExecutor:
 
 @register_driver(DriverKind.GRAPH, GraphDriver.CHECKPOINTED)
 def _checkpointed_graph_driver(app: Any) -> CheckpointedGraphExecutor:
-    return CheckpointedGraphExecutor()
+    store = None
+    try:
+        if bool(getattr(app.settings, "checkpoints_enabled", False)):
+            store = app.manager("checkpoint").driver()
+    except Exception:  # pragma: no cover - checkpoint store is best-effort
+        store = None
+    return CheckpointedGraphExecutor(store)

@@ -92,9 +92,32 @@ is rejected at settings load. See [Contracts & Drivers](/guide/drivers).
 | `evals_reporter_driver` | `EVALS_REPORTER_DRIVER` | `text` | `text`, `json`, `pydantic` |
 | `channel_driver` | `CHANNEL_DRIVER` | `log` | `log`, `telegram`, `slack`, `email`, `discord` |
 | `notification_channel_driver` | `NOTIFICATION_CHANNEL_DRIVER` | `log` | `log`, `conversation`, `telegram` |
+| `checkpoint_driver` | `CHECKPOINT_DRIVER` | `repository` | `repository`, `file`, `memory` |
+| `computer_driver` | `COMPUTER_DRIVER` | `loopback` | `loopback`, `playwright` (extra) |
+| `realtime_driver` | `REALTIME_DRIVER` | `loopback` | `loopback`, `pydantic_ai` (extra) |
+| `catalog_driver` | `CATALOG_DRIVER` | `local` | `local`, `skills`, `http`, `git` |
+| `dataset_driver` | `DATASET_DRIVER` | `repository` | `repository`, `memory` |
+| `eval_grader_driver` | `EVAL_GRADER_DRIVER` | `exact` | `exact`, `contains`, `schema`, `trace`, `llm_judge` |
 
 `memory_embedding_backend` doubles as the `embeddings` driver name
 (`sentence-transformers` | `fastembed` | `hash` | `none`).
+
+## Studio, traces & checkpoints
+
+| Field | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `run_trace_enabled` | `RUN_TRACE_ENABLED` | `True` | persist a uniform `RunEvent` trace per run (`run_events`) |
+| `run_events_retention` | `RUN_EVENTS_RETENTION` | `2000` | max events kept per run |
+| `checkpoints_enabled` | `CHECKPOINTS_ENABLED` | `False` | record run checkpoints (time travel) |
+| `checkpoint_retention` | `CHECKPOINT_RETENTION` | `50` | max checkpoints kept per run |
+| `computer_headless` | `COMPUTER_HEADLESS` | `True` | run the Playwright browser headless |
+| `computer_timeout_ms` | `COMPUTER_TIMEOUT_MS` | `30000` | Playwright default timeout |
+| `realtime_model` | `REALTIME_MODEL` | `None` | model for the realtime session |
+| `catalog_dir` | `CATALOG_DIR` | `None` | directory for the `local` catalog (default `catalog`) |
+| `catalog_url` | `CATALOG_URL` | `None` | JSON index URL for the `http`/`git` catalog |
+| `catalog_repo` | `CATALOG_REPO` | `None` | git repo for the `git` catalog |
+| `catalog_ref` | `CATALOG_REF` | `main` | git ref for the `git` catalog |
+| `catalog_path` | `CATALOG_PATH` | `catalog.json` | index path inside the git repo |
 
 ## Web UI
 

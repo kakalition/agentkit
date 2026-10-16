@@ -71,6 +71,16 @@ export const NAV: Record<Section, NavGroup[]> = {
       ],
     },
     {
+      title: "Extending agentkit",
+      items: [
+        { slug: "extensions", label: "Extensions" },
+        { slug: "specs", label: "Specs & Codegen" },
+        { slug: "computer-use", label: "Browser & Computer-Use" },
+        { slug: "realtime", label: "Realtime Voice" },
+        { slug: "catalog", label: "Catalog & Gallery" },
+      ],
+    },
+    {
       title: "Production",
       items: [
         { slug: "safety", label: "Safety & Moderation" },
