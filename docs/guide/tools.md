@@ -26,11 +26,17 @@ async def add_note(ctx: RunContext[Deps], text: str, *, pinned: bool = False) ->
     return f"saved: {text}"
 ```
 
-Register it on the builder:
+Register it on the definition:
 
 ```python
-agent.tool(add_note)
+from agentkit import AgentDefinition
+
+class Assistant(AgentDefinition):
+    name = "assistant"
+    tools = [add_note]
 ```
+
+Fluent equivalent: `agent.tool(add_note)`.
 
 ::: tip Describe your arguments
 PydanticAI derives the JSON schema from the annotations and the docstring. Clear
@@ -52,17 +58,28 @@ ctx.deps.remember_artifact("chart", "/tmp/chart.png", "revenue by month")
 
 ## Common options
 
+Per-tool options are applied in `configure(self, agent)`:
+
 ```python
-agent.tool(
-    delete_note,
-    requires_approval=True,   # defer to a human before running
-    retries=2,                # retry on failure
-    timeout=10.0,             # seconds
-    sequential=True,          # do not run concurrently with other tools
-    defer_loading=True,       # only expose the schema when relevant
-    cache_ttl=60,             # cache results for 60s
-)
+from agentkit import AgentDefinition
+
+class Assistant(AgentDefinition):
+    name = "assistant"
+
+    def configure(self, agent):
+        agent.tool(
+            delete_note,
+            requires_approval=True,   # defer to a human before running
+            retries=2,                # retry on failure
+            timeout=10.0,             # seconds
+            sequential=True,          # do not run concurrently with other tools
+            defer_loading=True,       # only expose the schema when relevant
+            cache_ttl=60,             # cache results for 60s
+        )
+        return agent
 ```
+
+Fluent equivalent: `agent.tool(delete_note, requires_approval=True, retries=2, timeout=10.0, sequential=True, defer_loading=True, cache_ttl=60)`.
 
 | Option | Meaning |
 | --- | --- |
@@ -80,22 +97,32 @@ keyed on the arguments (the `RunContext` is ignored). It is ideal for expensive,
 pure lookups:
 
 ```python
-from agentkit import cached_tool
+from agentkit import AgentDefinition, cached_tool
 
-agent.tool(cached_tool(geocode, ttl=3600))
+class Assistant(AgentDefinition):
+    name = "assistant"
+    tools = [cached_tool(geocode, ttl=3600)]
 ```
+
+Fluent equivalent: `agent.tool(cached_tool(geocode, ttl=3600))`.
 
 ## Toolsets
 
 A **toolset** is a bundle of tools (a PydanticAI `FunctionToolset`, an MCP toolset,
-and so on). Attach one with `.toolset(...)`:
+and so on). Declare one with the `toolsets` field:
 
 ```python
 from pydantic_ai import FunctionToolset
+from agentkit import AgentDefinition
 
 math_tools = FunctionToolset(tools=[add, multiply])
-agent.toolset(math_tools)
+
+class Assistant(AgentDefinition):
+    name = "assistant"
+    toolsets = [math_tools]
 ```
+
+Fluent equivalent: `agent.toolset(math_tools)`.
 
 ### MCP toolsets
 
@@ -103,23 +130,37 @@ The [MCP registry](/guide/protocols) exposes each server as a prefixed toolset �
 `<server>_<tool>` — so servers that share tool names never collide:
 
 ```python
+from agentkit import AgentDefinition
 from agentkit.mcp import MCPRegistry, MCPServerSpec
 
 registry = MCPRegistry([
     MCPServerSpec(name="chart", command="uvx", args=["mcp-server-chart"]),
 ])
+
+# inside your async setup:
 toolset = await registry.toolset("chart")   # tools appear as chart_*
-agent.toolset(toolset)
+
+class ChartAgent(AgentDefinition):
+    name = "chart"
+    toolsets = [toolset]
 ```
+
+Fluent equivalent: `agent.toolset(toolset)`.
 
 ## Delegation tools
 
-The most powerful "tool" is another agent. `.specialist(...)` turns an agent into a
-delegation tool, forwarding usage and model so accounting stays correct:
+The most powerful "tool" is another agent. The `specialists` field turns an agent
+into a delegation tool, forwarding usage and model so accounting stays correct:
 
 ```python
-agent.specialist(reminder_agent, name="handle_reminders", description="Set reminders.")
+from agentkit import AgentDefinition
+
+class Desk(AgentDefinition):
+    name = "desk"
+    specialists = {"handle_reminders": (reminder_agent, "Set reminders.")}
 ```
+
+Fluent equivalent: `agent.specialist(reminder_agent, name="handle_reminders", description="Set reminders.")`.
 
 For explicit, awaitable sub-tasks (rather than model-chosen delegation), use
 `spawn_tool` from [Multi-Agent Teams](/guide/teams).
@@ -129,8 +170,21 @@ For explicit, awaitable sub-tasks (rather than model-chosen delegation), use
 Mark risky tools with `requires_approval=True` and enable approvals on the agent:
 
 ```python
-agent = Agent.make("desk").instructions("…").approvals().tool(send_email, requires_approval=True).build()
+from agentkit import AgentDefinition
+
+class Desk(AgentDefinition):
+    name = "desk"
+    instructions = "…"
+    approvals = True
+
+    def configure(self, agent):
+        agent.tool(send_email, requires_approval=True)
+        return agent
+
+agent = Desk.build()
 ```
+
+Fluent equivalent: `agent = Agent.make("desk").instructions("…").approvals().tool(send_email, requires_approval=True).build()`.
 
 When the model calls `send_email`, the run is deferred. The app raises an
 `approval.asked` event and your `app.on("approval.asked", ...)` listener (or the
@@ -168,7 +222,22 @@ Turn any OpenAPI document into tools with `tools_from_openapi` (or attach them
 directly to a built agent):
 
 ```python
-from agentkit import Agent, register_openapi_tools, tools_from_openapi
+from agentkit import AgentDefinition, register_openapi_tools, tools_from_openapi
+
+class Api(AgentDefinition):
+    name = "api"
+    instructions = "…"
+    output = str
+    tools = tools_from_openapi("openapi.json", base_url="https://api.example.com")
+
+agent = Api.build()
+register_openapi_tools(agent, "openapi.json", base_url="https://api.example.com")
+```
+
+Fluent equivalent:
+
+```python
+from agentkit import Agent
 
 tools = tools_from_openapi("openapi.json", base_url="https://api.example.com")
 agent = Agent.make("api").instructions("…").output(str).build()

@@ -86,11 +86,27 @@ There are two seams, and they solve different problems:
 | Turn middleware (`app.middleware`) | the whole turn | auth, rate limiting, caching, moderation of inputs |
 | Capability hooks (`.capability(...)`) | inside the agent | tool start/end, tool arguments, model output |
 
-Capabilities are provided by PydanticAI's `Hooks`; agentkit ships helpers:
+Capabilities are provided by PydanticAI's `Hooks`; agentkit ships helpers. Capability
+hooks have no class field, so declare them in `configure(self, agent)`:
 
 ```python
+from agentkit import AgentDefinition
 from agentkit.foundation.middleware import lifecycle_hooks, policy_hooks, guardrails_hooks
 
+
+class X(AgentDefinition):
+    name = "x"
+
+    def configure(self, agent):
+        return agent.capability(guardrails_hooks())
+
+
+agent = X.build()
+```
+
+Fluent equivalent:
+
+```python
 agent = Agent.make("x").capability(guardrails_hooks()).build()
 ```
 
@@ -100,16 +116,27 @@ agent = Agent.make("x").capability(guardrails_hooks()).build()
 
 ## A realistic example
 
-Combine authentication middleware with a capability that audits tools:
+Combine authentication middleware with a capability that audits tools. The turn
+middleware is app-level and unchanged; the tool-auditing capability is declared on
+the agent class (it has no class field, so use `configure`):
 
 ```python
+from agentkit import AgentDefinition
+
+
 async def authenticate(turn, call_next):
     if turn.conversation_id not in allowed_conversations():
         raise PermissionDenied("not allowed in this conversation")
     return await call_next()
 
 app.middleware(authenticate)
-agent.capability(lifecycle_hooks())     # emits tool.start / tool.end events
+
+
+class Assistant(AgentDefinition):
+    name = "assistant"
+
+    def configure(self, agent):
+        return agent.capability(lifecycle_hooks())   # emits tool.start / tool.end events
 ```
 
 Continue to [Models & Database →](/guide/database)

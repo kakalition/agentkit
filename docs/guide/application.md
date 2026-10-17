@@ -64,18 +64,31 @@ An `App` exposes a small, typed surface. Each method is chainable.
 
 ### The agent
 
-```python
-from agentkit import Agent
+The primary way is a discoverable class — any `AgentDefinition` under `app/Agents/`
+is registered automatically, so the app needs no `app.agent(...)` call:
 
-app.agent(
-    Agent.make("nudge").persona().instructions("Be concise.").output(str)
-)
+```python
+from agentkit import AgentDefinition
+
+class Nudge(AgentDefinition):
+    name = "nudge"
+    persona = True
+    instructions = "Be concise."
+    output = str
+
 app.agent()          # → the built PydanticAI agent
 ```
 
-You may pass either a fluent builder or an already-built PydanticAI agent. Passing
-a builder defers construction until first use (and lets the app inject settings and
-the event dispatcher).
+To register an agent explicitly (e.g. from another module), pass a builder or an
+already-built PydanticAI agent; a builder defers construction until first use and
+lets the app inject settings and the event dispatcher:
+
+```python
+from agentkit import Agent
+
+app.agent(Agent.make("nudge").persona().instructions("Be concise."))
+app.agent()          # → the built PydanticAI agent
+```
 
 ### Channels
 

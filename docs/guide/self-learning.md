@@ -31,19 +31,27 @@ stack view report its state), and bounded (caps, dedupe, decay, redaction).
 ## Enabling learning
 
 ```python
-from agentkit import Agent
+from agentkit import AgentDefinition
 
-agent = (
-    Agent.make("assistant")
-    .instructions("Be helpful.")
-    .learning()               # reflect -> learn -> apply
-    .output(str)
-    .build()
-)
+class Assistant(AgentDefinition):
+    name = "assistant"
+    instructions = "Be helpful."
+    learning = True           # reflect -> learn -> apply
+    output = str
+
+agent = Assistant.build()
 ```
 
 `.full()` attaches learning automatically when `LEARNING_ENABLED=true`; an explicit
 `.learning()` opts in regardless of the flag. `.learning(False)` disables it.
+
+Fluent equivalent:
+
+```python
+from agentkit import Agent
+
+agent = Agent.make("assistant").instructions("Be helpful.").learning().output(str).build()
+```
 
 ## Tools
 

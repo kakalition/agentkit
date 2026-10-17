@@ -69,10 +69,24 @@ print(result.ledger.render())
 Register a roster once and reuse it from any agent:
 
 ```python
-from agentkit import register_team
-from agentkit import Agent
+from agentkit import AgentDefinition, register_team
 
 register_team("squad", {"researcher": researcher, "writer": writer}, kind="groupchat")
+
+class Lead(AgentDefinition):
+    name = "lead"
+    output = str
+
+    def configure(self, agent):
+        return agent.team("squad")
+
+agent = Lead.build()
+```
+
+Fluent equivalent:
+
+```python
+from agentkit import Agent
 
 agent = Agent.make("lead").team("squad").output(str)
 ```

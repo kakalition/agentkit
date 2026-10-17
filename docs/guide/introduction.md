@@ -28,8 +28,10 @@ agentkit ships the capabilities you would otherwise wire together yourself:
 
 - **An application container.** `App`, service `Provider`s, class facades,
   configuration sections, an event bus, and a middleware pipeline.
-- **A fluent agent builder.** `Agent.make(...)` composes instructions, tools,
-  specialists, memory, skills, knowledge, and policies declaratively.
+- **A declarative agent class.** Subclass `AgentDefinition` and declare
+  instructions, tools, specialists, memory, skills, knowledge, and policies as
+  class attributes; the equivalent functional form is the `Agent.make(...)`
+  fluent builder.
 - **Persistence.** A libSQL/SQLite runtime with repositories for conversations,
   messages, usage, audit, memory, knowledge, feedback, and scheduled jobs.
 - **Memory, skills, and retrieval.** Durable owner memory, discoverable `SKILL.md`

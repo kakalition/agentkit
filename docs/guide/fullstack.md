@@ -2,12 +2,75 @@
 
 ## Introduction
 
-agentkit ships a complete single-user assistant stack. `Agent.full()` turns a
-builder into the whole thing in one call, and `FullStackProvider` wires the
-application layers (config sections, schedules, channels) from settings — only
-for the layers you have actually configured.
+agentkit ships a complete single-user assistant stack. The primary (class-based)
+way to enable it is `full = True` on an `AgentDefinition`; the fluent
+`Agent.full()` call is the equivalent builder form. `FullStackProvider` wires the
+application layers (config sections, schedules, channels) from settings — only for
+the layers you have actually configured.
 
-## `Agent.full()`
+## The class form (primary)
+
+Declare the stack on the agent class. Any `AgentDefinition` under `app/Agents/` is
+discovered and built automatically — no `app.agent(...)` call is needed — and
+`full = True` expands the whole stack, with each layer toggleable by its own field:
+
+```python
+from agentkit import AgentDefinition
+
+from app.Tools.notes import add_note, current_time, list_notes
+
+
+class Assistant(AgentDefinition):
+    name = "assistant"
+    posture = "hybrid"           # specialized | hybrid | free
+    instructions = "You are a concise, helpful assistant."
+    tools = [current_time, add_note, list_notes]
+    full = True                  # persona + memory + skills + HITL + safety + todos
+    persona = True               # read <AGENT_HOME>/SOUL.md
+    memory = True                # typed memory tools + digest
+    skills = True                # discover skills/*/SKILL.md
+    learning = True              # reflect -> learn -> apply (review-gated)
+    # knowledge = "./knowledge"  # or: knowledge = True (the app knowledge base)
+    # approvals = True           # HITL approvals + ask_user
+    # safety = True              # default tool policy
+    # workspace = "./work"       # file tools
+    # subagents = registry       # peer tools + handoff_to
+    # code = True                # approval-gated run_code (off by default)
+    output = str
+```
+
+`full = True` is what expands the stack; the per-layer fields toggle it. A field set
+without `full` still attaches just that layer. Use `configure(self, agent)` for
+anything not covered by a field — for example the native toolkits' allow-lists
+(`agent.database({...})`, `agent.scheduler([...])`, `agent.queue({...})`).
+
+| Field | Layer | Skipped when |
+| --- | --- | --- |
+| `persona=True` | `SOUL.md` persona | — |
+| `memory=True` | typed memory tools + digest | `MEMORY_ENABLED=false` |
+| `skills=True` | `SKILL.md` discovery | `SKILLS_ENABLED=false` |
+| `knowledge=<path\|True>` | `search_knowledge` (RAG) | field unset |
+| `approvals=True` | approvals + `ask_user` | `APPROVALS_ENABLED=false` |
+| `safety=True` | `default_policy()` | — |
+| `workspace=<dir>` | file tools | field unset |
+| `subagents=<registry\|mapping>` | peer tools + `handoff_to` | field unset |
+| `learning=True` | self-learning ([Self-Learning](/guide/self-learning)) | `LEARNING_ENABLED=false` |
+| `todos=True` | in-loop todo tools ([Tasks & Todos](/guide/tasks)) | — |
+| `code=True` | approval-gated `run_code` ([Code Execution](/guide/code-execution)) | off by default |
+| `guardrails=True` | injection-scanning hooks ([Safety](/guide/safety)) | — |
+| `working_memory=True` | thread-scoped working memory | — |
+| `agent_middleware=[...]` | middleware hooks | — |
+
+Native toolkits ([Native Tools](/guide/native-tools)) are enabled by `full = True`
+according to the posture and `*_TOOLS_ENABLED` settings; their allow-lists
+(`models`/`tasks`/`jobs`) are set in `configure` or with the fluent form below.
+
+Applying the same agent twice is safe: each layer is applied once and tools are
+never double-registered.
+
+## The fluent form
+
+The same stack is one call on the builder:
 
 ```python
 from agentkit import Agent
@@ -22,7 +85,8 @@ agent = (
 )
 ```
 
-`full(...)` is a toggleable, idempotent expansion:
+`full(...)` is the toggleable, idempotent expansion (the same layers as the class
+fields above, plus the native allow-lists `models`/`tasks`/`jobs`):
 
 | Argument | Layer | Skipped when |
 | --- | --- | --- |
@@ -69,10 +133,10 @@ Nothing raises when the stack is empty.
 ## Scaffold
 
 `agentkit new <name>` writes the **full-stack** project by default:
-`bootstrap.py` registers `FullStackProvider` (and
-`DriverServiceProvider`, which reports/overrides drivers), `app/Agents/assistant.py`
-builds with `.full()`, `app/Channels/` shows a channel factory, and
-`config/memory.py` + `config/channels.py` layer the sections.
+`bootstrap.py` registers `FullStackProvider` (and `DriverServiceProvider`, which
+reports/overrides drivers), `app/Agents/assistant.py` is an `AgentDefinition` with
+`full = True`, `app/Channels/` shows a channel factory, and `config/memory.py` +
+`config/channels.py` layer the sections.
 
 ```bash
 agentkit new my-agent          # full stack (default)

@@ -11,6 +11,24 @@ clarification for the conversation.
 Mark a tool as risky and enable approvals on the agent:
 
 ```python
+from agentkit import AgentDefinition
+
+class Desk(AgentDefinition):
+    name = "desk"
+    instructions = "…"
+    approvals = True
+    output = str
+
+    def configure(self, agent):
+        agent.tool(send_email, requires_approval=True)
+        return agent
+
+agent = Desk.build()
+```
+
+Fluent equivalent:
+
+```python
 agent = (
     Agent.make("desk")
     .instructions("…")
@@ -57,7 +75,25 @@ paused. This is the pause/resume primitive: a turn can span minutes or days.
 ## Clarification
 
 Sometimes the agent needs information that only the user has. Add the `ask_user`
-tool with `.clarify()` and supply a handler:
+tool with `.clarify()` — which has no class field, so apply it in
+`configure(self, agent)` — and supply a handler:
+
+```python
+from agentkit import AgentDefinition
+
+class Desk(AgentDefinition):
+    name = "desk"
+    instructions = "…"
+    output = str
+
+    def configure(self, agent):
+        agent.clarify()
+        return agent
+
+app.agent(Desk.build()).clarify(lambda question, options: ask_the_user(question))
+```
+
+Fluent equivalent:
 
 ```python
 agent = Agent.make("desk").instructions("…").clarify().output(str).build()

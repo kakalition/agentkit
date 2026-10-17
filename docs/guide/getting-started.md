@@ -67,25 +67,27 @@ boots `bootstrap:app` by default.
 
 ```python
 # bootstrap.py
-from agentkit import Agent, App, AgentSettings
+from agentkit import AgentDefinition, App, AgentSettings
 
 def add_note(ctx, text: str) -> str:
     """Save a note for later."""
     ctx.deps.extras.setdefault("notes", []).append(text)
     return f"saved: {text}"
 
-agent = (
-    Agent.make("nudge")
-    .instructions("You keep short notes and remind the owner about them.")
-    .tool(add_note)
-    .memory()                # remember/recall/forget tools, backed by the DB
-    .output(str)
-    .build()
-)
+class Nudge(AgentDefinition):
+    name = "nudge"
+    instructions = "You keep short notes and remind the owner about them."
+    tools = [add_note]
+    memory = True            # remember/recall/forget tools, backed by the DB
+    output = str
+
+agent = Nudge.build()
 
 app = App(name="nudge", settings=AgentSettings(owner_id="me"))
 app.agent(agent)
 ```
+
+Fluent equivalent: `Agent.make("nudge").instructions(…).tool(add_note).memory().output(str).build()`.
 
 That is a complete, runnable agent. Run a single turn:
 

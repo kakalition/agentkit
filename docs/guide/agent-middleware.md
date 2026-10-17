@@ -6,10 +6,10 @@ redaction, caching, or per-call observability.
 
 ## Registering middleware
 
-Pass one or more middleware to the builder:
+Declare the middleware on the agent class with the `agent_middleware` field:
 
 ```python
-from agentkit import Agent, AgentMiddlewareCapability, BaseAgentMiddleware
+from agentkit import AgentDefinition, AgentMiddlewareCapability, BaseAgentMiddleware
 
 
 class RetryOnce(BaseAgentMiddleware):
@@ -20,6 +20,19 @@ class RetryOnce(BaseAgentMiddleware):
             return await call_next()
 
 
+class Writer(AgentDefinition):
+    name = "writer"
+    instructions = "Be concise."
+    output = str
+    agent_middleware = [RetryOnce()]
+
+
+agent = Writer.build()
+```
+
+Fluent equivalent — pass one or more middleware to the builder:
+
+```python
 agent = (
     Agent.make("writer")
     .instructions("Be concise.")

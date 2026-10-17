@@ -35,12 +35,57 @@ text = prompts.render("greeting", persona="Nudge", user="Ada")
 
 ## Attaching to an agent
 
-Use `.prompt(...)` on the builder — with a registry, a directory, a file, or a raw
-template:
+Declare prompts on the agent class. A plain file path maps straight to the
+`prompts` field; a registry plus a named prompt, or a prompt directory, needs the
+`name=` and render variables that have no class field, so declare those in
+`configure(self, agent)`:
+
+```python
+from agentkit import AgentDefinition
+
+
+class Nudge(AgentDefinition):
+    name = "nudge"
+    instructions = "Be concise."
+    prompts = ["./prompts/system.md"]        # a single markdown file
+    output = str
+
+
+agent = Nudge.build()
+```
+
+```python
+class Nudge(AgentDefinition):
+    name = "nudge"
+    output = str
+
+    def configure(self, agent):
+        # a registry + a named prompt (extra keywords are render variables)
+        return agent.prompt(prompts, name="greeting", persona="Nudge", user="Ada")
+
+
+agent = Nudge.build()
+```
+
+```python
+class Nudge(AgentDefinition):
+    name = "nudge"
+    output = str
+
+    def configure(self, agent):
+        # a directory (the prompt to load is named with name=)
+        return agent.prompt("./prompts", name="greeting")
+
+
+agent = Nudge.build()
+```
+
+Fluent equivalent — use `.prompt(...)` on the builder, with a registry, a
+directory, a file, or a raw template:
 
 ```python
 # a registry + a named prompt (extra keywords are render variables)
-agent = Agent.make("nudge").prompt(prompts, "greeting", persona="Nudge", user="Ada").output(str)
+agent = Agent.make("nudge").prompt(prompts, name="greeting", persona="Nudge", user="Ada").output(str)
 
 # a single markdown file
 agent = Agent.make("nudge").prompt("./prompts/system.md")

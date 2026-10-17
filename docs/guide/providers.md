@@ -132,22 +132,25 @@ stops the app from booting.
 ## A complete provider
 
 ```python
-from agentkit import Agent, Provider
+from agentkit import AgentDefinition, Provider
 
 ORCHESTRATOR = "You keep notes and answer questions about them."
+
+
+class Notes(AgentDefinition):
+    name = "notes"
+    persona = True
+    instructions = ORCHESTRATOR
+    memory = True
+    knowledge = "./docs"
+    output = str
+
 
 class NotesProvider(Provider):
     def register(self, app):
         from notes.config import Settings
 
-        app.agent(
-            Agent.make("notes")
-            .persona()
-            .instructions(ORCHESTRATOR)
-            .memory()
-            .knowledge(path="./docs")
-            .output(str)
-        )
+        app.agent(Notes.to_builder())      # or rely on discovery under app/Agents/
         app.config("notes", Settings)
 
     def boot(self, app):

@@ -54,29 +54,57 @@ registry.get("pdf-tools").description
 ## Attaching skills to an agent
 
 ```python
+from agentkit import AgentDefinition
+
+class Nudge(AgentDefinition):
+    name = "nudge"
+    instructions = "…"
+    skills = True
+    output = str
+
+agent = Nudge.build()
+```
+
+Fluent equivalent:
+
+```python
 agent = Agent.make("nudge").instructions("…").skills().output(str).build()
 ```
 
-`.skills()` adds:
+`skills = True` (the fluent `.skills()`) adds:
 
 - a compact **index** in the instructions (`- pdf-tools: Extract text…`);
 - **`list_skills()`** — the index;
 - **`load_skill(name)`** — the full instructions and bundled-file list;
 - **`read_skill_file(name, path)`** — read a bundled file (path-traversal safe).
 
+For an explicit registry or other `.skills(...)` sub-options there is no class
+field, so use `configure` (the class field `skills = True` enables discovery):
+
 ```python
-agent.skills()                                        # discover from settings
-agent.skills(SkillRegistry.from_paths(["./skills"]))  # explicit registry
+from agentkit import AgentDefinition, SkillRegistry
+
+class Nudge(AgentDefinition):
+    name = "nudge"
+    skills = True                                          # enable discovery
+
+    def configure(self, agent):
+        return agent.skills(SkillRegistry.from_paths(["./skills"]))
 ```
 
 ## Locking tools to skills
 
 Set `enforce=True` to restrict the agent's tools to the union of each skill's
 `allowed-tools`. This is a "locked mode" — tools not declared by any skill are
-denied at execution:
+denied at execution. There is no class field for `enforce`, so use `configure`:
 
 ```python
-agent.skills(registry, enforce=True)
+class Nudge(AgentDefinition):
+    name = "nudge"
+    skills = True
+
+    def configure(self, agent):
+        return agent.skills(registry, enforce=True)
 ```
 
 The underlying policy is available directly:
@@ -105,10 +133,15 @@ agentkit make:tool pdf_extract
 ## Authoring skills
 
 The agent can write skills itself. `.skill_authoring()` adds two approval-gated
-tools that render valid front matter and re-discover the registry:
+tools that render valid front matter and re-discover the registry. It has no class
+field, so attach it in `configure`:
 
 ```python
-agent.skill_authoring()   # save_skill / update_skill
+class SkillAuthor(AgentDefinition):
+    name = "skill-author"
+
+    def configure(self, agent):
+        return agent.skill_authoring()   # save_skill / update_skill
 ```
 
 ```python

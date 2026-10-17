@@ -20,14 +20,24 @@ if signals:
 ```
 
 The `guardrails_hooks()` capability does this for **every tool result** and emits a
-`guardrails.injection` event:
+`guardrails.injection` event. It is a PydanticAI capability, so attach it in
+`configure(self, agent)`:
 
 ```python
+from agentkit import AgentDefinition
 from agentkit.foundation.middleware import guardrails_hooks
 
-agent = Agent.make("x").capability(guardrails_hooks()).build()
+class X(AgentDefinition):
+    name = "x"
+
+    def configure(self, agent):
+        agent.capability(guardrails_hooks())
+        return agent
+
 app.on("guardrails.injection", lambda event: alert(event.tool, event.signals))
 ```
+
+Fluent equivalent: `agent = Agent.make("x").capability(guardrails_hooks()).build()`.
 
 ## PII detection and redaction
 
@@ -46,7 +56,7 @@ Detects emails, phone numbers, SSNs, credit-card numbers, and IBANs.
 screens each turn's input (and can redact in place); the hooks scan model output.
 
 ```python
-from agentkit import ModerationPolicy
+from agentkit import AgentDefinition, ModerationPolicy
 from agentkit.moderation import moderation_middleware, moderation_hooks
 
 policy = ModerationPolicy(
@@ -55,8 +65,16 @@ policy = ModerationPolicy(
     redact_pii=True,
 )
 app.middleware(moderation_middleware(policy))
-agent.capability(moderation_hooks(policy))
+
+class X(AgentDefinition):
+    name = "x"
+
+    def configure(self, agent):
+        agent.capability(moderation_hooks(policy))
+        return agent
 ```
+
+Fluent equivalent: `agent.capability(moderation_hooks(policy))`.
 
 A blocked input or output raises `ContentBlocked`:
 
@@ -74,17 +92,37 @@ except ContentBlocked as exc:
 `ToolPolicy` expresses a model's RBAC once:
 
 ```python
-from agentkit import ToolPolicy
+from agentkit import AgentDefinition, ToolPolicy
 
 policy = ToolPolicy(allow={"search", "read_file"})   # deny everything else
-agent = Agent.make("safe").instructions("…").policy(policy).build()
+
+class Safe(AgentDefinition):
+    name = "safe"
+    instructions = "…"
+    policy = policy               # the ToolPolicy field (deny-by-default)
+
+# equivalently, inline:
+# class Safe(AgentDefinition):
+#     policy = ToolPolicy(allow={"search", "read_file"})
 ```
+
+Fluent equivalent: `agent = Agent.make("safe").instructions("…").policy(policy).build()`.
 
 Risky tools are approved by a human — see [Human-in-the-Loop](/guide/hitl):
 
 ```python
-agent.tool(send_email, requires_approval=True).approvals()
+from agentkit import AgentDefinition
+
+class Desk(AgentDefinition):
+    name = "desk"
+    approvals = True
+
+    def configure(self, agent):
+        agent.tool(send_email, requires_approval=True)
+        return agent
 ```
+
+Fluent equivalent: `agent.tool(send_email, requires_approval=True).approvals()`.
 
 ## Secret and amount redaction
 

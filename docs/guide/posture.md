@@ -19,6 +19,27 @@ three postures.
 ## Selecting a posture
 
 ```python
+from agentkit import AgentDefinition
+
+class Support(AgentDefinition):
+    name = "support"
+    posture = "specialized"    # closed specialist
+    full = True
+
+class Assistant(AgentDefinition):
+    name = "assistant"
+    posture = "hybrid"         # hybrid (default)
+    full = True
+
+class Scout(AgentDefinition):
+    name = "scout"
+    posture = "free"           # autonomous generalist
+    full = True
+```
+
+Fluent equivalent:
+
+```python
 from agentkit import Agent
 
 agent = Agent.make("support").specialized().full()   # closed specialist
@@ -45,6 +66,18 @@ AGENT_POSTURE=specialized
 The rule is one line — **explicit argument > builder method > posture > settings
 flag** — and it is covered by tests. Settings flags remain a *hard gate*: a layer
 whose flag is disabled stays disabled even when a posture would enable it.
+
+```python
+from agentkit import AgentDefinition
+
+class X(AgentDefinition):
+    name = "x"
+    posture = "specialized"
+    full = True
+    memory = True          # explicit declaration re-enables memory
+```
+
+Fluent equivalent:
 
 ```python
 Agent.make("x").specialized().full(memory=True)   # explicit arg re-enables memory

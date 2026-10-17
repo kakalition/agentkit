@@ -24,8 +24,33 @@ plain `@agent.tool` when the behaviour is app-specific.
 
 ## Enabling toolkits
 
-`Agent.full()` attaches every settings-enabled toolkit. You can also opt in one
-capability at a time:
+`full = True` attaches every settings-enabled toolkit. You can also opt in one
+capability at a time. Each native toolkit has **no class field**, so declare them in
+`configure(self, agent)`:
+
+```python
+from agentkit import AgentDefinition
+
+class Assistant(AgentDefinition):
+    name = "assistant"
+    instructions = "Be helpful."
+    output = str
+
+    def configure(self, agent):
+        agent.database({"note": Note})      # CRUD over an allow-list of models
+        agent.scheduler(["sync_notes"])     # manage schedules over allow-listed tasks
+        agent.queue({"sync": SyncNotes})    # enqueue allow-listed jobs
+        agent.notifications()               # notify / notify_me
+        agent.history()                     # list / search / read conversations
+        agent.usage()                       # usage + audit trail (read-only)
+        agent.knowledge_admin()             # index / replace / forget documents
+        agent.skill_authoring()             # write SKILL.md files
+        return agent
+
+agent = Assistant.build()
+```
+
+Fluent equivalent:
 
 ```python
 from agentkit import Agent
@@ -33,21 +58,22 @@ from agentkit import Agent
 agent = (
     Agent.make("assistant")
     .instructions("Be helpful.")
-    .database({"note": Note})      # CRUD over an allow-list of models
-    .scheduler(["sync_notes"])     # manage schedules over allow-listed tasks
-    .queue({"sync": SyncNotes})    # enqueue allow-listed jobs
-    .notifications()               # notify / notify_me
-    .history()                     # list / search / read conversations
-    .usage()                       # usage + audit trail (read-only)
-    .knowledge_admin()             # index / replace / forget documents
-    .skill_authoring()             # write SKILL.md files
+    .database({"note": Note})
+    .scheduler(["sync_notes"])
+    .queue({"sync": SyncNotes})
+    .notifications()
+    .history()
+    .usage()
+    .knowledge_admin()
+    .skill_authoring()
     .output(str)
     .build()
 )
 ```
 
 `.native(enabled=None, *, models, tasks, jobs)` attaches the whole set (all
-settings-enabled toolkits by default). Attaching a toolkit twice is a no-op.
+settings-enabled toolkits by default). It has no class field either — call it in
+`configure(self, agent)`. Attaching a toolkit twice is a no-op.
 
 Each toolkit is gated by a settings flag:
 

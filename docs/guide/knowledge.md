@@ -44,6 +44,20 @@ without an embedder (see [Memory](/guide/memory#how-recall-works) for backends).
 ## Attaching to an agent
 
 ```python
+from agentkit import AgentDefinition
+
+class Support(AgentDefinition):
+    name = "support"
+    instructions = "Answer from the knowledge base."
+    knowledge = kb                 # add a search_knowledge tool
+    output = str
+
+agent = Support.build()
+```
+
+Fluent equivalent:
+
+```python
 agent = (
     Agent.make("support")
     .instructions("Answer from the knowledge base.")
@@ -53,14 +67,27 @@ agent = (
 )
 ```
 
-`.knowledge(...)` adds a **`search_knowledge(query, limit=5)`** tool. With
-`index=True` (the default) it also lists indexed sources in the instructions so the
-model knows what it can search:
+The `knowledge` field (fluent `.knowledge(...)`) adds a
+**`search_knowledge(query, limit=5)`** tool. With `index=True` (the default) it also
+lists indexed sources in the instructions so the model knows what it can search:
 
 ```python
-agent.knowledge(kb, index=False)      # tool only, no source listing
-agent.knowledge(path="./docs")        # index a path at build time
-agent.knowledge(kb, limit=8)          # default result limit
+class Support(AgentDefinition):
+    name = "support"
+    knowledge = kb            # a prepared KnowledgeBase
+    # knowledge = "./docs"    # index a path at build time
+    # knowledge = True        # use the app's default runtime
+```
+
+The `index` and `limit` sub-options have no class field, so set them in
+`configure`:
+
+```python
+class Support(AgentDefinition):
+    name = "support"
+
+    def configure(self, agent):
+        return agent.knowledge(kb, limit=8, index=False)
 ```
 
 ## Choosing a chunk size

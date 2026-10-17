@@ -19,6 +19,23 @@ The simplest multi-agent pattern is delegation: expose one agent as a tool of
 another. Usage and model are forwarded, so accounting stays correct.
 
 ```python
+from agentkit import AgentDefinition
+
+class Nudge(AgentDefinition):
+    name = "nudge"
+    instructions = "Route requests to the right specialist."
+    specialists = {
+        "handle_reminders": (reminder_agent, "Set reminders."),
+        "handle_notes": (notes_agent, "Manage notes."),
+    }
+    output = str
+
+orchestrator = Nudge.build()
+```
+
+Fluent equivalent:
+
+```python
 orchestrator = (
     Agent.make("nudge")
     .instructions("Route requests to the right specialist.")
@@ -29,8 +46,8 @@ orchestrator = (
 )
 ```
 
-See [The Agent Builder](/guide/agents#specialist-agent-name-description) for
-`.specialist()` and `.orchestrate()`.
+See [The Agent Builder](/guide/agents#specialists) for
+`specialists` / `.specialist()` and `.orchestrate()`.
 
 ## The `Supervisor`
 
@@ -58,8 +75,20 @@ For explicit, awaitable sub-tasks — rather than model-chosen delegation — us
 sub-agent and returns its output.
 
 ```python
-from agentkit import spawn_tool
+from agentkit import AgentDefinition, spawn_tool
 
+class Lead(AgentDefinition):
+    name = "lead"
+    instructions = "Spin up specialists as needed."
+    tools = [spawn_tool({"researcher": researcher_agent})]
+    output = str
+
+agent = Lead.build()
+```
+
+Fluent equivalent:
+
+```python
 agent = (
     Agent.make("lead")
     .instructions("Spin up specialists as needed.")
@@ -123,7 +152,7 @@ default), or forward a short recap (**summarized**).
 ### End-to-end example
 
 ```python
-from agentkit import Agent, App, DriverKind, spawn_tool, team_tools
+from agentkit import AgentDefinition, App, DriverKind, spawn_tool, team_tools
 from agentkit.agents.registry import AgentRegistry
 from agentkit.agents.subagent import SharedContext, subagent_tool
 
@@ -132,7 +161,11 @@ roster = {"writer": writer_agent, "researcher": researcher_agent}
 
 # Default: CONTEXT_DRIVER unset -> "isolated"; spawn_tool gives the model a
 # spawn(agent, task) tool and each child sees only the task string.
-lead = Agent.make("lead").tool(spawn_tool(roster)).build()
+class Lead(AgentDefinition):
+    name = "lead"
+    tools = [spawn_tool(roster)]
+
+lead = Lead.build()
 tools = team_tools(roster)          # convenience: [spawn_tool(roster)]
 
 # The same thing at a lower level: a registry plus an explicit strategy.

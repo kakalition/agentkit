@@ -75,11 +75,21 @@ surfaces, so a supervisor can probe the process.
 
 ## The instrumentation capability
 
-For finer-grained control, attach PydanticAI's instrumentation capability:
+For finer-grained control, attach PydanticAI's instrumentation capability.
+Instrumentation has no `AgentDefinition` field, so attach it in `configure`:
 
 ```python
-agent = Agent.make("notes").instructions("…").instrumentation().build()
+from agentkit import AgentDefinition
+
+class Notes(AgentDefinition):
+    name = "notes"
+    instructions = "…"
+
+    def configure(self, agent):
+        return agent.instrumentation()
 ```
+
+Fluent equivalent: `Agent.make("notes").instructions("…").instrumentation().build()`.
 
 ## What to watch
 

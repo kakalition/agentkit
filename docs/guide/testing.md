@@ -53,19 +53,27 @@ MEMORY_EMBEDDING_BACKEND=hash
 Swap the model for a `FunctionModel` so a turn is deterministic and instant:
 
 ```python
+from agentkit import AgentDefinition
 from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
+
+class TestAgent(AgentDefinition):
+    name = "test"
+    instructions = "x"
+    output = str
 
 def test_app_run(runtime):
     app = App(name="test", settings=runtime.settings, discover=False)
     app._runtime = runtime
-    app.agent(Agent.make("test").instructions("x").output(str))
+    app.agent(TestAgent.to_builder())
     app._model = FunctionModel(lambda m, i: ModelResponse(parts=[TextPart("ok")]))
     app.boot()
 
     result = asyncio.run(app.run("hi"))
     assert result.output == "ok"
 ```
+
+Fluent equivalent: `app.agent(Agent.make("test").instructions("x").output(str))`.
 
 To exercise **tools**, inspect the messages for the tool call and return a result:
 

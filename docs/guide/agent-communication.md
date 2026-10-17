@@ -37,11 +37,26 @@ they survive a restart.
 
 ## Peer tools and handoff
 
-Attach the peer tools to any agent so the model can use them:
+Attach the peer tools to any agent so the model can use them. The registry and
+mailbox have no class field, so wire them in `configure`:
+
+```python
+from agentkit import AgentDefinition
+
+class Lead(AgentDefinition):
+    name = "lead"
+    full = True
+
+    def configure(self, agent):
+        return agent.agents(registry).mailbox(mailbox)
+
+# tools: send_to, ask_agent, broadcast, list_agents, handoff_to
+```
+
+Fluent equivalent:
 
 ```python
 Agent.make("lead").agents(registry).mailbox(mailbox).full()
-# tools: send_to, ask_agent, broadcast, list_agents, handoff_to
 ```
 
 `handoff_to(agent, brief=None)` moves the **whole conversation** to another agent:

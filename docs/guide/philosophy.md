@@ -14,6 +14,24 @@ for a decade: a container, providers, facades, an expressive builder, and a
 generator-driven CLI.
 
 ```python
+from agentkit import AgentDefinition
+
+class Nudge(AgentDefinition):
+    name = "nudge"
+    persona = True
+    instructions = "Be concise."
+    tools = [add_note]
+    memory = True
+    output = str
+
+agent = Nudge.build()
+```
+
+Reads like a sentence. Tests as easily as it reads.
+
+The equivalent fluent builder:
+
+```python
 agent = (
     Agent.make("nudge")
     .persona()
@@ -24,8 +42,6 @@ agent = (
     .build()
 )
 ```
-
-Reads like a sentence. Tests as easily as it reads.
 
 ## Batteries included, but removable
 
@@ -86,9 +102,10 @@ agentkit does not reinvent the model layer. It stands on
 a well-tested library exists, agentkit wires it in rather than cloning it.
 
 ::: tip The test of a good abstraction
-If a feature makes the simple case harder, it does not belong in the builder. The
-`Agent.make(...)` chain above will still be a one-liner when your agent has
-memory, skills, retrieval, approvals, and observability.
+If a feature makes the simple case harder, it does not belong in the definition.
+The `AgentDefinition` above (or its fluent `Agent.make(...)` equivalent) will
+still be a one-liner when your agent has memory, skills, retrieval, approvals,
+and observability.
 :::
 
 Continue to [The Application →](/guide/application)

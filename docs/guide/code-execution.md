@@ -51,6 +51,22 @@ untrusted.
 ## Quickstart
 
 ```python
+from agentkit import AgentDefinition
+
+class Analyst(AgentDefinition):
+    name = "analyst"
+    instructions = (
+        "Use run_code for arithmetic, parsing, and data work. Keep snippets short."
+    )
+    code = True              # <-- adds the approval-gated run_code tool
+    output = str
+
+agent = Analyst.build()
+```
+
+Fluent equivalent:
+
+```python
 from agentkit import Agent
 
 agent = (
@@ -58,7 +74,7 @@ agent = (
     .instructions(
         "Use run_code for arithmetic, parsing, and data work. Keep snippets short."
     )
-    .code_execution()        # <-- adds the approval-gated run_code tool
+    .code_execution()
     .output(str)
     .build()
 )
@@ -74,7 +90,8 @@ attach_code_executor(agent)
 
 ::: tip Off by default
 `.full()` does **not** include code execution unless you ask for it: use
-`.full(code=True)`. Executing code is a high-trust capability, so it is opt-in.
+`.full(code=True)`. In the class form, set `full = True` and `code = True`.
+Executing code is a high-trust capability, so it is opt-in.
 :::
 
 ## The tool
@@ -178,9 +195,15 @@ async def test_runs_and_prints():
 
 
 def test_tool_requires_approval():
-    from agentkit import Agent
+    from agentkit import AgentDefinition
 
-    agent = Agent.make("c").instructions("x").code_execution().output(str).build()
+    class C(AgentDefinition):
+        name = "c"
+        instructions = "x"
+        code = True
+        output = str
+
+    agent = C.build()
     assert agent._function_toolset.tools["run_code"].requires_approval is True
 ```
 

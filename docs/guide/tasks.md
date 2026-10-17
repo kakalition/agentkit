@@ -38,6 +38,24 @@ the model *re-reads* its own plan.
 Add the to-do tools to an agent and build it:
 
 ```python
+from agentkit import AgentDefinition
+
+class Planner(AgentDefinition):
+    name = "planner"
+    instructions = (
+        "You are a careful assistant. For any multi-step task, first write a "
+        "short checklist with write_todos, then work through it, marking items "
+        "in_progress and completed as you go."
+    )
+    todos = True      # <-- adds write_todos/read_todos/add_todo/update_todo/clear_todos
+    output = str
+
+agent = Planner.build()
+```
+
+Fluent equivalent:
+
+```python
 from agentkit import Agent
 
 agent = (
@@ -47,7 +65,7 @@ agent = (
         "short checklist with write_todos, then work through it, marking items "
         "in_progress and completed as you go."
     )
-    .todos()          # <-- adds write_todos/read_todos/add_todo/update_todo/clear_todos
+    .todos()
     .output(str)
     .build()
 )
@@ -55,7 +73,7 @@ agent = (
 
 That is the whole feature. When you run the agent, it can now manage a checklist.
 
-The one-line shortcut `.todos()` is the same as:
+The `todos = True` class field (or its fluent shortcut `.todos()`) is the same as:
 
 ```python
 from agentkit.tasks import attach_tasks
@@ -151,16 +169,17 @@ the fuller [`Planner`](/guide/planning) instead.
 ## A complete, runnable example
 
 ```python
-from agentkit import Agent, App, DriverKind
+from agentkit import AgentDefinition, App, DriverKind
 
 app = App("planner")
 
-agent = (
-    Agent.make("planner")
-    .instructions("Break multi-step work into todos, then work the list.")
-    .todos()
-    .output(str)
-)
+class Planner(AgentDefinition):
+    name = "planner"
+    instructions = "Break multi-step work into todos, then work the list."
+    todos = True
+    output = str
+
+agent = Planner.build()
 
 # Inspect the store directly (the agent does this for you during a run):
 import asyncio
@@ -180,8 +199,16 @@ asyncio.run(demo())
 You can assert the tools were registered without running a real model:
 
 ```python
+from agentkit import AgentDefinition
+
 def test_tools_present():
-    agent = Agent.make("t").instructions("x").todos().output(str).build()
+    class T(AgentDefinition):
+        name = "t"
+        instructions = "x"
+        todos = True
+        output = str
+
+    agent = T.build()
     tools = set(agent._function_toolset.tools)
     assert {"write_todos", "read_todos", "add_todo", "update_todo", "clear_todos"} <= tools
 ```

@@ -34,7 +34,7 @@ a superset of what came before; nothing here removes the older functional API
 ## The agent is a class
 
 Where Laravel has no single "agent", agentkit makes the agent a declarative class.
-See [The Agent Builder](/guide/agents#class-based-definition-recommended):
+See [The Agent Builder](/guide/agents):
 
 ```python
 class Assistant(AgentDefinition):

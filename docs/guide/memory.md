@@ -12,7 +12,21 @@ are **async**.
 
 ## Enabling memory
 
-Add `.memory()` to the builder:
+Set the `memory` field on the class:
+
+```python
+from agentkit import AgentDefinition
+
+class Nudge(AgentDefinition):
+    name = "nudge"
+    instructions = "Be concise."
+    memory = True
+    output = str
+
+agent = Nudge.build()
+```
+
+Fluent equivalent:
 
 ```python
 agent = (
@@ -68,8 +82,8 @@ MEMORY_EMBEDDING_DEVICE=cpu
 
 ## The digest
 
-`.memory()` injects a short digest of known facts so the model has them without
-calling a tool every turn. You can render it yourself:
+The `memory` field (fluent `.memory()`) injects a short digest of known facts so the
+model has them without calling a tool every turn. You can render it yourself:
 
 ```python
 from agentkit import memory_digest

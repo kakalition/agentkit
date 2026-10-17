@@ -44,14 +44,32 @@ document(blob, media_type="application/pdf")
 ## Generated media as artifacts
 
 When a model returns generated media (for instance via `.image_generation()`), it
-is captured automatically:
+is captured automatically. `.image_generation()` has no class field, so declare it
+in `configure(self, agent)`:
 
 ```python
-agent = Agent.make("designer").instructions("…").image_generation().build()
+from agentkit import AgentDefinition
+
+
+class Designer(AgentDefinition):
+    name = "designer"
+    instructions = "…"
+
+    def configure(self, agent):
+        return agent.image_generation()
+
+
+agent = Designer.build()
 
 result = await app.run("draw a mascot")
 for artifact in result.artifacts:
     print(artifact["kind"], artifact["media_type"], artifact["bytes"])
+```
+
+Fluent equivalent:
+
+```python
+agent = Agent.make("designer").instructions("…").image_generation().build()
 ```
 
 You can also scan messages yourself:
@@ -89,7 +107,24 @@ not provided by agentkit. Transcription and synthesis are.
 
 ## Capability shortcuts
 
-Common multimodal capabilities have builder shortcuts:
+Common multimodal capabilities have builder shortcuts; none of them has a class
+field, so declare them in `configure(self, agent)`:
+
+```python
+from agentkit import AgentDefinition
+
+
+class Designer(AgentDefinition):
+    name = "designer"
+
+    def configure(self, agent):
+        return agent.image_generation().web_search().web_fetch().thinking(effort="medium")
+
+
+agent = Designer.build()
+```
+
+Fluent equivalent:
 
 ```python
 agent.image_generation().web_search().web_fetch().thinking(effort="medium")

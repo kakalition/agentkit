@@ -50,6 +50,30 @@ agent = orchestrator.agent        # the underlying pydantic_ai.Agent
 - **`.tool(fn)`** — register a plain tool on the orchestrator.
 - **`.agent`** — the built `pydantic_ai.Agent`.
 
+## With the class form
+
+Declare an `AgentDefinition` and register the specialists. A single specialist is
+a `specialists` mapping entry; several at once use `configure` with
+`.orchestrate(...)` (which has no class field):
+
+```python
+from agentkit import AgentDefinition
+
+class Nudge(AgentDefinition):
+    name = "nudge"
+    instructions = "Route each request to the right specialist, then summarise."
+    specialists = {"handle_reminders": (reminder_agent, "Set timed reminders.")}
+    output = str
+
+    def configure(self, agent):
+        return agent.orchestrate({                 # several at once (mapping form)
+            "handle_notes": (notes_agent, "Manage the owner's notes."),
+            "handle_writing": (writer_agent, "Draft and edit text."),
+        })
+
+agent = Nudge.build()
+```
+
 ## With the fluent builder
 
 The builder exposes the same primitive as `.specialist(...)` and `.orchestrate(...)`:
@@ -131,8 +155,20 @@ Gives the model a `spawn(agent, task)` tool that runs a named sub-agent and
 returns its output (forwarding `usage`/`model`):
 
 ```python
-from agentkit import spawn_tool
+from agentkit import AgentDefinition, spawn_tool
 
+class Lead(AgentDefinition):
+    name = "lead"
+    instructions = "Spin up specialists as needed."
+    tools = [spawn_tool({"researcher": researcher_agent})]
+    output = str
+
+agent = Lead.build()
+```
+
+Fluent equivalent:
+
+```python
 agent = (
     Agent.make("lead")
     .instructions("Spin up specialists as needed.")
@@ -223,7 +259,7 @@ delegation is built with `agentkit.agents.subagent.subagent_tool`.
 ### End-to-end example
 
 ```python
-from agentkit import Agent, App, DriverKind
+from agentkit import AgentDefinition, App, DriverKind
 from agentkit.agents.registry import AgentRegistry
 from agentkit.agents.subagent import SharedContext, subagent_tool
 
@@ -233,7 +269,12 @@ registry.register_local(researcher_agent, name="researcher")   # your own helper
 
 # Default: no CONTEXT_DRIVER set -> "isolated"; the helper inherits nothing.
 strategy = app.manager(DriverKind.CONTEXT).driver()
-lead = Agent.make("lead").tool(subagent_tool(registry, strategy=strategy)).build()
+
+class Lead(AgentDefinition):
+    name = "lead"
+    tools = [subagent_tool(registry, strategy=strategy)]
+
+lead = Lead.build()
 
 # Switch driver three ways:
 app.manager(DriverKind.CONTEXT).driver("shared")                       # explicit name

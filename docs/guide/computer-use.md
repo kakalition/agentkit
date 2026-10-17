@@ -31,12 +31,28 @@ Select with `computer_driver=playwright`. Missing the extra raises a
 `browser_screenshot`, and `browser_evaluate` tools. Every tool is approval-gated
 by default and egress policy still applies.
 
+Computer-use has no `AgentDefinition` field, so attach it in `configure`:
+
+```python
+from agentkit import AgentDefinition
+from agentkit.toolkits.computer import attach_computer_tools
+
+class Browser(AgentDefinition):
+    name = "browser"
+
+    def configure(self, agent):
+        attach_computer_tools(agent)   # tools resolve the configured computer driver
+        return agent
+```
+
+Fluent equivalent:
+
 ```python
 from agentkit import Agent
 from agentkit.toolkits.computer import attach_computer_tools
 
 agent = Agent.make("browser").build()
-attach_computer_tools(agent)   # tools resolve the configured computer driver
+attach_computer_tools(agent)
 ```
 
 The `Computer` contract:
