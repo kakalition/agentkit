@@ -11,6 +11,7 @@ from agentkit import package_name, scaffold_project
 from agentkit.cli import app as cli_app
 
 EXPECTED = [
+    "AGENTS.md",
     "bootstrap.py",
     "pyproject.toml",
     "README.md",

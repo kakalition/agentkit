@@ -124,6 +124,112 @@ pytest
 agentkit eval evals/smoke.yaml
 ```
 """,
+        "AGENTS.md": """\
+# AGENTS.md
+
+Guidance for AI coding agents (Claude Code, Cursor, Codex, …) working in this
+repository. Read it before making changes.
+
+## What this project is
+
+`{{project}}` is an [agentkit](https://github.com/kakalition/agentkit) application: a
+PydanticAI assistant wrapped in a booted `App`, with a local database (libSQL/SQLite
+via SQLModel), a durable scheduler and queue, and an operator web UI. The code is a
+Laravel-style flat `app/` package; `bootstrap.py` builds the app and is what every
+CLI command boots (`bootstrap:app`).
+
+## Commands
+
+Run everything from the project root.
+
+```bash
+cp .env.example .env      # once; set the API key for MODEL_NAME's provider
+uv sync                   # install deps (or: pip install -e ".[dev]")
+
+agentkit tinker           # chat with the agent (REPL)
+agentkit serve            # boot channels + scheduler + web UI (127.0.0.1:8787)
+agentkit inspect          # the booted agent's tools, channels, and active drivers
+agentkit schedule:list    # durable scheduled jobs
+agentkit schedule:run     # run any jobs that are due now
+agentkit queue:work       # process queued jobs (needs QUEUE_ENABLED=true)
+agentkit eval evals/smoke.yaml
+agentkit make:agent | make:tool | make:model | make:provider | make:command
+
+pytest                    # this project's tests
+ruff check .              # lint
+```
+
+After any code change, run `pytest` and `ruff check .` before finishing.
+
+## Layout
+
+```
+bootstrap.py                     # Application.configure(...).create() — the boot target
+app/
+  config.py                      # Settings(AgentSettings) + a layered Section
+  Agents/assistant.py            # the agent (a discoverable AgentDefinition class)
+  Console/Kernel.py              # schedule() + commands()
+  Console/Commands/*.py          # CLI commands (Command subclasses)
+  Events/*.py                    # event payloads (see agentkit.emit)
+  Listeners/*.py                 # Listener subclasses
+  Jobs/*.py                      # Job subclasses (inline or queued)
+  Middleware/*.py                # turn middleware (Middleware subclasses)
+  Models/*.py                    # SQLModel tables (Model subclasses)
+  Notifications/*.py             # Notification subclasses
+  Policies/*.py                  # ToolPolicy factories
+  Providers/*.py                 # service providers (AppServiceProvider is mandatory)
+  Repositories/                  # Repository subclasses + AppRepositories
+  Rules/*.py                     # validation rules (see agentkit.validate)
+  Services/*.py                  # Service subclasses (self.repositories)
+  Tools/*.py                     # tool functions (first arg: RunContext[Deps])
+config/<section>.py              # config/<section>.py overrides (defaults < file < env)
+skills/<name>/SKILL.md           # discoverable skills
+prompts/*.md                     # versioned prompts
+evals/*.yaml                     # evaluation suites
+tests/                           # pytest suite
+```
+
+## How the app is assembled
+
+- **Convention discovery** builds the app: any `AgentDefinition` under `app/Agents/`,
+  `Command` under `app/Console/Commands/`, channel under `app/Channels/`, and
+  provider under `app/Providers/` is registered automatically. Explicit wiring goes in
+  a provider or `bootstrap.py` with `.withProviders(...)`.
+- **Providers** (`agentkit.Provider`): `register(app)` declares (config, middleware,
+  schedules); `boot(app)` performs effects. `AppServiceProvider` is mandatory.
+- **Repositories** (`agentkit.Repository[Model]`) give CRUD for free
+  (`create`/`get`/`update`/`delete`/`all`/`count`/`where()`). Register app repositories
+  on `AppRepositories` in `app/Repositories/__init__.py`.
+- **Services** (`agentkit.foundation.service.Service`) receive the app and expose
+  `self.repositories` (an async repository scope).
+- **Tools** are async functions whose first parameter is `RunContext[Deps]`; the
+  docstring is the tool schema. Add them to the agent's `tools` list.
+- **Jobs** subclass `agentkit.Job` (`queue`, `max_retries`) and run via
+  `app.dispatch(job)`; set `QUEUE_ENABLED=true` to run them through the queue.
+- **Scheduling** is fluent: `app.schedule("task_name").name("job").every_fifteen_minutes()`.
+  Register the task with `@agentkit.scheduler.task("task_name")` before
+  `init_scheduler()` runs (do it in a provider's `boot`).
+- **Events**: call `await emit("note.saved", ...)`; a `Listener` with
+  `event = "note.saved"` receives the payload. Register listeners in
+  `EventServiceProvider`.
+
+## Conventions
+
+- Python 3.11+, `ruff` line length 100, type hints on public functions.
+- Async by default; repositories and services are async (`await`).
+- Settings are environment-driven: add a field to `Settings` in `app/config.py` (or an
+  `AppSection`), document it in `.env.example`, and read it via `settings.<field>` or
+  `app.config("app")`.
+- Keep models additive. Tables are created from model metadata at startup (`init_db`);
+  a new table/column needs no migration step.
+- Never hardcode secrets — read them from settings/env, and never commit `.env`.
+
+## Prefer the scaffolders
+
+Use `agentkit make:tool`, `make:model`, `make:provider`, `make:command`, or
+`make:agent` to add files so they match the surrounding conventions, then fill in the
+generated stub.
+""",
         "pyproject.toml": """\
 [project]
 name = "{{project}}"

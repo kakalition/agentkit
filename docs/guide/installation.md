@@ -50,6 +50,7 @@ You get a full, runnable, **explorable** project in one command:
 ```
 my-agent/
 ├── bootstrap.py                # App(...) — the boot target
+├── AGENTS.md                   # guidance for AI coding agents (Claude Code, Cursor, …)
 ├── SOUL.md                     # the persona
 ├── pyproject.toml
 ├── .env.example
@@ -83,6 +84,10 @@ my-agent/
 The tree mirrors Laravel: `app/Providers/AppServiceProvider.py` is where everything
 is wired, `app/Console/Kernel.py` holds the schedule and commands, and each layer has
 a working example you can read, extend, or delete.
+
+The generated `AGENTS.md` documents the layout, the CLI commands, and the project's
+conventions so AI coding agents (`AGENTS.md` is the shared convention for Claude Code,
+Cursor, Codex, and others) can work in the project correctly.
 
 Useful flags:
 

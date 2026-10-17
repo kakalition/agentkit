@@ -33,6 +33,9 @@ All notable changes to this project are documented here. The format follows
   documented `from agentkit import Agent` import works.
 - New guide page [Class & Functional Duality](/guide/duality); `docs/guide/class-based.md`
   corrected from "Removed functional forms" to "Both forms are first-class".
+- **Generated projects ship `AGENTS.md`.** The `agentkit new` starter (minimal and
+  full) now includes an `AGENTS.md` documenting the layout, CLI commands, and
+  conventions so AI coding agents can work in a scaffolded project correctly.
 - **Temporal durability driver** (`durability_driver=temporal`, new
   `agentkit[temporal]` extra): a `TemporalDurability` driver implements the
   `Durability` contract (`init`/`register_queue`/`enqueue`/`apply_schedules`) and
