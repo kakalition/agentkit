@@ -22,7 +22,8 @@ console for exploring and operating the running agent.
 ## Highlights
 
 - **A framework front door.** An `App` container with service providers
-  (`register`/`boot`), a fluent `Agent` builder, short facades
+  (`register`/`boot`), class-based `AgentDefinition`s with an equivalent fluent
+  `Agent` builder, short facades
   (  `Memory`/`Schedule`/`DB`/`Events`/`Log`), lifecycle events + turn middleware,
   per-concern config, discoverable **skills** (`SKILL.md`), an Artisan-style
   `make:*` CLI, and a thin `Model`/`DB` layer — all additive over the building
@@ -66,10 +67,10 @@ console for exploring and operating the running agent.
 - **Typed memory.** Facts/preferences/people/dates with a hybrid
   similarity+recency+importance recall, an owner **profile**, and a daily durable
   `memory:consolidate` task (dedupe/summarize/prune).
-- **Full stack in one call.** `Agent.make(...).full()` expands to persona +
-  memory + skills + HITL + safety; `App(...).fullstack()` boots config sections,
-  schedules and any configured **channels** (Telegram, Slack, Email, Discord) —
-  unconfigured layers stay idle.
+- **Full stack in one call.** Declaring `full = True` (or the fluent
+  `Agent.make(...).full()`) expands to persona + memory + skills + HITL + safety;
+  `App(...).fullstack()` boots config sections, schedules and any configured
+  **channels** (Telegram, Slack, Email, Discord) — unconfigured layers stay idle.
 - **Everything is agent-callable.** Native **toolkits** expose database CRUD,
   scheduling, the queue, notifications, history, usage/audit, knowledge writes and
   skill authoring as tools — deny-by-default allow-lists, approval-gated writes,
@@ -146,12 +147,31 @@ automatically on `http://127.0.0.1:8787`.
 ```python
 import asyncio
 from pydantic_ai import RunContext
-from agentkit import Agent, AgentSettings, App, Deps
+from agentkit import AgentDefinition, AgentSettings, App, Deps
 
 async def add_note(ctx: RunContext[Deps], text: str) -> str:
     """Save a note."""
     ctx.deps.extras.setdefault("notes", []).append(text)
     return f"saved: {text}"
+
+class Notes(AgentDefinition):
+    name = "notes"
+    instructions = "Manage the owner's notes."
+    deps_type = Deps
+    memory = True
+    tools = [add_note]
+    output = str
+
+app = App(name="notes", settings=AgentSettings(owner_id="owner"), discover=False)
+app.agent(Notes.build())
+app.boot()
+print(asyncio.run(app.run("add a note: buy milk")).output)
+```
+
+The same agent as the equivalent fluent builder:
+
+```python
+from agentkit import Agent
 
 notes = (
     Agent.make("notes", deps_type=Deps)
@@ -159,23 +179,22 @@ notes = (
     .memory()
     .tool(add_note)
     .output(str)
+    .build()
 )
-app = App(name="notes", settings=AgentSettings(owner_id="owner"), discover=False)
-app.agent(notes)
-app.boot()
-print(asyncio.run(app.run("add a note: buy milk")).output)
 ```
 
-`agentkit.Agent` here is the fluent **builder**; internal code that wants the raw
+`AgentDefinition` is the primary, declarative API: `AgentDefinition.build()`
+returns the built PydanticAI agent and `AgentDefinition.to_builder()` returns the
+equivalent fluent **builder**, `agentkit.Agent`. Internal code that wants the raw
 PydanticAI agent keeps `from pydantic_ai import Agent`. The legacy
 `AgentApp.build(agent=..., settings=...)` still works as a deprecated shim.
 
 ## Framework front door (Laravel-style)
 
 Everything above is the low-level surface and keeps working. On top of it sits an
-`App` container with `Provider`s, a fluent `Agent` builder, short facades, an
-event bus, a middleware pipeline, per-concern config, an Artisan-style CLI, and a
-thin `Model`/`DB` layer.
+`App` container with `Provider`s, class-based `AgentDefinition`s (with an
+equivalent fluent `Agent` builder), short facades, an event bus, a middleware
+pipeline, per-concern config, an Artisan-style CLI, and a thin `Model`/`DB` layer.
 
 ```python
 # bootstrap.py  —  `agentkit serve` boots bootstrap:app
@@ -196,22 +215,21 @@ closure / callable / `"module:attr"` spec — see
 
 ```python
 # app/Agents/Assistant.py  —  discovered and registered automatically
-from agentkit import Agent, AgentDefinition
+from agentkit import AgentDefinition
 
 class Assistant(AgentDefinition):
     name = "assistant"
     posture = "hybrid"          # "specialized" (closed) | "hybrid" | "free"
-
-    def define(self, agent: Agent) -> Agent:
-        return (
-            agent
-            .persona()          # SOUL.md (read live every run)
-            .instructions(ORCHESTRATOR)
-            .memory()           # remember/recall/forget tools
-            .full()             # persona + memory + skills + HITL + safety + todos
-            .output(str)
-        )
+    persona = True              # SOUL.md (read live every run)
+    instructions = ORCHESTRATOR
+    memory = True               # remember/recall/forget tools
+    full = True                 # persona + memory + skills + HITL + safety + todos
+    output = str
 ```
+
+The equivalent fluent form is
+`Assistant.to_builder()` — i.e.
+`Agent.make("assistant").persona().instructions(ORCHESTRATOR).memory().full().output(str)`.
 
 A **posture** picks the default layer set for `.full()` — see
 [Postures](docs/guide/posture.md). Providers still own lifecycle:
@@ -257,13 +275,14 @@ agentkit schedule:list
 agentkit about
 ```
 
-**IMPORTANT — `Agent` shadowing.** In *application* code, `from agentkit import
-Agent` is the **builder**. Internal/low-level code keeps importing PydanticAI
-directly:
+**IMPORTANT — `Agent` shadowing.** Declaring an `AgentDefinition` class is the
+primary way; in *application* code, `from agentkit import Agent` is the
+equivalent fluent **builder** (what `AgentDefinition.to_builder()` returns).
+Internal/low-level code keeps importing PydanticAI directly:
 
 ```python
 from pydantic_ai import Agent        # internal: the raw PydanticAI agent
-from agentkit import Agent           # app-facing: the fluent builder
+from agentkit import Agent           # app-facing: the fluent builder (functional twin of AgentDefinition)
 ```
 
 **Lifecycle.** `App.boot()` is idempotent and ordered: every `Provider.register()`
@@ -339,26 +358,64 @@ extraction. `summarize_older` and `truncating_processor` remain simple alternati
 
 ### Knowledge (RAG)
 ```python
-from agentkit import Agent, KnowledgeBase
+from agentkit import AgentDefinition, KnowledgeBase
 
 kb = KnowledgeBase()
 kb.add_directory("docs", pattern="**/*.md")
 kb.add("Free-form note text", source="note")
-agent = Agent.make("notes").instructions("…").knowledge(kb).output(str).build()
+
+class Notes(AgentDefinition):
+    name = "notes"
+    instructions = "…"
+    knowledge = kb              # a KnowledgeBase (or a path, or True)
+    output = str
+
+agent = Notes.build()
+# Fluent equivalent: Agent.make("notes").instructions("…").knowledge(kb).output(str).build()
 ```
 Indexes chunks with embeddings and adds a `search_knowledge` tool (plus a source listing
 in the instructions). Index from the CLI with `agentkit knowledge add|add-text|search|list`.
 
 ### Capability shortcuts
-Builder pass-throughs to the PydanticAI capabilities of the same name:
-`.web_search()` `.web_fetch()` `.x_search()` `.thinking(effort=...)` `.caching()`
-`.tool_search()` `.image_generation()` `.instrumentation()` `.native_tool(...)` `.sandbox(...)`.
+Builder pass-throughs to the PydanticAI capabilities of the same name. None has a
+class field, so declare them in `configure`:
+
+```python
+from agentkit import AgentDefinition
+
+class Researcher(AgentDefinition):
+    name = "researcher"
+    instructions = "…"
+    output = str
+
+    def configure(self, agent):
+        return (
+            agent
+            .web_search()
+            .web_fetch()
+            .x_search()
+            .thinking(effort=...)
+            .caching()
+            .tool_search()
+            .image_generation()
+            .instrumentation()
+            .native_tool(...)
+            .sandbox(...)
+        )
+```
 
 ### Sandboxed workspace
 ```python
-from agentkit import Agent, Sandbox
+from agentkit import AgentDefinition, Sandbox
 
-agent = Agent.make("coder").instructions("…").workspace(Sandbox("./work")).output(str).build()
+class Coder(AgentDefinition):
+    name = "coder"
+    instructions = "…"
+    workspace = Sandbox("./work")     # or a path, or Sandbox(path, read_only=True)
+    output = str
+
+agent = Coder.build()
+# Fluent equivalent: Agent.make("coder").instructions("…").workspace(Sandbox("./work")).output(str).build()
 ```
 Backed by `pydantic_ai.workspaces` (`LocalWorkspaceBackend` + `ReadOnlyWorkspace`) — agentkit
 does not re-implement confinement or process execution. Adds `read_file`/`list_files`/
@@ -385,8 +442,18 @@ Executed and reported by Pydantic's `pydantic_evals`.
 
 ### Human-in-the-loop
 ```python
-agent = Agent.make("desk").instructions("…").clarify().output(str).build()
-app.agent(agent).clarify(lambda question, options: ask_the_user(question))
+from agentkit import AgentDefinition
+
+class Desk(AgentDefinition):
+    name = "desk"
+    instructions = "…"
+    output = str
+
+    def configure(self, agent):
+        return agent.clarify()      # adds the ask_user tool
+
+app.agent(Desk.build()).clarify(lambda question, options: ask_the_user(question))
+# Fluent equivalent: Agent.make("desk").instructions("…").clarify().output(str).build()
 ```
 `ask_user` hands a question to your handler; with no handler it instructs the model to ask
 in its reply. `App.resume(deferred_tool_results)` continues a turn that paused on deferred tool
@@ -408,13 +475,26 @@ supervisor = Supervisor({"writer": writer, "researcher": researcher}).build()
 
 ### Tooling
 ```python
-agent = (Agent.make("t").instructions("…")
-    .tool(lookup, cache_ttl=60, timeout=5, sequential=False, defer_loading=True)
-    .toolset(my_toolset)
-    .output(str).build())
+from agentkit import AgentDefinition
+
+class T(AgentDefinition):
+    name = "t"
+    instructions = "…"
+    output = str
+
+    def configure(self, agent):
+        # per-tool options live in configure
+        return (
+            agent
+            .tool(lookup, cache_ttl=60, timeout=5, sequential=False, defer_loading=True)
+            .toolset(my_toolset)
+        )
+
+agent = T.build()
 ```
 Per-tool `retries`/`timeout`/`sequential`/`defer_loading`, a TTL result cache
-(`cached_tool`), and generic toolsets (MCP, function toolsets).
+(`cached_tool`), and generic toolsets (MCP, function toolsets). Plain tools and
+toolsets can also be declared as the `tools`/`toolsets` fields.
 
 ### Safety
 ```python
@@ -428,13 +508,22 @@ and user feedback (`Feedback.add(rating=1, conversation_id=…)`, `Feedback.aver
 
 ### Ops
 ```python
-from agentkit import Budget, PromptRegistry
+from agentkit import AgentDefinition, Budget, PromptRegistry
 app.budget(Budget(max_cost=5.0, max_tokens=1_000_000, window_seconds=86400))
 prompts = PromptRegistry.from_settings().discover()       # prompts/<name>.md, versioned
-agent = Agent.make("x").prompt(prompts, "greeting", name="Ada").output(str).build()
+
+class X(AgentDefinition):
+    name = "x"
+    output = str
+
+    def configure(self, agent):
+        return agent.prompt(prompts, "greeting", name="Ada")
+
+agent = X.build()
 ```
 Budgets are checked before each turn (`BudgetExceeded`); the prompt registry is file-backed and
 versioned; conversations branch with `app.fork(...)` / re-run with `app.replay(...)`.
+(Declare file prompts with `prompts = [...]`; registry prompts with variables go in `configure`.)
 
 ### Multimodal + audio
 ```python
@@ -447,8 +536,25 @@ captured into `ChatResult.artifacts`; STT/TTS use the OpenAI audio API (client i
 
 ## Orchestrator + specialists
 
-PydanticAI v2 removed `Agent.as_tool`; `Orchestrator` generates one delegation
-tool per specialist.
+PydanticAI v2 removed `Agent.as_tool`; declaring `specialists` generates one
+delegation tool per specialist.
+
+```python
+from agentkit import AgentDefinition
+
+class Assistant(AgentDefinition):
+    name = "assistant"
+    instructions = "Route to the right specialist."
+    specialists = {
+        "handle_notes": (notes, "Add/list notes."),
+        "handle_calendar": (calendar, "Manage events."),
+    }
+
+agent = Assistant.build()
+```
+
+The equivalent fluent form is the `specialists`/`.specialist(...)` builder method;
+`Orchestrator` builds the same delegation over a roster:
 
 ```python
 from agentkit import Orchestrator
@@ -463,23 +569,25 @@ agent = orchestrator.agent
 
 Agents can also talk to each other directly. A registry of **handles** (local or
 remote A2A) plus a **mailbox** and **handoff** gives you peer messaging; attach
-the tools with the builder and the model can use them:
+the tools in `configure` and the model can use them:
 
 ```python
-from agentkit import Agent, AgentRegistry, Mailbox, AgentHandle
+from agentkit import AgentDefinition, AgentRegistry, Mailbox, AgentHandle
 
 registry = AgentRegistry()
 registry.register(AgentHandle.local(writer, capabilities=["writing"]))
 mailbox = Mailbox(registry, events=app.events)
 
-agent = (
-    Agent.make("lead")
-    .instructions("Coordinate the team. Use ask_agent/handoff_to when useful.")
-    .agents(registry)
-    .mailbox(mailbox)
-    .full()
-    .build()
-)
+class Lead(AgentDefinition):
+    name = "lead"
+    instructions = "Coordinate the team. Use ask_agent/handoff_to when useful."
+    full = True
+
+    def configure(self, agent):
+        # registry/mailbox have no class field — attach them in configure
+        return agent.agents(registry).mailbox(mailbox)
+
+agent = Lead.build()
 # tools: send_to, ask_agent, broadcast, list_agents, handoff_to
 ```
 
@@ -600,11 +708,20 @@ Call `read_skill_file("pdf-tools", "references/style.md")` for house style, then
 ```
 
 ```python
-from agentkit import Agent, SkillRegistry
+from agentkit import AgentDefinition, SkillRegistry
 
 registry = SkillRegistry.from_settings().discover()   # ./skills + <AGENT_HOME>/skills
-agent = Agent.make("notes").instructions("…").skills(registry).output(str).build()
-# or discover lazily from settings:  Agent.make("notes").skills()
+
+class Notes(AgentDefinition):
+    name = "notes"
+    instructions = "…"
+    output = str
+
+    def configure(self, agent):
+        return agent.skills(registry)   # bare `skills = True` discovers from settings
+
+agent = Notes.build()
+# Fluent equivalent: Agent.make("notes").instructions("…").skills(registry).output(str).build()
 ```
 
 `skills()` adds a compact index to the instructions plus three tools —
@@ -620,13 +737,20 @@ agentkit skills show pdf-tools
 
 ## The full stack, in one call
 
-`Agent.full()` expands a builder to the whole agent stack (each layer toggleable,
-idempotent, and skipped when its settings flag disables it):
+Declaring `full = True` (the fluent equivalent is `Agent.full()`) expands an agent
+to the whole agent stack (each layer toggleable, idempotent, and skipped when its
+settings flag disables it):
 
 ```python
-from agentkit import Agent, App, FullStackProvider
+from agentkit import AgentDefinition, App, FullStackProvider
 
-agent = Agent.make("assistant").instructions("Be helpful.").full().build()
+class Assistant(AgentDefinition):
+    name = "assistant"
+    instructions = "Be helpful."
+    full = True              # persona + memory + skills + HITL + safety + todos
+
+agent = Assistant.build()
+# Fluent equivalent: Agent.make("assistant").instructions("Be helpful.").full().build()
 
 app = App(name="assistant").fullstack()   # FullStackProvider
 app.boot()                                # schedules + any configured channels
@@ -646,19 +770,25 @@ Every capability is agent-callable and safe by default — allow-lists decide wh
 reachable and writes require approval:
 
 ```python
-from agentkit import Agent
+from agentkit import AgentDefinition
 
-agent = (
-    Agent.make("assistant")
-    .instructions("Be helpful.")
-    .database({"note": Note})        # CRUD over an allow-listed model
-    .scheduler(["sync_notes"])       # manage schedules over allow-listed tasks
-    .queue({"sync": SyncNotes})      # enqueue allow-listed jobs
-    .notifications().history().usage().knowledge_admin().skill_authoring()
-    .learning()                      # reflect -> learn -> apply
-    .output(str)
-    .build()
-)
+class Assistant(AgentDefinition):
+    name = "assistant"
+    instructions = "Be helpful."
+    learning = True                  # reflect -> learn -> apply
+    output = str
+
+    def configure(self, agent):
+        # the native toolkits have no class fields — attach them in configure
+        return (
+            agent
+            .database({"note": Note})        # CRUD over an allow-listed model
+            .scheduler(["sync_notes"])       # manage schedules over allow-listed tasks
+            .queue({"sync": SyncNotes})      # enqueue allow-listed jobs
+            .notifications().history().usage().knowledge_admin().skill_authoring()
+        )
+
+agent = Assistant.build()
 ```
 
 Reflection is idempotent, redacts PII/secrets before storage, and is injected into
