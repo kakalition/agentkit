@@ -94,22 +94,37 @@ def parse(spec: str | tuple[str, str]) -> tuple[str, str]:
 
 
 def register(kind: str, name: str, driver: Any) -> None:
-    """Register (or replace) the :class:`Driver` subclass for ``(kind, name)``."""
-    if not (isinstance(driver, type) and issubclass(driver, Driver)):
+    """Register (or replace) the driver for ``(kind, name)``.
+
+    ``driver`` may be a :class:`Driver` subclass (the class form) or a plain
+    ``factory(app) -> driver`` callable (the functional form, matching
+    ``app.extend``). Both normalise to the same ``factory(app)`` stored here.
+    """
+    if isinstance(driver, type) and issubclass(driver, Driver):
+        factory: DriverFactory = driver.factory()
+    elif callable(driver):
+        factory = driver
+    else:
         raise TypeError(
-            f"drivers must be Driver subclasses; got {driver!r}. "
-            "Define a class with a build() method and register the class."
+            f"drivers must be a Driver subclass or a factory(app) callable; got {driver!r}. "
+            "Define a class with a build() method (register the class) or pass a callable."
         )
-    _REGISTRY[_key(kind, name)] = driver.factory()
+    _REGISTRY[_key(kind, name)] = factory
 
 
 def register_driver(kind: str, name: str):
-    """Decorator form of :func:`register` for a :class:`Driver` subclass.
+    """Decorator form of :func:`register` for a :class:`Driver` subclass or factory.
 
         @register_driver(DriverKind.CACHE, "redis")
         class RedisCacheDriver(Driver):
             def build(self):
                 return RedisCache(self.app.settings.redis_url)
+
+    A plain ``factory(app)`` function works too::
+
+        @register_driver(DriverKind.CACHE, "pantry")
+        def pantry_cache(app):
+            return PantryCache(app.settings)
     """
 
     def decorator(driver: Any) -> Any:

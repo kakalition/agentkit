@@ -33,7 +33,7 @@ from agentkit.foundation.signature import ParsedInput, parse_signature
 
 DEFAULT_BOOTSTRAP = "bootstrap:app"
 
-__all__ = ["Command", "ConsoleOutput", "DEFAULT_BOOTSTRAP", "install", "load_bootstrap"]
+__all__ = ["ClosureCommand", "Command", "ConsoleOutput", "DEFAULT_BOOTSTRAP", "install", "load_bootstrap"]
 
 
 class ConsoleOutput:
@@ -142,7 +142,14 @@ class Command:
     def call(self, parsed: ParsedInput, app: Any) -> Any:
         self.parsed = parsed
         self.app = app
-        kwargs = _resolve_parameters(self, parsed, app)
+        kwargs = _resolve_parameters(self._reflect(), parsed, app)
+        return self._invoke(kwargs)
+
+    def _reflect(self) -> Any:
+        """The callable whose parameters drive input/DI resolution."""
+        return self.handle
+
+    def _invoke(self, kwargs: dict[str, Any]) -> Any:
         return self.handle(**kwargs)
 
     def invoke(self, **values: Any) -> Any:
@@ -181,6 +188,46 @@ class Command:
         return self.output.confirm(question, default)
 
 
+class ClosureCommand(Command):
+    """A command backed by a plain callable (Laravel's ``Artisan::command('x', fn)``).
+
+    ``signature`` may be a full signature (``"greet {name} {--loud}"``) or a bare
+    name; the callable's parameters are resolved from the CLI input exactly like a
+    class-based command's ``handle``.
+    """
+
+    def __init__(
+        self,
+        signature: str,
+        handler: Any,
+        *,
+        description: str = "",
+        app: Any = None,
+    ) -> None:
+        super().__init__(app=app)
+        self.signature = signature
+        self.description = description or (getattr(handler, "__doc__", "") or "")
+        self._handler = handler
+
+    def _reflect(self) -> Any:
+        return self._handler
+
+    def handle(self, **kwargs: Any) -> Any:
+        return self._handler(**kwargs)
+
+    # Instance-level identity (the base class resolves these as classmethods).
+    def command_name(self) -> str:  # type: ignore[override]
+        if self.signature:
+            return parse_signature(self.signature).name
+        return self.name or _kebab(type(self).__name__)
+
+    def command_signature(self) -> str:  # type: ignore[override]
+        return self.signature or self.command_name()
+
+    def command_description(self) -> str:  # type: ignore[override]
+        return self.description or (getattr(self._handler, "__doc__", "") or "")
+
+
 def _kebab(name: str) -> str:
     out: list[str] = []
     for index, char in enumerate(name):
@@ -190,14 +237,14 @@ def _kebab(name: str) -> str:
     return "".join(out).removesuffix("-command")
 
 
-def _resolve_parameters(command: Command, parsed: ParsedInput, app: Any) -> dict[str, Any]:
-    """Resolve ``handle``'s parameters from the CLI input, then the container."""
+def _resolve_parameters(target: Any, parsed: ParsedInput, app: Any) -> dict[str, Any]:
+    """Resolve a handler's parameters from the CLI input, then the container."""
     try:
-        signature = inspect.signature(command.handle)
+        signature = inspect.signature(target)
     except (TypeError, ValueError):  # pragma: no cover - builtins
         return {}
     try:
-        hints = typing.get_type_hints(command.handle)
+        hints = typing.get_type_hints(target)
     except Exception:  # pragma: no cover - unresolvable annotations
         hints = {}
     container = getattr(app, "container", None)

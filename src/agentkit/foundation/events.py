@@ -24,6 +24,14 @@ log = get_logger("agentkit.events")
 ListenerFunc = Callable[["Event"], Any]
 
 
+def _normalize_listener(listener: Any) -> Any:
+    """Normalize a listener target to a listener-shaped callable (or ``None``)."""
+    from agentkit.foundation.callable import normalize
+
+    resolved = normalize(listener, protocol="listener")
+    return resolved.invocable
+
+
 @dataclass
 class Event:
     """A dispatched lifecycle event; payload keys are available as attributes."""
@@ -65,9 +73,20 @@ class Dispatcher:
             return name if isinstance(name, str) else event.__name__
         return str(getattr(event, "name", event))
 
-    def listen(self, event: Any, listener: ListenerFunc) -> ListenerFunc:
-        self._listeners.setdefault(self._key(event), []).append(listener)
-        return listener
+    def listen(self, event: Any, listener: Any) -> Any:
+        """Register ``listener`` for ``event``.
+
+        ``listener`` may be a closure/callable, a :class:`Listener` class or
+        instance, or a ``"module:attr"`` string spec; it is normalized through
+        the shared layer to a listener-shaped callable.
+        """
+        normalized = _normalize_listener(listener)
+        if normalized is None:
+            return listener
+        self._listeners.setdefault(self._key(event), []).append(normalized)
+        return normalized
+
+    on = listen
 
     def listeners(self, event: Any) -> list[ListenerFunc]:
         key = self._key(event)

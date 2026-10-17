@@ -33,6 +33,14 @@ __all__ = [
     "SchedulerToolkit",
     "SkillAuthoringToolkit",
     "UsageToolkit",
+    "attach_database",
+    "attach_history",
+    "attach_knowledge_admin",
+    "attach_notifications",
+    "attach_queue",
+    "attach_scheduler",
+    "attach_skill_authoring",
+    "attach_usage",
     "enabled_toolkits",
     "install_toolkits",
     "toolkit_for",
@@ -49,6 +57,21 @@ TOOLKITS: dict[str, str] = {
     "knowledge_admin": "knowledge_admin_enabled",
     "skills_admin": "skill_authoring_enabled",
 }
+
+
+# -- functional form of the built-in toolkits ------------------------------
+# These public ``attach_*`` helpers are the closure/functional face of the
+# ``Toolkit`` classes below; the classes delegate to them, so both forms install
+# exactly the same tools. Prefer a class for a reusable bundle, a helper for a
+# one-off install.
+attach_database = _attach_database
+attach_history = _attach_history
+attach_knowledge_admin = _attach_knowledge_admin
+attach_notifications = _attach_notifications
+attach_queue = _attach_queue
+attach_scheduler = _attach_scheduler
+attach_skill_authoring = _attach_skill_authoring
+attach_usage = _attach_usage
 
 
 # -- class-based toolkits (thin wrappers over the attach_* helpers) ---------

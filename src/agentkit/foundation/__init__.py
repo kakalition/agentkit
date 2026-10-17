@@ -15,6 +15,7 @@ from agentkit.foundation.application import (
     discover_providers,
 )
 from agentkit.foundation.bus import Batch, Chain, batch, chain, pending_batches
+from agentkit.foundation.callable import Resolved, invoke, normalize
 from agentkit.foundation.casts import Cast, resolve_cast
 from agentkit.foundation.channels import Channel
 from agentkit.foundation.collection import Collection, CursorCollection, collect
@@ -261,6 +262,7 @@ __all__ = [
     "Queue",
     "Repository",
     "RepositoryQuery",
+    "Resolved",
     "Response",
     "Rule",
     "Schedule",
@@ -295,9 +297,11 @@ __all__ = [
     "resolve_cast",
     "scaffold_project",
     "guardrails_hooks",
+    "invoke",
     "lifecycle_hooks",
     "load_bootstrap",
     "logging_middleware",
+    "normalize",
     "policy_hooks",
     "run_pipeline",
     "session_scope",

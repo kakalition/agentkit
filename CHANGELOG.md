@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Class & functional duality** (Laravel-faithful, additive): every author-facing
+  seam now accepts both a class form and a closure/callable/`"module:attr"` form,
+  normalized through one shared layer. New `foundation.callable`
+  (`normalize`/`invoke`/`Resolved`, re-exported from `agentkit`), plus
+  `Container.call(target, params=None)` (DI-invocation, Laravel's `Container::call`)
+  and `Container.wrap(target, protocol=…)`.
+- `App.on(event, listener)` — the documented-but-missing listener registration,
+  chainable, accepting closures, `Listener` classes/instances, and string specs;
+  `App.listeners([...])` accepts the same. `Dispatcher.listen` normalizes too.
+- `.tool(...)` / `App.tool(...)` accept a plain function, a `Tool` class, or a
+  `Tool` instance (tool parameters are never container-injected).
+- Public `agentkit.toolkits.attach_*` functional helpers restored as aliases over
+  the built-in `Toolkit` classes (the classes delegate to them).
+- `support.drivers.register(...)` / `@register_driver` accept a plain
+  `factory(app)` callable as well as a `Driver` subclass, matching `app.extend`.
+- Closure commands (`app.commands([("greet {name}", fn)])`) via `ClosureCommand`,
+  and closure jobs (`await app.dispatch(fn)`); closure jobs run inline.
+- `App.middleware(...)` normalizes `Middleware` classes to instances; channel
+  registration accepts class / factory / instance / string spec.
+- `Container.bind(name, ConcreteClass)` now autowires the class (previously it was
+  called with the container); `bind`/`singleton`/`instance`/provider binding maps
+  accept closure | class | instance uniformly.
+- `Agent` (the app-facing fluent builder) is now exported from `agentkit`, so the
+  documented `from agentkit import Agent` import works.
+- New guide page [Class & Functional Duality](/guide/duality); `docs/guide/class-based.md`
+  corrected from "Removed functional forms" to "Both forms are first-class".
+
 ## [0.3.0] - 2026-10-16
 
 ### Added

@@ -38,6 +38,7 @@ from agentkit.support.manager import Manager
 log = get_logger("agentkit.queue")
 
 __all__ = [
+    "ClosureJob",
     "DeserializationError",
     "Job",
     "Queue",
@@ -95,6 +96,27 @@ class Job:
 
     def to_payload(self) -> dict[str, Any]:
         return serialize_job(self)
+
+
+class ClosureJob(Job):
+    """A job backed by a plain callable (Laravel's ``dispatch(fn)``).
+
+    Runs inline: a closure cannot be serialized onto the durable queue, so even
+    with ``queue_enabled`` a closure job is awaited in-process.
+    """
+
+    def __init__(self, handler: Any = None, name: str = "closure") -> None:
+        self._handler = handler
+        self.name = name
+
+    def handle(self, app: Any) -> Any:
+        from agentkit.foundation.callable import invoke
+
+        return invoke(
+            self._handler,
+            container=getattr(app, "container", None),
+            framework_params=True,
+        )
 
 
 def _wrap_job_middleware(

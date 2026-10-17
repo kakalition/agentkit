@@ -118,6 +118,7 @@ from agentkit.extensions import (
 )
 from agentkit.foundation import (
     DB,
+    Agent,
     AgentDefinition,
     App,
     Application,
@@ -194,6 +195,7 @@ from agentkit.foundation import (
     Relationship,
     Repository,
     RepositoryQuery,
+    Resolved,
     Response,
     Rule,
     S3FileSystem,
@@ -245,7 +247,9 @@ from agentkit.foundation import (
     has_many,
     has_many_through,
     has_one,
+    invoke,
     load_bootstrap,
+    normalize,
     package_name,
     parse_signature,
     pending_batches,
@@ -503,6 +507,7 @@ __all__ = [
     # app facade + durable scheduling
     "AgentApp",
     # framework foundation (Laravel-style front door)
+    "Agent",
     "AgentDefinition",
     "App",
     "Application",
@@ -653,6 +658,9 @@ __all__ = [
     "current_app",
     "using",
     "run_pipeline",
+    "normalize",
+    "invoke",
+    "Resolved",
     "discover_providers",
     "load_bootstrap",
     "scaffold_project",

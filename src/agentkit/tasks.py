@@ -1,10 +1,10 @@
 """Task planning: an in-loop todo store plus planning strategies.
 
     from agentkit.foundation.agent import Agent
-    from agentkit.tasks import attach_tasks
+    from agentkit.tasks import TasksCapability
 
     agent = Agent.make("planner").instructions("…").build()
-    attach_tasks(agent)          # write_todos / read_todos / add_todo / update_todo / clear_todos
+    TasksCapability().install(agent)   # write_todos / read_todos / add_todo / update_todo / clear_todos
 
 Todos are held by a :class:`TaskStore` driver (default ``memory``; select with
 ``tasks_driver`` or register your own). Planning strategies (``planning_driver``)

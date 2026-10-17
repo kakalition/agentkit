@@ -1,6 +1,6 @@
 """Agent-to-agent tools: message peers, broadcast, list, and hand off.
 
-``attach_agents(agent, registry, mailbox)`` registers ``send_to``, ``ask_agent``,
+``AgentsCapability(registry, mailbox)`` registers ``send_to``, ``ask_agent``,
 ``broadcast``, ``list_agents`` (and ``handoff_to`` when enabled) plus a roster in
 the instructions, so an agent can talk to its peers from the model loop.
 """

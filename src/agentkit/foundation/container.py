@@ -14,6 +14,30 @@ from typing import Any
 
 Factory = Callable[["Container"], Any]
 
+#: Annotations the container never fabricates (a scalar/builtin has no service
+#: meaning); a parameter typed like these must be supplied or have a default.
+_PRIMITIVES = (
+    str,
+    int,
+    float,
+    bool,
+    bytes,
+    bytearray,
+    complex,
+    list,
+    tuple,
+    dict,
+    set,
+    frozenset,
+    type(None),
+)
+
+
+def _injectable(annotation: Any) -> bool:
+    if annotation is inspect.Parameter.empty or annotation is Any:
+        return False
+    return annotation not in _PRIMITIVES
+
 
 class BindingError(KeyError):
     """Raised when a name cannot be resolved."""
@@ -98,7 +122,12 @@ class Container:
             return self._instances[name]
         if name in self._factories:
             factory = self._factories[name]
-            value = factory(self) if callable(factory) else factory
+            if isinstance(factory, type):
+                value = self.build(factory)
+            elif callable(factory):
+                value = factory(self)
+            else:
+                value = factory
             if name in self._singletons:
                 self._instances[name] = value
             return value
@@ -137,6 +166,87 @@ class Container:
                 if parameter.default is inspect.Parameter.empty:
                     raise
         return cls(**kwargs)
+
+    # -- invocation / normalization -------------------------------------
+    def call(
+        self, target: Any, params: dict[str, Any] | None = None, *args: Any, **kwargs: Any
+    ) -> Any:
+        """Invoke ``target`` with its typed parameters injected (Laravel's ``call``).
+
+        ``params`` (plus ``**kwargs``) are explicit arguments and always win; the
+        remaining typed parameters with no default are resolved from the
+        container. Stays synchronous and returns awaitables untouched — callers
+        await the result. Never used for tool parameters (PydanticAI owns those).
+        """
+        handler = target
+        if isinstance(target, type):
+            handler = self.make(target)
+        if not callable(handler):
+            method = getattr(handler, "handle", None)
+            if not callable(method):
+                raise BindingError(f"cannot call {target!r}")
+            handler = method
+        provided = {**(params or {}), **kwargs}
+        injected = self._inject(handler, provided, len(args))
+        return handler(*args, **injected)
+
+    def _inject(self, func: Any, provided: dict[str, Any], positional: int) -> dict[str, Any]:
+        try:
+            signature = inspect.signature(func)
+        except (TypeError, ValueError):  # pragma: no cover - builtins
+            return dict(provided)
+        try:
+            hints = typing.get_type_hints(func)
+        except Exception:  # pragma: no cover - unresolvable annotations
+            hints = {}
+        owner = type(func.__self__) if inspect.ismethod(func) else None
+        contextual = self._contextual.get(owner, {})
+        names = [
+            name
+            for name, parameter in signature.parameters.items()
+            if parameter.kind
+            in (
+                parameter.POSITIONAL_ONLY,
+                parameter.POSITIONAL_OR_KEYWORD,
+                parameter.KEYWORD_ONLY,
+            )
+        ]
+        bound = set(names[:positional])
+        result = dict(provided)
+        for name, parameter in signature.parameters.items():
+            if name == "self" or parameter.kind in (
+                parameter.VAR_POSITIONAL,
+                parameter.VAR_KEYWORD,
+                parameter.POSITIONAL_ONLY,
+            ):
+                continue
+            if name in bound or name in result:
+                continue
+            annotation = hints.get(name, parameter.annotation)
+            if not _injectable(annotation):
+                if parameter.default is inspect.Parameter.empty:
+                    raise BindingError(f"cannot inject parameter {name!r}")
+                continue
+            if annotation in contextual:
+                result[name] = self._resolve_contextual(contextual[annotation])
+                continue
+            try:
+                result[name] = self.make(annotation)
+            except BindingError:
+                if parameter.default is inspect.Parameter.empty:
+                    raise
+        return result
+
+    def wrap(self, target: Any, *, protocol: str | None = None) -> Any:
+        """Normalize a seam target to its protocol callable/instance.
+
+        Accepts a closure, callable, class, instance, or ``"module:attr"`` spec;
+        class targets are instantiated (autowired when possible). Returns the
+        invocable, or ``None`` for an unresolvable string spec.
+        """
+        from agentkit.foundation.callable import normalize
+
+        return normalize(target, protocol=protocol, container=self).invocable
 
     def forget(self, name: Any) -> None:
         self._factories.pop(name, None)

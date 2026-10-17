@@ -342,11 +342,25 @@ class Agent:
         defer_loading: bool = False,
         cache_ttl: float | None = None,
     ) -> Agent:
-        if cache_ttl is not None:
-            from agentkit.cache import cached_tool
+        """Register a tool: a plain function, a :class:`Tool` class, or an instance.
 
-            function = cached_tool(function, ttl=cache_ttl)
+        A :class:`Tool` class/instance contributes its function and its declared
+        options (name/description/…); tool parameters are PydanticAI-native and
+        are never container-injected.
+        """
+        from agentkit.foundation.tools import Tool, resolve_tool
+
+        item = resolve_tool(function)
         options: dict[str, Any] = {}
+        if isinstance(item, Tool):
+            options.update(item.tool_options())
+            target = item.function()
+        else:
+            target = item
+            if cache_ttl is not None:
+                from agentkit.cache import cached_tool
+
+                target = cached_tool(target, ttl=cache_ttl)
         if requires_approval:
             options["requires_approval"] = True
         if retries is not None:
@@ -357,7 +371,7 @@ class Agent:
             options["sequential"] = True
         if defer_loading:
             options["defer_loading"] = True
-        self._tools.append((function, options))
+        self._tools.append((target, options))
         return self
 
     def tools(self, *functions: Any, **options: Any) -> Agent:

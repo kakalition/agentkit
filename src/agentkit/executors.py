@@ -1,8 +1,8 @@
 """Code execution: a sandbox contract + drivers (local subprocess by default).
 
-    from agentkit.executors import attach_code_executor
+    from agentkit.executors import CodeExecutorCapability
 
-    attach_code_executor(agent)   # registers an approval-gated ``run_code`` tool
+    CodeExecutorCapability().install(agent)   # registers an approval-gated ``run_code`` tool
 
 The default ``local`` driver runs code in a **restricted** subprocess of the
 current interpreter — it is not a security boundary. Use ``docker``/``jupyter``/

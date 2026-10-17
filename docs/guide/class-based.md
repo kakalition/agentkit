@@ -1,9 +1,10 @@
 # Laravel → agentkit
 
 agentkit's framework layer is deliberately Laravel-shaped, and — like the rest of
-the project — **class-based**. This page is the concept map: what each Laravel
+the project — **class-first**. This page is the concept map: what each Laravel
 idea is called here, the class you extend, and where to read more. Every entry is
-a superset of what came before; nothing here removes the older functional API.
+a superset of what came before; nothing here removes the older functional API
+(see [Class & functional duality](/guide/duality)).
 
 ## Concept map
 
@@ -152,22 +153,29 @@ class RedisCacheDriver(Driver):
 
 See [Contracts & Drivers](/guide/drivers).
 
-## Removed functional forms
+## Both forms are first-class
 
-agentkit is class-based end to end. These functional/imperative forms are **gone
-from the public API**; use the class instead.
+agentkit is **class-first, not class-only**. Every author-facing seam accepts both
+a class form and a functional/closure form, normalized through one shared layer;
+classes are the *recommended* default for reusable, long-lived units, closures the
+quick local form. Neither is deprecated, and DI works identically on both. See
+[Class & functional duality](/guide/duality) for the full contract.
 
-| Removed | Use instead |
+| Functional / closure form | Class form |
 | --- | --- |
 | `Agent.make(...).tool(...).full().build()` fluent builder | `AgentDefinition` class attributes (+ `configure`/`define` hooks) |
-| `attach_*` toolkit functions (`attach_database`, …) | `Toolkit` subclasses (`DatabaseToolkit`, `SchedulerToolkit`, …) |
-| Factory-based channels (`def x_channel(app)`) | `Channel` subclasses under `app/Channels/` |
-| `app.on(name, listener)` / inline-lambda listeners | `Listener` subclasses registered with `app.listeners([...])` |
-| Built-in CLI command functions (`@app.command`) | `Command` subclasses compiled into the Click kernel |
-| Public `attach_*` capability bindings (`attach_memory`, …) | `Capability` classes (`MemoryCapability`, `TasksCapability`, `LearningCapability`, `ArtifactsCapability`, `TeamLedgerCapability`, `CodeExecutorCapability`, `ComputerCapability`, `AgentsCapability`) |
-| Driver factory functions (`@register_driver(...)` on a `def`) | `Driver` subclasses (the registry rejects callables) |
+| `attach_*` toolkit helpers (`attach_database`, `attach_usage`, …) | `Toolkit` subclasses (`DatabaseToolkit`, `SchedulerToolkit`, …) |
+| Factory channels (`def x_channel(app)`) and `app.channel(...)` | `Channel` subclasses under `app/Channels/` |
+| `app.on(name, fn)` / inline-lambda listeners, `"module:attr"` specs | `Listener` subclasses registered with `app.listeners([...])` |
+| Closure commands (`app.commands([("greet {name}", fn)])`) | `Command` subclasses compiled into the Click kernel |
+| Capability factories | `Capability` classes (`MemoryCapability`, `TasksCapability`, `LearningCapability`, `ArtifactsCapability`, `TeamLedgerCapability`, `CodeExecutorCapability`, `ComputerCapability`, `AgentsCapability`) |
+| Driver factory functions (`@register_driver(...)` on a `def`, or `app.extend(kind, name, fn)`) | `Driver` subclasses |
+| `Gate.define("x", fn)` closures | `Policy` classes |
+| String / callable / `ValidationRule` rules | `Validator` subclasses of `ValidationRule` |
+| Function middleware and closure jobs (`dispatch(fn)`) | `Middleware` subclasses and `Job` subclasses |
 
 Plain **functions are still accepted as tools** — a tool *is* a callable
-underneath — but agents, toolkits, channels, listeners, commands, models, and
-policies are declared as classes.
+underneath. Reach for a class when the unit is reusable or long-lived; a closure is
+equally valid for a one-off. The container and CLI treat both the same.
+
 

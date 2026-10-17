@@ -2,7 +2,7 @@
 
 Memories are plain rows in the same database as conversations (owner-scoped),
 each with a CPU-computed embedding and a *kind* (``fact``, ``preference``,
-``person``, ``date``, ``episodic``, ``procedural``). :func:`attach_memory` gives a
+``person``, ``date``, ``episodic``, ``procedural``). :class:`MemoryCapability` gives a
 PydanticAI agent tools to save and recall them plus a dynamic instructions block
 that lists what it already knows, so it can greet the user by name, keep their
 preferences, and stop asking the same thing twice. Recall is a hybrid of semantic

@@ -190,7 +190,9 @@ under `app/Channels/`, commands under `app/Console/Commands/`, config under
 `config/`, and your `Repositories` subclass under `app/Repositories/` are
 discovered at boot. `.withProviders([...])` still wins when you need to be
 explicit. `App` remains an alias for `Application`, and every existing signature
-keeps working.
+keeps working. Classes are the recommended default, but every seam also accepts a
+closure / callable / `"module:attr"` spec — see
+[Class & Functional Duality](/guide/duality).
 
 ```python
 # app/Agents/Assistant.py  —  discovered and registered automatically

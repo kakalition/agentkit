@@ -369,15 +369,27 @@ class App:
             self.tool(function, requires_approval=requires_approval)
 
     def tool(self, function: Any, *, requires_approval: bool = False) -> App:
+        """Register a tool: a plain function, a :class:`Tool` class, or an instance."""
+        from agentkit.foundation.tools import Tool, resolve_tool
+
+        resolved = resolve_tool(function)
         if self._agent_builder is not None:
-            self._agent_builder.tool(function, requires_approval=requires_approval)
+            self._agent_builder.tool(resolved, requires_approval=requires_approval)
         elif self._agent is not None:
-            if requires_approval:
-                self._agent.tool(function, requires_approval=True)
+            if isinstance(resolved, Tool):
+                options = dict(resolved.tool_options())
+                target = resolved.function()
             else:
-                self._agent.tool(function)
+                options = {}
+                target = resolved
+            if requires_approval:
+                options["requires_approval"] = True
+            if options:
+                self._agent.tool(**options)(target)
+            else:
+                self._agent.tool(target)
         else:
-            self._pending_tools.append((function, requires_approval))
+            self._pending_tools.append((resolved, requires_approval))
         return self
 
     # -- registries -----------------------------------------------------
@@ -406,36 +418,69 @@ class App:
         return self
 
     def commands(self, commands: Any) -> App:
+        """Register commands: classes, instances, string specs, or closures.
+
+        A ``(signature, callable)`` pair (or a bare callable) becomes a
+        :class:`~agentkit.foundation.commands.ClosureCommand` — the functional form
+        of a class-based ``Command``.
+        """
         if isinstance(commands, dict):
             self._commands.update(commands)
-        else:
-            for command in commands:
-                if isinstance(command, str):
-                    self._commands[command] = command
-                    continue
-                name = getattr(command, "name", None)
-                if not name and hasattr(command, "command_name"):
-                    try:
-                        name = command.command_name()
-                    except Exception:  # pragma: no cover - defensive
-                        name = None
-                self._commands[name or type(command).__name__] = command
+            return self
+        for command in commands:
+            self._register_command(command)
         return self
+
+    def _register_command(self, command: Any) -> None:
+        from agentkit.foundation.commands import ClosureCommand, Command
+
+        if isinstance(command, str):
+            if ":" in command:
+                resolved = self.container.wrap(command, protocol="command")
+                if resolved is not None:
+                    self._commands[_command_name(resolved)] = resolved
+            else:
+                self._commands[command] = command
+            return
+        if isinstance(command, tuple) and len(command) == 2 and callable(command[1]):
+            closure = ClosureCommand(command[0], command[1])
+            self._commands[closure.command_name()] = closure
+            return
+        if isinstance(command, (ClosureCommand, Command)):
+            self._commands[command.command_name()] = command
+            return
+        if callable(command) and not isinstance(command, type):
+            closure = ClosureCommand(getattr(command, "__name__", "command"), command)
+            self._commands[closure.command_name()] = closure
+            return
+        self._commands[_command_name(command)] = command
 
     def command(self, command: Any) -> App:
         return self.commands([command])
 
     def listeners(self, listeners: Any) -> App:
-        """Register event listeners (classes or instances)."""
-        if isinstance(listeners, (Listener, type)):
+        """Register event listeners (classes, instances, callables, string specs)."""
+        if isinstance(listeners, (Listener, type, str)) or callable(listeners):
             listeners = [listeners]
         for listener in listeners:
-            instance = listener() if isinstance(listener, type) else listener
+            instance = self.container.wrap(listener, protocol="listener")
+            if instance is None:
+                continue
             names = instance.events() if hasattr(instance, "events") else []
             if not names and isinstance(getattr(instance, "event", None), str):
                 names = [instance.event]
             for name in names:
                 self.events.listen(name, instance)
+        return self
+
+    def on(self, event: Any, listener: Any) -> App:
+        """Register an event listener (``app.on("turn.end", fn)``, chainable).
+
+        ``listener`` may be a closure/callable, a :class:`Listener` class or
+        instance, or a ``"module:attr"`` string spec. Accepts an event name, a
+        :class:`Event` class, or ``"*"`` for the wildcard.
+        """
+        self.events.listen(event, listener)
         return self
 
     def command_names(self) -> list[str]:
@@ -551,20 +596,35 @@ class App:
 
     # -- events + middleware -------------------------------------------
     def middleware(self, middleware: Any) -> App:
-        """Register turn middleware, a named alias, or a :class:`MiddlewareGroup`."""
+        """Register turn middleware: a closure, a ``Middleware`` class/instance, a
+        named group (:class:`MiddlewareGroup`), or a group alias.
+
+        Classes are instantiated (autowired) through the shared normalizer; a
+        ``"module:attr"`` string spec is imported lazily.
+        """
         from agentkit.foundation.pipeline import MiddlewareGroup
 
         if isinstance(middleware, MiddlewareGroup):
-            self._middleware_groups[middleware.name] = list(middleware.middlewares)
+            self._middleware_groups[middleware.name] = [
+                self._normalize_middleware(item) for item in middleware.middlewares
+            ]
             return self
         if isinstance(middleware, str):
             group = self._middleware_groups.get(middleware)
             if group is None:
-                raise KeyError(f"unknown middleware group: {middleware!r}")
+                resolved = self.container.wrap(middleware, protocol="middleware")
+                if resolved is None:
+                    raise KeyError(f"unknown middleware group: {middleware!r}")
+                self._middlewares.append(resolved)
+                return self
             self._middlewares.extend(group)
             return self
-        self._middlewares.append(middleware)
+        self._middlewares.append(self._normalize_middleware(middleware))
         return self
+
+    def _normalize_middleware(self, middleware: Any) -> Any:
+        resolved = self.container.wrap(middleware, protocol="middleware")
+        return middleware if resolved is None else resolved
 
     def middleware_group(self, name: str, *middlewares: Any) -> App:
         """Declare a named middleware group (usable by alias)."""
@@ -992,15 +1052,22 @@ class App:
         self.notify(_ScheduledResult(), to=[channel], conversation_id=conversation_id)
 
     async def dispatch(self, job: Any, *, queue: str | None = None) -> Any:
-        """Run a :class:`~agentkit.foundation.queue.Job`.
+        """Run a job — a :class:`~agentkit.foundation.queue.Job` instance or class,
+        or a plain callable (wrapped into a closure job).
 
         When ``queue_enabled`` is set the job is pushed onto the queue and returns
         its id (a worker processes it, e.g. ``agentkit queue:work``); otherwise it
-        runs inline. With durability initialised, inline work is a durable workflow.
+        runs inline. Closure jobs always run inline (they are not serializable).
         """
+        from agentkit.foundation.queue import ClosureJob
+
+        if isinstance(job, type) and issubclass(job, Job):
+            job = job()
+        if callable(job) and not isinstance(job, Job):
+            job = ClosureJob(job)
         if not isinstance(job, Job):
-            raise TypeError("dispatch() expects a Job instance")
-        if getattr(self.settings, "queue_enabled", False):
+            raise TypeError("dispatch() expects a Job instance, Job class, or callable")
+        if getattr(self.settings, "queue_enabled", False) and not isinstance(job, ClosureJob):
             return await self.queue.push(job, queue=queue)
         return await job.dispatch(self)
 
@@ -1192,12 +1259,16 @@ class App:
             factory = spec.factory
             if factory is None:
                 continue
+            if isinstance(factory, str):
+                factory = self.container.wrap(factory, protocol="channel")
             if isinstance(factory, type) and issubclass(factory, Channel):
                 produced = factory(self).services(self)
             elif isinstance(factory, Channel):
                 produced = factory.services(self)
-            else:
+            elif callable(factory):
                 produced = factory(self)
+            else:  # pragma: no cover - defensive
+                produced = getattr(factory, "services", lambda app: None)(self)
             services.extend(_as_services(spec.name, produced))
         return services
 
@@ -1404,6 +1475,18 @@ class Turn:
     approve: Any = None
     result: Any = None
     extras: dict[str, Any] = field(default_factory=dict)
+
+
+def _command_name(command: Any) -> str:
+    name = getattr(command, "name", None)
+    if name:
+        return str(name)
+    if hasattr(command, "command_name"):
+        try:
+            return str(command.command_name())
+        except Exception:  # pragma: no cover - defensive
+            pass
+    return type(command).__name__
 
 
 def _binding_factory(concrete: Any) -> Any:
