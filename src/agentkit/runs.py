@@ -159,10 +159,16 @@ class RepositoryRunRecorder(RunRecorder):
         self.events.clear()
 
 
-def recorder_for(repos: Any, run_id: str, *, enabled: bool = True) -> RunRecorder:
-    """The recorder for a run: repository-backed when enabled, else in-memory."""
+def recorder_for(
+    repos: Any, run_id: str, *, enabled: bool = True, retention: int | None = None
+) -> RunRecorder:
+    """The recorder for a run: repository-backed when enabled, else in-memory.
+
+    ``retention`` bounds how many trailing events the repository recorder flushes
+    per run (``run_events_retention``).
+    """
     if enabled:
         store = getattr(repos, "run_events", None)
         if store is not None:
-            return RepositoryRunRecorder(store, run_id)
+            return RepositoryRunRecorder(store, run_id, retention=retention)
     return InMemoryRecorder(run_id)

@@ -394,3 +394,47 @@ class EvalRunRecord(SQLModel, table=True):
     passed: bool = False
     report: str = "{}"
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class WorkingMemoryRecord(SQLModel, table=True):
+    """A thread-scoped working-memory entry (namespaced by owner + conversation)."""
+
+    __tablename__ = "working_memory"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    namespace: str = Field(default="", index=True)
+    key: str = Field(default="", index=True)
+    value: str = ""
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class MailboxMessageRecord(SQLModel, table=True):
+    """An at-least-once spooled inter-agent message (see ``agents.mailbox``)."""
+
+    __tablename__ = "mailbox_messages"
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    recipient: str = Field(default="", index=True)
+    sender: str | None = None
+    message: str = ""
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class GatewayPairingRecord(SQLModel, table=True):
+    """A gateway DM pairing (pending code, then ``paired_at`` once confirmed)."""
+
+    __tablename__ = "gateway_pairings"
+    __table_args__ = (Index("ix_gateway_pairing_owner_scope_ext", "owner_id", "scope", "external_id"),)
+
+    id: int | None = Field(default=None, primary_key=True)
+    owner_id: str = Field(index=True)
+    scope: str = Field(default="", index=True)  # gateway/channel name
+    external_id: str = Field(default="", index=True)
+    code: str = ""
+    code_expires_at: datetime | None = None
+    paired_at: datetime | None = None  # non-null once paired
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)

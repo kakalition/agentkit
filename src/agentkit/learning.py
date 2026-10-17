@@ -294,7 +294,63 @@ async def _distill(
     return candidates, written
 
 
+def _driver(kind: str) -> Any:
+    """Resolve a learning driver (extractor/strategy/sink) from the current app."""
+    try:
+        from agentkit.foundation.facade import get_current_app
+
+        app = get_current_app()
+    except Exception:  # pragma: no cover - defensive
+        app = None
+    if app is None:
+        return None
+    try:
+        return app.manager(kind).driver()
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
 async def reflect(
+    repos: Any,
+    *,
+    model: Any = None,
+    conversation_id: str | None = None,
+    window: int | None = None,
+    dry_run: bool = False,
+    settings: Any = None,
+    auto_skills: bool | None = None,
+    skill_threshold: int | None = None,
+) -> dict[str, Any]:
+    """Distil lessons/preferences/facts from a conversation window.
+
+    Dispatches through the configured ``learning_strategy_driver`` (default
+    ``reflect_apply``, which runs the full pass below). ``none`` skips learning.
+    """
+    strategy = _driver("learning_strategy")
+    if strategy is not None:
+        return await strategy.run(
+            repos,
+            model=model,
+            conversation_id=conversation_id,
+            window=window,
+            dry_run=dry_run,
+            settings=settings,
+            auto_skills=auto_skills,
+            skill_threshold=skill_threshold,
+        )
+    return await _reflect_impl(
+        repos,
+        model=model,
+        conversation_id=conversation_id,
+        window=window,
+        dry_run=dry_run,
+        settings=settings,
+        auto_skills=auto_skills,
+        skill_threshold=skill_threshold,
+    )
+
+
+async def _reflect_impl(
     repos: Any,
     *,
     model: Any = None,
@@ -358,7 +414,11 @@ async def reflect(
 
     from agentkit.session import deserialize_messages
 
-    extracted = await _extract(deserialize_messages(payloads), model)
+    extractor = _driver("learning_extractor")
+    if extractor is not None:
+        extracted = await extractor.extract(deserialize_messages(payloads), model)
+    else:
+        extracted = await _extract(deserialize_messages(payloads), model)
     lessons = _redact_items(extracted.get("lessons", []))[:max_lessons]
     preferences = _redact_items(extracted.get("preferences", []))
     facts = _redact_items(extracted.get("facts", []))
@@ -370,25 +430,24 @@ async def reflect(
     store = getattr(repos, "memories", None)
     candidates: list[dict[str, Any]] = []
     written: list[str] = []
+    if (
+        store is not None
+        and bool(getattr(settings, "learning_eval_gate", False))
+        and not await _eval_gate_passed(repos)
+    ):
+        result["skipped"] = True
+        result["reason"] = "eval_gate"
+        return result
     if store is not None:
-        for lesson in lessons:
-            await store.add(
-                lesson,
-                kind=LESSON_KIND,
-                importance=_importance(lesson),
-                source_conversation_id=conversation_id,
-                status=lesson_status,
-            )
-            await _emit("learning.lesson", conversation_id=conversation_id, text=lesson)
-        for fact in facts:
-            await store.add(fact, kind="fact", source_conversation_id=conversation_id)
-        for preference in preferences:
-            await store.add(
-                preference,
-                kind="preference",
-                importance=0.6,
-                source_conversation_id=conversation_id,
-            )
+        sink = _driver("learning_sink") or MemorySink()
+        await sink.store(
+            repos,
+            {"lessons": lessons, "facts": facts, "preferences": preferences},
+            settings=settings,
+            conversation_id=conversation_id,
+            require_review=require_review,
+            lesson_status=lesson_status,
+        )
         # Distil recurring lessons *before* deduping (a merged lesson is one signal).
         candidates, written = await _distill(repos, settings, threshold, write_skills)
         result["merged"] = await _dedupe_lessons(store)
@@ -509,6 +568,18 @@ async def _emit(event: str, **payload: Any) -> None:
     from agentkit.foundation.facade import emit
 
     await emit(event, **payload)
+
+
+async def _eval_gate_passed(repos: Any) -> bool:
+    """Whether the most recent recorded eval run passed (``learning_eval_gate``).
+
+    Fail-closed: with no eval runs on record, learning is held back.
+    """
+    runs = getattr(repos, "eval_runs", None)
+    if runs is None:
+        return False
+    records = await runs.list(limit=1)
+    return bool(records) and bool(records[0].passed)
 
 
 async def _reflect_for_ctx(ctx: RunContext[Deps], settings: Any) -> dict[str, Any]:
@@ -658,7 +729,7 @@ class ReflectApplyStrategy:
     """The default strategy: the full ``reflect`` pass (extract → store → digest)."""
 
     async def run(self, repos: Any, **options: Any) -> dict[str, Any]:
-        return await reflect(repos, **options)
+        return await _reflect_impl(repos, **options)
 
 
 class NoopStrategy:
@@ -677,8 +748,10 @@ class MemorySink:
             return 0
         settings = options.get("settings")
         conversation_id = options.get("conversation_id")
-        require_review = bool(getattr(settings, "learning_require_review", True))
-        lesson_status = "proposed" if require_review else "active"
+        require_review = options.get("require_review")
+        if require_review is None:
+            require_review = bool(getattr(settings, "learning_require_review", True))
+        lesson_status = options.get("lesson_status") or ("proposed" if require_review else "active")
         added = 0
         for lesson in items.get("lessons", []):
             await store.add(
@@ -688,6 +761,7 @@ class MemorySink:
                 source_conversation_id=conversation_id,
                 status=lesson_status,
             )
+            await _emit("learning.lesson", conversation_id=conversation_id, text=lesson)
             added += 1
         for fact in items.get("facts", []):
             await store.add(fact, kind="fact", source_conversation_id=conversation_id)

@@ -72,3 +72,29 @@ def test_runs_endpoints(tmp_path):
     assert any(run["run_id"] == "webui:r1" for run in runs)
     detail = client.get("/api/studio/runs/webui:r1").json()
     assert detail["events"]
+
+
+def test_score_run_endpoint(tmp_path):
+    app = _app(tmp_path)
+    client = TestClient(
+        build_webui_app(runtime=app.runtime, settings=app.settings, app=app, answer=app.answer)
+    )
+    client.post("/api/chat", json={"conversation_id": "webui:s1", "text": "hi"})
+    response = client.post("/api/studio/runs/webui:s1/score", json={"grader": "trace"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["run_id"] == "webui:s1"
+    assert "score" in body
+    assert body["record_id"] is not None
+
+
+def test_inspect_app_reports_new_drivers(tmp_path):
+    app = _app(tmp_path)
+    client = TestClient(
+        build_webui_app(runtime=app.runtime, settings=app.settings, app=app, answer=app.answer)
+    )
+    body = client.get("/api/studio/app").json()
+    assert body["vector"]["driver"] == "repository"
+    assert body["dataset"]["driver"] == "repository"
+    assert body["working_memory"]["driver"] == "memory"
+    assert "vector" in body["drivers"]

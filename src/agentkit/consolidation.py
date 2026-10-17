@@ -92,10 +92,15 @@ def register_consolidate_task() -> str:
 
     @task(CONSOLIDATE_TASK)
     async def _consolidate() -> dict[str, int]:
+        from agentkit.config import get_settings
         from agentkit.runtime import build_runtime, repositories
 
-        runtime = build_runtime()
+        settings = get_settings()
+        runtime = build_runtime(settings)
         async with repositories(runtime) as repos:
-            return await consolidate_memories(repos)
+            return await consolidate_memories(
+                repos,
+                duplicate_threshold=float(settings.memory_consolidate_duplicate_threshold),
+            )
 
     return CONSOLIDATE_TASK

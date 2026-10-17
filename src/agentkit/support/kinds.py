@@ -50,6 +50,7 @@ __all__ = [
     "MemoryDriver",
     "NotificationChannelDriver",
     "ObservabilityDriver",
+    "PairingDriver",
     "PlanningDriver",
     "PricingDriver",
     "PromptsDriver",
@@ -65,6 +66,8 @@ __all__ = [
     "StorageDriver",
     "TaskDriver",
     "VaultDriver",
+    "VectorStoreDriver",
+    "WorkingMemoryDriver",
 ]
 
 
@@ -99,6 +102,7 @@ class DriverKind(StrEnum):
     MEMORY_RECALL = "memory_recall"
     NOTIFICATION_CHANNEL = "notification_channel"
     OBSERVABILITY = "observability"
+    PAIRING = "pairing"
     PLANNING = "planning"
     PRICING = "pricing"
     PROMPTS = "prompts"
@@ -113,6 +117,8 @@ class DriverKind(StrEnum):
     STORAGE = "storage"
     TASKS = "tasks"
     VAULT = "vault"
+    VECTOR = "vector"
+    WORKING_MEMORY = "working_memory"
 
 
 class CacheDriver(StrEnum):
@@ -190,6 +196,11 @@ class SpeakerDriver(StrEnum):
 class DurabilityDriver(StrEnum):
     DBOS = "dbos"
     TEMPORAL = "temporal"
+
+
+class PairingDriver(StrEnum):
+    MEMORY = "memory"
+    REPOSITORY = "repository"
 
 
 class DatabaseDriver(StrEnum):
@@ -275,6 +286,17 @@ class ContextDriver(StrEnum):
 
 class TaskDriver(StrEnum):
     MEMORY = "memory"
+
+
+class WorkingMemoryDriver(StrEnum):
+    MEMORY = "memory"
+    REPOSITORY = "repository"
+
+
+class VectorStoreDriver(StrEnum):
+    REPOSITORY = "repository"
+    SQLITE_VEC = "sqlite_vec"
+    PGVECTOR = "pgvector"
 
 
 class PlanningDriver(StrEnum):

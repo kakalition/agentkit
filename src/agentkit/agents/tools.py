@@ -66,8 +66,20 @@ def mailbox_tools(mailbox: Any, registry: Any = None) -> list[Any]:
 
 
 def _self_name(ctx: RunContext[Deps]) -> str | None:
+    """The running agent's name (for message/handoff attribution).
+
+    Prefers an explicit ``deps.extras["_agent_name"]`` override, then the
+    per-run ``RunContext.agent`` (correct even when a peer agent reuses the
+    caller's deps).
+    """
     deps = getattr(ctx, "deps", None)
-    return getattr(deps, "extras", {}).get("_agent_name") if deps is not None else None
+    extras = getattr(deps, "extras", None) or {}
+    name = extras.get("_agent_name")
+    if name:
+        return str(name)
+    agent = getattr(ctx, "agent", None)
+    resolved = getattr(agent, "name", None)
+    return str(resolved) if resolved else None
 
 
 class AgentsCapability(Capability):

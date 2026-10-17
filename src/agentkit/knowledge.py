@@ -104,21 +104,52 @@ class KnowledgeBase:
         async with repositories(self._runtime) as repos:
             yield repos
 
+    # -- drivers --------------------------------------------------------
+    def _driver_app(self) -> Any:
+        """The app whose managers resolve chunker/retriever/reranker/ingest drivers."""
+        if self.app is not None:
+            return self.app
+        try:
+            from agentkit.foundation.facade import get_current_app
+
+            return get_current_app()
+        except Exception:  # pragma: no cover - defensive
+            return None
+
+    def _driver(self, kind: str) -> Any:
+        app = self._driver_app()
+        if app is None:
+            return None
+        try:
+            return app.manager(kind).driver()
+        except Exception:  # pragma: no cover - defensive
+            return None
+
     # -- writes ---------------------------------------------------------
     async def add(self, text: str, *, source: str = "") -> int:
         """Chunk and index ``text``; returns the number of chunks added."""
-        chunks = chunk_text(text, chunk_chars=self.chunk_chars, overlap=self.overlap)
+        chunker = self._driver("chunker")
+        if chunker is not None:
+            chunks = chunker.chunk(text, chunk_chars=self.chunk_chars, overlap=self.overlap)
+        else:
+            chunks = chunk_text(text, chunk_chars=self.chunk_chars, overlap=self.overlap)
         if not chunks:
             return 0
         async with self._scope() as repos:
             return await repos.knowledge.add(source, chunks)
 
-    async def add_file(self, path: str | Path, *, source: str | None = None) -> int:
+    async def _load_text(self, path: Path, settings: Any) -> str:
+        loader = self._driver("ingest")
+        if loader is not None:
+            return await asyncio.to_thread(loader.load, path, settings=settings)
         from agentkit.ingest import extract_text
 
+        return await asyncio.to_thread(extract_text, path, settings=settings)
+
+    async def add_file(self, path: str | Path, *, source: str | None = None) -> int:
         path = Path(path).expanduser()
         settings = self._settings or get_settings()
-        text = await asyncio.to_thread(extract_text, path, settings=settings)
+        text = await self._load_text(path, settings)
         return await self.add(text, source=source or str(path))
 
     async def add_url(self, url: str, *, source: str | None = None) -> int:
@@ -153,7 +184,15 @@ class KnowledgeBase:
     # -- reads ----------------------------------------------------------
     async def search(self, query: str, *, limit: int = 5, source: str | None = None) -> list[Any]:
         async with self._scope() as repos:
-            return await repos.knowledge.search(query, limit=limit, source=source)
+            retriever = self._driver("retriever")
+            if retriever is not None and not isinstance(retriever, RepositoryRetriever):
+                hits = await retriever.search(query, limit=limit, source=source)
+            else:
+                hits = await repos.knowledge.search(query, limit=limit, source=source)
+            reranker = self._driver("reranker")
+            if reranker is not None:
+                hits = reranker.rerank(query, hits)
+            return hits
 
     async def sources(self) -> list[str]:
         async with self._scope() as repos:

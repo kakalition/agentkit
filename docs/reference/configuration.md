@@ -97,10 +97,33 @@ is rejected at settings load. See [Contracts & Drivers](/guide/drivers).
 | `realtime_driver` | `REALTIME_DRIVER` | `loopback` | `loopback`, `pydantic_ai` (extra) |
 | `catalog_driver` | `CATALOG_DRIVER` | `local` | `local`, `skills`, `http`, `git` |
 | `dataset_driver` | `DATASET_DRIVER` | `repository` | `repository`, `memory` |
+| `vector_store_driver` | `VECTOR_STORE_DRIVER` | `repository` | `repository`, `sqlite_vec` (extra), `pgvector` |
+| `working_memory_driver` | `WORKING_MEMORY_DRIVER` | `memory` | `memory`, `repository` |
+| `pairing_driver` | `PAIRING_DRIVER` | `memory` | `memory`, `repository` |
 | `eval_grader_driver` | `EVAL_GRADER_DRIVER` | `exact` | `exact`, `contains`, `schema`, `trace`, `llm_judge` |
 
 `memory_embedding_backend` doubles as the `embeddings` driver name
 (`sentence-transformers` | `fastembed` | `hash` | `none`).
+
+## Durability
+
+`durability_driver=dbos` is the default (DBOS Transact over a local SQLite system
+database). `durability_driver=temporal` (needs the `temporal` extra) routes durable
+execution through Temporal; workflows are submitted by fully-qualified name, so the
+worker must register them.
+
+| Field | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `temporal_address` | `TEMPORAL_ADDRESS` | `localhost:7233` | Temporal frontend address |
+| `temporal_namespace` | `TEMPORAL_NAMESPACE` | `default` | Temporal namespace |
+| `temporal_task_queue` | `TEMPORAL_TASK_QUEUE` | `agentkit` | default task queue for enqueues/schedules |
+
+## Mailbox & pairing persistence
+
+`mailbox_durable` spools inter-agent messages (`mailbox_messages` table via
+`RepositoryMailboxSpool`); `pairing_driver=repository` persists gateway pairings
+(`gateway_pairings` table via `RepositoryPairingRegistry`). Both tables are created
+additively by `init_db`.
 
 ## Studio, traces & checkpoints
 
@@ -118,6 +141,17 @@ is rejected at settings load. See [Contracts & Drivers](/guide/drivers).
 | `catalog_repo` | `CATALOG_REPO` | `None` | git repo for the `git` catalog |
 | `catalog_ref` | `CATALOG_REF` | `main` | git ref for the `git` catalog |
 | `catalog_path` | `CATALOG_PATH` | `catalog.json` | index path inside the git repo |
+
+## Capability depth
+
+| Field | Env | Default | Meaning |
+| --- | --- | --- | --- |
+| `working_memory_enabled` | `WORKING_MEMORY_ENABLED` | `False` | add thread-scoped working-memory tools to every agent |
+| `guardrails_enabled` | `GUARDRAILS_ENABLED` | `False` | scan tool results for prompt injection |
+| `guardrails_wrap_untrusted` | `GUARDRAILS_WRAP_UNTRUSTED` | `False` | wrap untrusted tool results as data (attaches the hooks) |
+| `online_scoring_enabled` | `ONLINE_SCORING_ENABLED` | `False` | grade live run traces with a registered grader |
+| `online_scoring_grader` | `ONLINE_SCORING_GRADER` | `trace` | grader name for online scoring |
+| `model_fallbacks` | `MODEL_FALLBACKS` | `[]` | ordered `provider:model` fallbacks for the primary model |
 
 ## Web UI
 

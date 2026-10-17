@@ -27,13 +27,34 @@ class MemoryService:
         async with self.app.repositories() as repos:
             return int((await repos.memories.add(content, kind=kind)).id)
 
-    async def search(self, query: str, *, limit: int = 5) -> list[Any]:
+    async def add(self, content: str, *, kind: str = "fact", **kwargs: Any) -> Any:
         async with self.app.repositories() as repos:
-            return list(await repos.memories.search(query, limit=limit))
+            return await repos.memories.add(content, kind=kind, **kwargs)
+
+    async def search(
+        self,
+        query: str,
+        *,
+        kind: str | None = None,
+        limit: int = 5,
+        status: str | None = "active",
+    ) -> list[Any]:
+        async with self.app.repositories() as repos:
+            return list(await repos.memories.search(query, kind=kind, limit=limit, status=status))
 
     async def all(self, limit: int | None = None) -> list[Any]:
         async with self.app.repositories() as repos:
             return list(await repos.memories.list(limit=limit))
+
+    async def list(
+        self, limit: int | None = None, *, kind: str | None = None, status: str | None = "active"
+    ) -> list[Any]:
+        async with self.app.repositories() as repos:
+            return list(await repos.memories.list(limit, kind=kind, status=status))
+
+    async def record_use(self, memories: Any) -> int:
+        async with self.app.repositories() as repos:
+            return int(await repos.memories.record_use(memories))
 
     async def forget(self, memory_id: int) -> bool:
         async with self.app.repositories() as repos:

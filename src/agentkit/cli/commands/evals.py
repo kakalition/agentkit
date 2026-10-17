@@ -152,10 +152,31 @@ class EvalGradeCommand(Command):
             raise typer.Exit(code=1)
 
 
+class EvalScoreRunCommand(Command):
+    signature = "evals:score {run_id} {--grader=trace} {--dataset=}"
+    description = "Score a live run trace with a grader and record the result."
+
+    async def handle(self, run_id: str, grader: str = "trace", dataset: str | None = None) -> None:
+        from agentkit.scorers import score_run
+
+        async with _eval_scope() as repos:
+            result = await score_run(
+                repos, run_id, grader_name=grader, dataset=dataset or None
+            )
+        mark = "✓" if result["passed"] else "✗"
+        self.info(
+            f"{mark} {run_id}: score={result['score']:.2f} events={result['events']} "
+            f"{result.get('reason', '')}".rstrip()
+        )
+        if not result["passed"]:
+            raise typer.Exit(code=1)
+
+
 COMMANDS: list[type] = [
     EvalCommand,
     EvalCaptureCommand,
     EvalGateCommand,
     EvalDatasetCommand,
     EvalGradeCommand,
+    EvalScoreRunCommand,
 ]

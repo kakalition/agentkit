@@ -15,6 +15,7 @@ from agentkit.agents import (
     AgentRegistry,
     AgentsCapability,
     Mailbox,
+    RepositoryMailboxSpool,
     TeamLedgerCapability,
     handoff,
     handoff_tool,
@@ -77,6 +78,13 @@ from agentkit.config import (
 )
 from agentkit.consolidation import consolidate_memories
 from agentkit.data import export_owner, forget_owner
+from agentkit.datasets import (
+    DatasetManager,
+    DatasetStore,
+    MemoryDatasetStore,
+    RepositoryDatasetStore,
+    load_dataset_file,
+)
 from agentkit.deps import ApprovalCallback, ApprovalRequest, CommsContext, Deps
 from agentkit.errors import (
     AgentKitError,
@@ -119,13 +127,16 @@ from agentkit.extensions import (
 from agentkit.foundation import (
     DB,
     Agent,
+    AgentCallContext,
     AgentDefinition,
+    AgentMiddlewareCapability,
     App,
     Application,
     ApplicationBuilder,
     ApprovalRequested,
     Argument,
     Attribute,
+    BaseAgentMiddleware,
     Batch,
     BelongsTo,
     BelongsToMany,
@@ -179,6 +190,7 @@ from agentkit.foundation import (
     Migrator,
     Model,
     ModelEvent,
+    NoopMiddleware,
     Notification,
     Notifier,
     Observer,
@@ -225,6 +237,7 @@ from agentkit.foundation import (
     ValidationError,
     ValidationRule,
     Validator,
+    agent_middleware_hooks,
     batch,
     belongs_to,
     belongs_to_many,
@@ -261,7 +274,7 @@ from agentkit.foundation import (
     validate,
     validator,
 )
-from agentkit.gateways.pairing import PairingRegistry
+from agentkit.gateways.pairing import PairingRegistry, RepositoryPairingRegistry
 from agentkit.graders import (
     ContainsGrader,
     ExactMatchGrader,
@@ -271,7 +284,7 @@ from agentkit.graders import (
     TraceGrader,
     register_grader,
 )
-from agentkit.graph import END, GraphError, StateGraph
+from agentkit.graph import END, GraphError, GraphInterrupt, Interrupt, StateGraph, interrupt
 from agentkit.guardrails import (
     check_egress,
     is_loopback,
@@ -392,6 +405,7 @@ from agentkit.runs import (
 from agentkit.runtime import Runtime, build_deps, build_runtime, repositories
 from agentkit.sandbox import CommandResult, Sandbox, SandboxError
 from agentkit.scheduling_nl import NaturalSchedule, parse_when
+from agentkit.scorers import OnlineScorer, score_run
 from agentkit.search import (
     FtsSearchIndex,
     ScanSearchIndex,
@@ -481,9 +495,23 @@ from agentkit.trajectory import (
     render_jsonl,
 )
 from agentkit.tui import run_tui
+from agentkit.vector_store import (
+    NumpyVectorStore,
+    PgVectorStore,
+    SqliteVecVectorStore,
+    VectorHit,
+    VectorStore,
+    VectorStoreManager,
+)
 from agentkit.webhooks import WebhookDispatcher
 from agentkit.webhooks import sign as sign_webhook
 from agentkit.webui import build_webui_app, serve_webui, webui_service
+from agentkit.working_memory import (
+    InMemoryWorkingMemory,
+    RepositoryWorkingMemory,
+    WorkingMemoryCapability,
+    WorkingMemoryManager,
+)
 from agentkit.workspace import (
     default_workspace_root,
     detect_legacy,
@@ -496,6 +524,23 @@ __version__ = "0.3.0"
 __all__ = [
     "Capability",
     "MemoryCapability",
+    "WorkingMemoryCapability",
+    "InMemoryWorkingMemory",
+    "RepositoryWorkingMemory",
+    "WorkingMemoryManager",
+    "VectorStore",
+    "VectorHit",
+    "NumpyVectorStore",
+    "SqliteVecVectorStore",
+    "PgVectorStore",
+    "VectorStoreManager",
+    "DatasetStore",
+    "DatasetManager",
+    "MemoryDatasetStore",
+    "RepositoryDatasetStore",
+    "load_dataset_file",
+    "OnlineScorer",
+    "score_run",
     "TasksCapability",
     "LearningCapability",
     "ArtifactsCapability",
@@ -508,7 +553,9 @@ __all__ = [
     "AgentApp",
     # framework foundation (Laravel-style front door)
     "Agent",
+    "AgentCallContext",
     "AgentDefinition",
+    "AgentMiddlewareCapability",
     "App",
     "Application",
     "ApplicationBuilder",
@@ -579,10 +626,12 @@ __all__ = [
     "resolve_cast",
     "SoftDeletes",
     "Attribute",
+    "BaseAgentMiddleware",
     "Observer",
     "GlobalScope",
     "LazyLoadingViolation",
     "ModelEvent",
+    "NoopMiddleware",
     "Relationship",
     "Relation",
     "HasMany",
@@ -598,6 +647,7 @@ __all__ = [
     "Batch",
     "Chain",
     "batch",
+    "agent_middleware_hooks",
     "chain",
     "pending_batches",
     "Factory",
@@ -716,6 +766,7 @@ __all__ = [
     "AgentHandle",
     "AgentRegistry",
     "Mailbox",
+    "RepositoryMailboxSpool",
     "handoff",
     "handoff_tool",
     "mailbox_tools",
@@ -765,6 +816,7 @@ __all__ = [
     "build_agent_mcp_server",
     "serve_agent",
     "PairingRegistry",
+    "RepositoryPairingRegistry",
     "NaturalSchedule",
     "parse_when",
     # native toolkits (first-class agent-callable capabilities)
@@ -815,6 +867,9 @@ __all__ = [
     "StateGraph",
     "END",
     "GraphError",
+    "GraphInterrupt",
+    "Interrupt",
+    "interrupt",
     "Supervisor",
     "spawn_tool",
     "team_tools",

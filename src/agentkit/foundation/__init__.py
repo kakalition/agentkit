@@ -6,6 +6,13 @@ unchanged.
 """
 
 from agentkit.foundation.agent import Agent, AgentDefinition
+from agentkit.foundation.agent_middleware import (
+    AgentCallContext,
+    AgentMiddlewareCapability,
+    BaseAgentMiddleware,
+    NoopMiddleware,
+    agent_middleware_hooks,
+)
 from agentkit.foundation.application import (
     App,
     Application,
@@ -154,14 +161,19 @@ from agentkit.foundation.validation import (
 
 __all__ = [
     "Agent",
+    "AgentCallContext",
     "AgentDefinition",
+    "AgentMiddlewareCapability",
     "App",
     "Application",
     "ApplicationBuilder",
+    "BaseAgentMiddleware",
     "GuardrailsMiddleware",
     "LoggingMiddleware",
     "MiddlewareGroup",
+    "NoopMiddleware",
     "PolicyMiddleware",
+    "agent_middleware_hooks",
     "Argument",
     "ApprovalRequested",
     "Attribute",

@@ -275,6 +275,16 @@ A driver needs no base class — only the contract's methods. See
 [Contracts & Drivers](/guide/drivers) for the full catalog, precedence, and the
 conformance tests every driver must pass.
 
+### Ranking
+
+Recall blends semantic similarity, recency, and importance. The blend is chosen by
+`memory_recall_driver` (`hybrid` default, or `keyword`/`recency`), and the semantic
+scores are produced through the configured [vector store](/guide/vector-store)
+(`vector_store_driver`) — the default `repository` driver is the same numpy cosine
+scan as before, so recall is unchanged unless you select another driver. See
+[Agent Middleware](/guide/agent-middleware) for model/tool-level hooks and
+[Working Memory](/guide/working-memory) for per-conversation scratch state.
+
 ### Troubleshooting
 
 | Symptom | Likely cause |

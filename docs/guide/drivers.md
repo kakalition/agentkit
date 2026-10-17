@@ -313,6 +313,10 @@ at a glance which implementation each subsystem is using.
 ## Where to go next
 
 - [The Full Stack](/guide/fullstack) — what `.full()` and `fullstack()` turn on.
-- [Configuration](/guide/configuration) — settings and layered sections.
+- [Configuration](/guide/configuration) — settings and layered sections, including
+  the complete per-subsystem driver table (`vector_store_driver`,
+  `working_memory_driver`, `dataset_driver`, `agent_middleware_driver`, `*_fallbacks`).
+- [Vector Stores](/guide/vector-store) and [Eval Datasets](/guide/datasets) — the
+  newer driver kinds, with parity-preserving defaults.
 - [Tasks & Todos](/guide/tasks) and [Code Execution](/guide/code-execution) —
   two of the newer capabilities.

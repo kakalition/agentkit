@@ -104,9 +104,33 @@ class HealthCommand(Command):
             raise typer.Exit(code=1)
 
 
+class RunsResumeCommand(Command):
+    signature = "runs:resume {conversation_id} {--seq=} {--target=}"
+    description = "Restore (or branch) a conversation from a stored checkpoint."
+
+    async def handle(
+        self, conversation_id: str, seq: int | None = None, target: str | None = None
+    ) -> None:
+        from agentkit.foundation.application import App
+
+        runtime = _runtime()
+        app = App(settings=runtime.settings, discover=False)
+        app._runtime = runtime
+        try:
+            destination = await app.resume_from_checkpoint(
+                conversation_id, seq=seq, target=target
+            )
+        except Exception as exc:
+            self.error(str(exc))
+            raise typer.Exit(code=1) from exc
+        where = f"branch {destination}" if target else destination
+        self.info(f"restored {conversation_id} -> {where}")
+
+
 COMMANDS: list[type] = [
     MigrateCommand,
     DbBackupCommand,
     DbRestoreCommand,
     HealthCommand,
+    RunsResumeCommand,
 ]

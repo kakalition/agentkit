@@ -21,7 +21,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from agentkit.config import model_settings, usage_limits
+from agentkit.config import get_settings, model_settings, usage_limits
 from agentkit.deps import Deps
 
 DEFAULT_MAX_HISTORY = 40
@@ -77,6 +77,15 @@ def _tool_calls(messages: list[ModelMessage]) -> list[str]:
     return names
 
 
+def _model_used(messages: list[ModelMessage]) -> str | None:
+    """The model name that produced the last response (fallback-aware)."""
+    for message in reversed(messages):
+        name = getattr(message, "model_name", None)
+        if name:
+            return str(name)
+    return None
+
+
 def _content_repr(value: Any) -> str:
     """A short text preview of a possibly-multimodal user message."""
     if isinstance(value, str):
@@ -118,6 +127,8 @@ class ChatResult:
     history_length: int = 0
     usage: dict[str, Any] | None = None
     tool_calls: list[str] = field(default_factory=list)
+    #: the model that produced the final response (fallback chains may differ).
+    model: str | None = None
 
 
 @dataclass
@@ -160,7 +171,6 @@ class ChatRunner:
         self.recorder = recorder
         # Optional checkpoint store (see ``agentkit.checkpoints``); no-op when absent.
         self.checkpointer = checkpointer
-        self._checkpoint_seq = 0
         # Set by ``_begin`` when a history processor shrank the window.
         self._compaction: dict[str, int] | None = None
         # Make the conversation id available to tools (e.g. to deliver later).
@@ -203,14 +213,42 @@ class ChatRunner:
         except Exception:  # pragma: no cover - recorder errors are swallowed
             pass
 
+    def _effective_settings(self) -> Any:
+        """Settings for this turn, preferring the owning app's overrides."""
+        extras = getattr(self.deps, "extras", None) or {}
+        app = extras.get("app")
+        return (
+            getattr(app, "settings", None)
+            or getattr(self.deps, "settings", None)
+            or get_settings()
+        )
+
+    async def _auto_score(self, repos: Any) -> None:
+        """Grade this run's trace when online scoring is enabled (opt-in, best-effort)."""
+        try:
+            settings = self._effective_settings()
+            if not bool(getattr(settings, "online_scoring_enabled", False)):
+                return
+            run_id = str(getattr(self.recorder, "run_id", "") or self.conversation_id or "")
+            if not run_id:
+                return
+            from agentkit.scorers import score_run
+
+            await score_run(
+                repos,
+                run_id,
+                grader_name=str(getattr(settings, "online_scoring_grader", "trace") or "trace"),
+            )
+        except Exception:  # pragma: no cover - scoring must never break a turn
+            pass
+
     async def _checkpoint(self, label: str, state: Any) -> None:
         if self.checkpointer is None:
             return
         try:
-            await self.checkpointer.put(
-                self.conversation_id, self._checkpoint_seq, state, label=label
-            )
-            self._checkpoint_seq += 1
+            latest = await self.checkpointer.latest(self.conversation_id)
+            seq = (int(getattr(latest, "seq", -1)) + 1) if latest is not None else 0
+            await self.checkpointer.put(self.conversation_id, seq, state, label=label)
         except Exception:  # pragma: no cover - checkpoint errors are swallowed
             pass
 
@@ -257,6 +295,7 @@ class ChatRunner:
         await self._checkpoint("finish", self._finish_state(chat_result))
         self._record_final(chat_result)
         await self._flush_recorder()
+        await self._auto_score(repos)
         return chat_result
 
     async def stream(self, text: Any) -> AsyncIterator[StreamEvent]:
@@ -287,6 +326,7 @@ class ChatRunner:
         await self._checkpoint("finish", self._finish_state(chat_result))
         self._record_final(chat_result)
         await self._flush_recorder()
+        await self._auto_score(repos)
         yield StreamEvent("final", result=chat_result)
 
     async def resume(self, deferred_tool_results: Any, text: str | None = None) -> ChatResult:
@@ -309,6 +349,7 @@ class ChatRunner:
         await self._checkpoint("finish", self._finish_state(chat_result))
         self._record_final(chat_result)
         await self._flush_recorder()
+        await self._auto_score(repos)
         return chat_result
 
     async def _begin(self, text: Any) -> tuple[Any, str, list[ModelMessage]]:
@@ -381,6 +422,7 @@ class ChatRunner:
             history_length=len(all_messages),
             usage=usage,
             tool_calls=_tool_calls(all_messages),
+            model=_model_used(all_messages),
         )
         from agentkit import metrics
         from agentkit.foundation.facade import emit

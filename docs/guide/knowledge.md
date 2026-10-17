@@ -234,6 +234,15 @@ A driver needs no base class — only the contract's methods. See
 [Contracts & Drivers](/guide/drivers) for the full catalog, precedence, and the
 conformance tests every driver must pass.
 
+### Drivers
+
+Writing and reading each resolve a driver: `chunker_driver` (default `semantic`)
+splits text, `retriever_driver` (default `repository`) finds candidates, and
+`reranker_driver` (default `identity`) reorders them. Document loading uses
+`ingest_driver`. Semantic ranking runs through the configured
+[vector store](/guide/vector-store) (`vector_store_driver`); the default
+`repository` driver reproduces the built-in numpy cosine scan exactly.
+
 ### Troubleshooting
 
 | Symptom | Likely cause |

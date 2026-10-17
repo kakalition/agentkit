@@ -72,6 +72,22 @@ def _usage_dict(result: Any) -> dict[str, int]:
     return {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total}
 
 
+async def _record_usage(
+    ctx: WebUIContext, conversation_id: str, model_name: str, result: Any, actor: Actor
+) -> None:
+    usage = _usage_dict(result)
+    async with repositories(ctx.runtime, actor.owner_id) as repos:
+        await repos.usage.add(
+            conversation_id=conversation_id,
+            kind="api",
+            model=model_name,
+            requests=1,
+            input_tokens=usage["prompt_tokens"],
+            output_tokens=usage["completion_tokens"],
+            total_tokens=usage["total_tokens"],
+        )
+
+
 @router.get("/v1/models")
 async def list_models(
     ctx: WebUIContext = Depends(get_context), actor: Actor = Depends(require_actor)
@@ -98,27 +114,20 @@ async def chat_completions(
     actor: Actor = Depends(require_actor),
 ) -> Any:
     _check_enabled(ctx.settings)
-    if ctx.answer is None:
+    streamer = getattr(ctx.app, "stream", None) if ctx.app is not None else None
+    if ctx.answer is None and streamer is None:
         raise HTTPException(status_code=503, detail="chat is not enabled for this agent")
     conversation_id = body.conversation_id or f"openai:{actor.owner_id}"
     prompt = _last_user(body.messages)
     model_name = body.model or ctx.settings.model_name
-    result = await ctx.answer(conversation_id, prompt, actor=actor)
-    usage = _usage_dict(result)
-    async with repositories(ctx.runtime, actor.owner_id) as repos:
-        await repos.usage.add(
-            conversation_id=conversation_id,
-            kind="api",
-            model=model_name,
-            requests=1,
-            input_tokens=usage["prompt_tokens"],
-            output_tokens=usage["completion_tokens"],
-            total_tokens=usage["total_tokens"],
-        )
 
     completion_id = f"chatcmpl-{uuid4().hex}"
     created = int(time.time())
     if not body.stream:
+        assert ctx.answer is not None
+        result = await ctx.answer(conversation_id, prompt, actor=actor)
+        await _record_usage(ctx, conversation_id, model_name, result, actor)
+        usage = _usage_dict(result)
         return {
             "id": completion_id,
             "object": "chat.completion",
@@ -145,6 +154,31 @@ async def chat_completions(
             "model": model_name,
             "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
         }
+
+    if streamer is not None:
+
+        async def _live() -> Any:
+            yield _sse(_chunk({"role": "assistant", "content": ""}))
+            final: Any = None
+            async for event in streamer(conversation_id, prompt, actor=actor):
+                kind = getattr(event, "kind", None)
+                if kind == "text":
+                    text = getattr(event, "text", "") or ""
+                    if text:
+                        yield _sse(_chunk({"content": text}))
+                elif kind == "final":
+                    final = getattr(event, "result", None)
+            if final is not None:
+                await _record_usage(ctx, conversation_id, model_name, final, actor)
+            yield _sse(_chunk({}, finish="stop"))
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(_live(), media_type="text/event-stream")
+
+    # No streaming runner available: fall back to a simulated chunked reply.
+    assert ctx.answer is not None
+    result = await ctx.answer(conversation_id, prompt, actor=actor)
+    await _record_usage(ctx, conversation_id, model_name, result, actor)
 
     async def _stream() -> Any:
         yield _sse(_chunk({"role": "assistant", "content": ""}))

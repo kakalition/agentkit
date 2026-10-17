@@ -979,6 +979,33 @@ class App:
         return self.manager("learning_sink").driver()
 
     @property
+    def vector_store(self) -> Any:
+        """The configured vector store (``vector_store_driver``, default ``repository``)."""
+        return self.manager("vector").driver()
+
+    @property
+    def datasets(self) -> Any:
+        """The configured eval dataset store (``dataset_driver``, default ``repository``)."""
+        return self.manager("dataset").driver()
+
+    @property
+    def working_memory(self) -> Any:
+        """The configured working-memory store (``working_memory_driver``)."""
+        return self.manager("working_memory").driver()
+
+    @property
+    def pairing(self) -> Any:
+        """The configured gateway pairing registry (``pairing_driver``, default ``memory``)."""
+        return self.manager("pairing").driver()
+
+    @property
+    def online_scorer(self) -> Any:
+        """The online scorer: grade live run traces with the configured grader."""
+        from agentkit.scorers import OnlineScorer
+
+        return OnlineScorer(self)
+
+    @property
     def comms(self) -> Any:
         """The configured agent comms topology (``comms_driver``, default ``mailbox``)."""
         return self.manager("comms").driver()
@@ -1124,7 +1151,8 @@ class App:
         from agentkit.runs import recorder_for
 
         enabled = bool(getattr(self.settings, "run_trace_enabled", True))
-        return recorder_for(repos, run_id or "run", enabled=enabled)
+        retention = int(getattr(self.settings, "run_events_retention", 0) or 0) or None
+        return recorder_for(repos, run_id or "run", enabled=enabled, retention=retention)
 
     def _make_checkpointer(self, repos: Any) -> Any:
         """A checkpoint store for a turn (over the live repos; off by default)."""
@@ -1186,25 +1214,36 @@ class App:
         ephemeral: bool = False,
     ) -> Any:
         """Stream one turn as :class:`~agentkit.session.StreamEvent` increments."""
+        from agentkit.foundation.pipeline import Pipeline
+
+        turn = Turn(conversation_id=conversation_id, text=text, approve=approve)
         owner_id = actor.owner_id if actor is not None else None
-        task = self._track(conversation_id)
-        try:
+
+        async def destination(current: Turn) -> Any:
             async with self.repositories(owner_id) as repos:
                 if self._budget is not None:
                     from agentkit.limits import check_budget
 
-                    await check_budget(repos, self._budget, conversation_id=conversation_id)
+                    await check_budget(repos, self._budget, conversation_id=current.conversation_id)
                 runner = ChatRunner(
-                    self.deps(repos, approve=approve, actor=actor),
+                    self.deps(repos, approve=current.approve, context=current, actor=actor),
                     agent=self._require_agent(),
-                    conversation_id=conversation_id,
+                    conversation_id=current.conversation_id,
                     history_processor=self._history_processor,
                     persist=not ephemeral,
-                    recorder=self._make_recorder(conversation_id, repos),
+                    recorder=self._make_recorder(current.conversation_id, repos),
                     checkpointer=self._make_checkpointer(repos),
                 )
-                async for event in runner.stream(text):
+                async for event in runner.stream(current.text):
+                    if getattr(event, "kind", None) == "final":
+                        current.result = getattr(event, "result", None)
                     yield event
+
+        task = self._track(conversation_id)
+        try:
+            streamed = await Pipeline(self._middlewares).send(turn).then(destination)
+            async for event in streamed:
+                yield event
         finally:
             self._untrack(conversation_id, task)
 
@@ -1217,21 +1256,72 @@ class App:
         actor: Actor | None = None,
     ) -> ChatResult:
         """Resume a turn that deferred tool calls (approvals / clarification)."""
+        from agentkit.foundation.pipeline import Pipeline
+
+        turn = Turn(conversation_id=conversation_id, text="", approve=approve)
         owner_id = actor.owner_id if actor is not None else None
-        task = self._track(conversation_id)
-        try:
+
+        async def destination(current: Turn) -> Turn:
             async with self.repositories(owner_id) as repos:
                 runner = ChatRunner(
-                    self.deps(repos, approve=approve, actor=actor),
+                    self.deps(repos, approve=current.approve, context=current, actor=actor),
                     agent=self._require_agent(),
-                    conversation_id=conversation_id,
+                    conversation_id=current.conversation_id,
                     history_processor=self._history_processor,
-                    recorder=self._make_recorder(conversation_id, repos),
+                    recorder=self._make_recorder(current.conversation_id, repos),
                     checkpointer=self._make_checkpointer(repos),
                 )
-                return await runner.resume(deferred_tool_results)
+                current.result = await runner.resume(deferred_tool_results)
+            return current
+
+        task = self._track(conversation_id)
+        try:
+            await Pipeline(self._middlewares).send(turn).then(destination)
         finally:
             self._untrack(conversation_id, task)
+        assert turn.result is not None
+        return turn.result
+
+    async def resume_from_checkpoint(
+        self,
+        conversation_id: str,
+        *,
+        seq: int | None = None,
+        target: str | None = None,
+        actor: Actor | None = None,
+    ) -> str:
+        """Restore a conversation's history from a stored checkpoint.
+
+        Loads the history saved in the checkpoint at ``seq`` (or the latest with
+        history), then either restores it in place or, when ``target`` is given,
+        writes it into a new conversation (a branch). Returns the conversation id
+        that now holds the restored history (``target`` or ``conversation_id``).
+
+        Requires ``checkpoints_enabled``; raises :class:`~agentkit.errors.NotFound`
+        when no checkpoint with history exists.
+        """
+        from agentkit.errors import ConfigurationError, NotFound
+
+        owner_id = actor.owner_id if actor is not None else None
+        destination = target or conversation_id
+        async with self.repositories(owner_id) as repos:
+            store = self._make_checkpointer(repos)
+            if store is None:
+                raise ConfigurationError(
+                    "resuming from a checkpoint requires checkpoints_enabled"
+                )
+            history = await _history_from_checkpoint(store, conversation_id, seq)
+            if history is None:
+                raise NotFound(
+                    f"no checkpoint with history for {conversation_id!r}",
+                    detail={"conversation_id": conversation_id, "seq": seq},
+                )
+            if target is not None:
+                channel = target.split(":", 1)[0] or "cli"
+                await repos.conversations.get_or_create(target, channel=channel)
+            await repos.messages.clear(destination)
+            await repos.messages.append(destination, history)
+        return destination
 
     @property
     def answer(self) -> Any:
@@ -1475,6 +1565,29 @@ class Turn:
     approve: Any = None
     result: Any = None
     extras: dict[str, Any] = field(default_factory=dict)
+
+
+async def _history_from_checkpoint(store: Any, conversation_id: str, seq: int | None) -> Any:
+    """The serialized message history saved in a checkpoint (``None`` if absent).
+
+    Prefers ``seq`` when given; otherwise scans newest-first for a checkpoint
+    whose payload carries a non-empty ``history`` (a chat ``start`` snapshot).
+    """
+    rows = await store.list(conversation_id)
+    if seq is not None:
+        rows = [record for record in rows if int(getattr(record, "seq", -1)) == seq]
+    for record in reversed(rows):
+        payload = getattr(record, "state", None)
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError:  # pragma: no cover - tolerate corrupt rows
+                payload = None
+        if isinstance(payload, dict):
+            history = payload.get("history")
+            if history:
+                return list(history)
+    return None
 
 
 def _command_name(command: Any) -> str:

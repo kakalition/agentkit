@@ -51,6 +51,16 @@ class InstallBody(BaseModel):
     name: str | None = None
 
 
+class ResumeCheckpointBody(BaseModel):
+    seq: int | None = None
+    target: str | None = None
+
+
+class ScoreRunBody(BaseModel):
+    grader: str | None = None
+    dataset: str | None = None
+
+
 def _catalog_source(ctx: WebUIContext, driver: str | None) -> Any:
     """Resolve the configured (or named) catalog source."""
     if ctx.app is not None and hasattr(ctx.app, "manager"):
@@ -66,7 +76,8 @@ def _recorder(ctx: WebUIContext, repos: Any, run_id: str) -> Any:
     from agentkit.runs import recorder_for
 
     enabled = bool(getattr(ctx.settings, "run_trace_enabled", True))
-    return recorder_for(repos, run_id, enabled=enabled)
+    retention = int(getattr(ctx.settings, "run_events_retention", 0) or 0) or None
+    return recorder_for(repos, run_id, enabled=enabled, retention=retention)
 
 
 async def _run_context(ctx: WebUIContext, repos: Any) -> Any:
@@ -226,6 +237,21 @@ async def get_run(
     return {"run_id": run_id, "events": [_event_view(row) for row in rows]}
 
 
+@router.post("/studio/runs/{run_id}/score")
+async def score_run_endpoint(
+    run_id: str,
+    body: ScoreRunBody,
+    ctx: WebUIContext = Depends(get_context),
+) -> dict[str, Any]:
+    """Grade a stored run trace with a registered grader and record the score."""
+    from agentkit.scorers import score_run
+
+    async with repositories(ctx.runtime) as repos:
+        return await score_run(
+            repos, run_id, grader_name=body.grader or "trace", dataset=body.dataset
+        )
+
+
 @router.get("/studio/runs/{run_id}/stream")
 async def stream_run(
     run_id: str, ctx: WebUIContext = Depends(get_context)
@@ -267,6 +293,27 @@ async def get_checkpoint(
         if record is None:
             raise HTTPException(status_code=404, detail="checkpoint not found")
         return _checkpoint_view(record)
+
+
+@router.post("/studio/conversations/{conversation_id}/resume")
+async def resume_conversation_from_checkpoint(
+    conversation_id: str,
+    body: ResumeCheckpointBody,
+    ctx: WebUIContext = Depends(get_context),
+) -> dict[str, Any]:
+    """Restore (or branch) a conversation from a stored checkpoint."""
+    app = ctx.app
+    if app is None or not hasattr(app, "resume_from_checkpoint"):
+        raise HTTPException(status_code=503, detail="app unavailable")
+    destination = await app.resume_from_checkpoint(
+        conversation_id, seq=body.seq, target=body.target
+    )
+    return {
+        "source": conversation_id,
+        "conversation_id": destination,
+        "seq": body.seq,
+        "branch": body.target is not None,
+    }
 
 
 def _event_view(record: Any) -> dict[str, Any]:
@@ -323,6 +370,9 @@ async def inspect_app(ctx: WebUIContext = Depends(get_context)) -> dict[str, Any
         "speaker": _driver_view(app, "speaker"),
         "graph": _driver_view(app, "graph"),
         "checkpoint": _driver_view(app, "checkpoint"),
+        "vector": _driver_view(app, "vector"),
+        "dataset": _driver_view(app, "dataset"),
+        "working_memory": _driver_view(app, "working_memory"),
         "computer": _driver_view(app, "computer"),
         "realtime": _driver_view(app, "realtime"),
         "catalog": _driver_view(app, "catalog"),

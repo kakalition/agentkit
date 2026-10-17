@@ -18,6 +18,7 @@ from agentkit.embeddings import (
     similarity_scores,
     unpack_vector,
 )
+from agentkit.vector_store import current_vector_store
 
 
 class KnowledgeRepo:
@@ -175,6 +176,15 @@ class KnowledgeRepo:
                 continue
             candidates.append(chunk)
             vectors.append(vector)
+        store = current_vector_store()
+        if store is not None:
+            hits = await store.rank(
+                "__knowledge__",
+                query_vector,
+                [(str(index), vector) for index, vector in enumerate(vectors)],
+                limit=limit,
+            )
+            return [candidates[int(hit.id)] for hit in hits]
         scores = similarity_scores(query_vector, vectors)
         order = sorted(range(len(candidates)), key=lambda index: scores[index], reverse=True)
         return [candidates[index] for index in order[:limit]]

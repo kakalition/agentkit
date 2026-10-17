@@ -83,6 +83,8 @@ tui = ["textual>=0.80"]
 browser = ["playwright>=1.48"]
 # realtime voice: PydanticAI's realtime transport (``realtime_driver=pydantic_ai``)
 realtime = ["pydantic-ai-slim[realtime]>=2.55.0,<3"]
+# durable execution: Temporal (``durability_driver=temporal``)
+temporal = ["temporalio>=1.7"]
 
 [project.scripts]
 agentkit = "agentkit.cli:main"

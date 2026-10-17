@@ -23,7 +23,9 @@ from agentkit.db.repositories.eval_suites import (
 from agentkit.db.repositories.feedback import FeedbackRepo
 from agentkit.db.repositories.knowledge import KnowledgeRepo
 from agentkit.db.repositories.learning import LearningRunRepo
+from agentkit.db.repositories.mailbox import MailboxMessageRepo
 from agentkit.db.repositories.memory import MEMORY_KINDS, MemoryRepo, OwnerProfileRepo
+from agentkit.db.repositories.pairing import PairingRepo
 from agentkit.db.repositories.scheduling import ScheduledJobRepo
 from agentkit.db.repositories.team_specs import TeamSpecRepo
 from agentkit.db.repositories.usage import AuditRepo, UsageRepo
@@ -40,9 +42,11 @@ __all__ = [
     "KnowledgeRepo",
     "LearningRunRepo",
     "MEMORY_KINDS",
+    "MailboxMessageRepo",
     "MemoryRepo",
     "MessageRepo",
     "OwnerProfileRepo",
+    "PairingRepo",
     "Repositories",
     "ScheduledJobRepo",
     "TeamSpecRepo",

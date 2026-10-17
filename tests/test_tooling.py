@@ -55,3 +55,21 @@ async def test_builder_cache_ttl_wraps_tool():
 
     agent = Agent.make("c").instructions("x").tool(lookup, cache_ttl=60).output(str).build()
     assert "lookup" in set(agent._function_toolset.tools.keys())
+
+
+def test_builder_cache_ttl_on_tool_class():
+    from agentkit import Tool
+
+    calls: list[str] = []
+
+    class Lookup(Tool):
+        name = "lookup"
+        description = "Look up."
+        cache_ttl = 60
+
+        async def handle(self, ctx: RunContext[Deps], query: str) -> str:
+            calls.append(query)
+            return "hit"
+
+    agent = Agent.make("c").instructions("x").tool(Lookup).output(str).build()
+    assert "lookup" in set(agent._function_toolset.tools.keys())

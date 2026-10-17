@@ -17,7 +17,7 @@ from agentkit.db.engine import create_async_db_engine, make_async_session_factor
 from agentkit.db.migrations import init_db
 from agentkit.db.repositories import Repositories
 from agentkit.deps import ApprovalCallback, Deps
-from agentkit.embeddings import build_embedder, configure
+from agentkit.embeddings import EmbedderManager, configure
 from agentkit.security import Actor
 
 
@@ -31,6 +31,18 @@ class Runtime:
     init_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
+def _configured_embedder(settings: AgentSettings) -> Any:
+    """Resolve the embedder through :class:`EmbedderManager` (``memory_embedding_backend``).
+
+    Preserves today's default: the ``sentence-transformers`` backend builds exactly
+    what the old direct ``build_embedder(settings)`` call returned.
+    """
+    from types import SimpleNamespace
+
+    manager = EmbedderManager(SimpleNamespace(settings=settings))
+    return manager.driver()
+
+
 def build_runtime(
     settings: AgentSettings | None = None,
     *,
@@ -41,7 +53,7 @@ def build_runtime(
     engine = create_async_db_engine(
         settings.resolved_database_url, auth_token=settings.libsql_auth_token
     )
-    configure(build_embedder(settings))
+    configure(_configured_embedder(settings))
     return Runtime(
         settings=settings,
         engine=engine,

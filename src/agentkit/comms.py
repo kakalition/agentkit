@@ -123,8 +123,29 @@ class BroadcastTopology(TopologyBase):
         return True
 
 
-class SwarmTopology(BroadcastTopology):
-    """Broadcast-and-collect: like broadcast, but returns every reply."""
+class SwarmTopology(TopologyBase):
+    """A swarm: messages reach every member; any member may take the handoff.
+
+    ``send(name, msg)`` targets a member directly; addressing anything else (or
+    ``handoff_to`` having set an active member) falls back to the swarm, where the
+    message is delivered to every handler and the replies collected.
+    """
+
+    def __init__(self, registry: Any = None, *, events: Any = None) -> None:
+        super().__init__(registry, events=events)
+        self.active: str | None = None
+
+    def handoff_to(self, name: str) -> SwarmTopology:
+        self.active = name
+        return self
+
+    async def send(self, to: str, message: str, *, sender: str | None = None) -> bool:
+        target = to if to in self.handlers else (self.active or "")
+        if target and target in self.handlers:
+            await self._deliver(target, message)
+            return True
+        await self.broadcast(message, sender=sender)
+        return True
 
 
 class PipelineTopology(TopologyBase):
@@ -145,8 +166,21 @@ class PipelineTopology(TopologyBase):
         return results
 
 
-class HandoffTopology(PipelineTopology):
-    """A single-step transfer: the message is handed to one handler and answered."""
+class HandoffTopology(TopologyBase):
+    """A single transfer: the message is handed to exactly one handler and answered.
+
+    Unlike :class:`PipelineTopology` (which chains every stage), only the first
+    target receives the message; it becomes the new owner of the exchange.
+    """
+
+    async def broadcast(
+        self, message: str, *, to: list[str] | None = None, sender: str | None = None
+    ) -> dict[str, Any]:
+        targets = to or self._targets()
+        if not targets:
+            return {}
+        name = targets[0]
+        return {name: await self._deliver(name, message)}
 
 
 class HubTopology(TopologyBase):
@@ -166,8 +200,25 @@ class HubTopology(TopologyBase):
         return {self.hub: reply}
 
 
-class MeshTopology(MailboxTopology):
-    """Peer-to-peer: direct delivery between any two registered agents."""
+class MeshTopology(TopologyBase):
+    """Peer-to-peer: direct delivery between linked agents.
+
+    Without configured links every pair may talk (all-to-all). ``connect(a, b)``
+    restricts delivery to declared pairs so only linked peers can message.
+    """
+
+    def __init__(self, registry: Any = None, *, events: Any = None, links: Any = None) -> None:
+        super().__init__(registry, events=events)
+        self.links: set[frozenset[str]] = {frozenset(pair) for pair in (links or [])}
+
+    def connect(self, a: str, b: str) -> MeshTopology:
+        self.links.add(frozenset((a, b)))
+        return self
+
+    async def send(self, to: str, message: str, *, sender: str | None = None) -> bool:
+        if sender and self.links and frozenset((sender, to)) not in self.links:
+            return False
+        return await super().send(to, message, sender=sender)
 
 
 class HierarchyTopology(TopologyBase):
@@ -269,6 +320,24 @@ class GroupChatTopology(TopologyBase):
     def _roster(self) -> list[str]:
         return self.participants or list(self.handlers)
 
+    def _pick_speaker(self, roster: list[str]) -> str:
+        if self.speaker == GroupChatSpeaker.MODERATOR:
+            return self.moderator or roster[0]
+        speaker = roster[self._cursor % len(roster)]
+        self._cursor += 1
+        return speaker
+
+    async def send(self, to: str, message: str, *, sender: str | None = None) -> bool:
+        """Deliver to ``to`` when it is a participant; otherwise pick a speaker."""
+        if to in self.handlers:
+            await self._deliver(to, message)
+            return True
+        roster = self._roster()
+        if not roster:
+            return False
+        await self._deliver(self._pick_speaker(roster), message)
+        return True
+
     async def broadcast(
         self, message: str, *, to: list[str] | None = None, sender: str | None = None
     ) -> dict[str, Any]:
@@ -278,11 +347,7 @@ class GroupChatTopology(TopologyBase):
         if self.speaker == GroupChatSpeaker.ALL:
             results = await asyncio.gather(*(self._deliver(name, message) for name in roster))
             return dict(zip(roster, results, strict=True))
-        if self.speaker == GroupChatSpeaker.MODERATOR:
-            speaker = self.moderator or roster[0]
-        else:  # round_robin
-            speaker = roster[self._cursor % len(roster)]
-            self._cursor += 1
+        speaker = self._pick_speaker(roster)
         return {speaker: await self._deliver(speaker, message)}
 
     async def run(self, task: str, *, speaker: Any = None, max_turns: int = 12) -> Any:

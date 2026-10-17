@@ -41,7 +41,24 @@ gateway.confirm_pairing("new-user", code)   # now they are allowed
 ```
 
 Codes are single-use and TTL-bounded (`code_ttl_s`, default 15 min). The registry
-is in-memory; persist it yourself if pairings must survive restarts.
+is in-memory by default; set `pairing_driver=repository` to persist pairings to the
+`gateway_pairings` table so they survive a restart (and are shared across
+processes). Enable it for a gateway with `channel_pairing_enabled=True` — gateways
+then adopt `app.pairing`.
+
+## Durable mailbox (cross-process)
+
+`mailbox_durable=True` spools inter-agent messages for at-least-once delivery; the
+default spool is in-process (`MemorySpool`). Under an app with a repository runtime
+the durable mailbox uses `RepositoryMailboxSpool`, which persists to the
+`mailbox_messages` table, so a message spooled by one process is drained by
+`receive` in another:
+
+```python
+from agentkit import Mailbox, RepositoryMailboxSpool
+
+mailbox = Mailbox(registry, durable=True, spool=RepositoryMailboxSpool(app))
+```
 
 ## Terminal UI
 

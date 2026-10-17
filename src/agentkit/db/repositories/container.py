@@ -21,13 +21,16 @@ from agentkit.db.repositories.evals import EvalCaptureRepo
 from agentkit.db.repositories.feedback import FeedbackRepo
 from agentkit.db.repositories.knowledge import KnowledgeRepo
 from agentkit.db.repositories.learning import LearningRunRepo
+from agentkit.db.repositories.mailbox import MailboxMessageRepo
 from agentkit.db.repositories.memory import MemoryRepo, OwnerProfileRepo
+from agentkit.db.repositories.pairing import PairingRepo
 from agentkit.db.repositories.ratelimit import RateWindowRepo
 from agentkit.db.repositories.run_events import RunEventRepo
 from agentkit.db.repositories.scheduling import ScheduledJobRepo
 from agentkit.db.repositories.team_specs import TeamSpecRepo
 from agentkit.db.repositories.usage import AuditRepo, UsageRepo
 from agentkit.db.repositories.webhooks import WebhookDeliveryRepo, WebhookRepo
+from agentkit.db.repositories.working_memory import WorkingMemoryRepo
 
 
 @dataclass
@@ -69,6 +72,9 @@ class Repositories:
         self.eval_runs = EvalRunRepo(self.session, self.owner_id)
         self.run_events = RunEventRepo(self.session, self.owner_id)
         self.checkpoints = CheckpointRepo(self.session, self.owner_id)
+        self.working_memory = WorkingMemoryRepo(self.session, self.owner_id)
+        self.mailbox = MailboxMessageRepo(self.session, self.owner_id)
+        self.pairing = PairingRepo(self.session, self.owner_id)
         self.webhooks = WebhookRepo(self.session, self.owner_id)
         self.webhook_deliveries = WebhookDeliveryRepo(self.session, self.owner_id)
         for attribute, repo_class in type(self).repositories.items():

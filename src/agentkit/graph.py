@@ -17,10 +17,12 @@ selects the next node from state. Useful for deterministic multi-step pipelines
 State is a mutable mapping (e.g. a ``dict``); nodes may return a partial dict to
 merge, or mutate in place and return ``None``.
 
-Execution is compiled to a :mod:`pydantic_graph` graph (typed start/step/decision
-nodes) so it shares PydanticAI's durable-execution path; :meth:`StateGraph.
-to_pydantic_graph` exposes the compiled graph directly. State that is not a
-mutable mapping falls back to a built-in async loop.
+Execution runs through agentkit's own node loop, which persists node-boundary
+checkpoints (and supports :func:`interrupt`/:meth:`StateGraph.resume`) when a
+checkpointer is supplied — see :meth:`StateGraph.run_durable`. :meth:`StateGraph.
+to_pydantic_graph` compiles the same graph to a :mod:`pydantic_graph` graph for
+interop; that compiled graph is **not** checkpointed. State that is not a mutable
+mapping falls back to the built-in async loop.
 """
 
 from __future__ import annotations
@@ -29,7 +31,10 @@ import contextlib
 import copy
 import inspect
 from collections.abc import Callable, Mapping, MutableMapping
+from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from pydantic_graph import GraphBuilder
 
@@ -43,10 +48,13 @@ __all__ = [
     "CheckpointedGraphExecutor",
     "GraphError",
     "GraphExecutor",
+    "GraphInterrupt",
     "GraphManager",
+    "Interrupt",
     "ParallelGraphExecutor",
     "SequentialGraphExecutor",
     "StateGraph",
+    "interrupt",
 ]
 
 END = "__end__"
@@ -58,6 +66,46 @@ class GraphError(RuntimeError):
     pass
 
 
+class GraphInterrupt(Exception):
+    """Raised by :func:`interrupt` to pause a node and await external input."""
+
+    def __init__(self, payload: Any = None, *, node: str | None = None) -> None:
+        super().__init__("graph interrupted")
+        self.payload = payload
+        self.node = node
+
+
+@dataclass
+class Interrupt:
+    """The result of a paused run — resume it with :meth:`StateGraph.resume`."""
+
+    run_id: str
+    node: str
+    payload: Any = None
+    state: Any = None
+    seq: int | None = None
+
+
+_current_node: ContextVar[str | None] = ContextVar("agentkit_graph_node", default=None)
+_answers: ContextVar[list[Any] | None] = ContextVar("agentkit_graph_answers", default=None)
+_answer_index: ContextVar[int] = ContextVar("agentkit_graph_answer_index", default=0)
+
+
+def interrupt(payload: Any = None) -> Any:
+    """Pause the running node; returns the value passed to :meth:`StateGraph.resume`.
+
+    Call it inside a node: the first call pauses the graph (returning an
+    :class:`Interrupt`); on resume the same call returns the supplied value. A node
+    may call it repeatedly — each call is answered by a subsequent resume.
+    """
+    index = _answer_index.get()
+    answers = _answers.get() or []
+    if index < len(answers):
+        _answer_index.set(index + 1)
+        return answers[index]
+    raise GraphInterrupt(payload, node=_current_node.get())
+
+
 class StateGraph:
     """An ordered async state machine over a mutable state object."""
 
@@ -67,6 +115,8 @@ class StateGraph:
         self._routers: dict[str, RouterFn] = {}
         self._entry: str | None = None
         self.max_steps = max_steps
+        #: Default checkpoint store for :meth:`run`/:meth:`resume` (if any).
+        self.checkpointer: Any = None
 
     # -- construction ---------------------------------------------------
     def add_node(self, name: str, function: NodeFn) -> StateGraph:
@@ -107,15 +157,150 @@ class StateGraph:
         return materialize_workflow(spec, **options)  # type: ignore[return-value]
 
     # -- run ------------------------------------------------------------
-    async def run(self, state: Any) -> Any:
+    async def run(
+        self, state: Any, *, run_id: str | None = None, checkpointer: Any = None
+    ) -> Any:
+        """Run the graph (alias of :meth:`run_durable`).
+
+        Pass ``run_id``/``checkpointer`` (or set ``self.checkpointer``) to persist
+        node-boundary checkpoints so an interrupted run can be :meth:`resume`d.
+        """
+        return await self.run_durable(state, run_id=run_id, checkpointer=checkpointer)
+
+    async def run_durable(
+        self, state: Any, *, run_id: str | None = None, checkpointer: Any = None
+    ) -> Any:
+        """The durable entry point: run with node-boundary checkpointing.
+
+        This is the documented way to run a graph with durable resume. With a
+        ``checkpointer`` (or ``self.checkpointer``) every node boundary is saved, so
+        a node that calls :func:`interrupt` pauses the run and :meth:`resume`
+        continues it. Resume is node-boundary only — there is no mid-node resume
+        (the compiled :mod:`pydantic_graph` form is not checkpointed either).
+        """
         if self._entry is None:
             raise GraphError("no entry node set")
         if self._entry not in self._nodes:
             raise GraphError(f"unknown node: {self._entry}")
         self._validate()
-        if isinstance(state, MutableMapping):
-            return await self._run_graph(state)
-        return await self._run_internal(state)  # pragma: no cover - non-mapping state
+        store = checkpointer if checkpointer is not None else self.checkpointer
+        return await self._loop(
+            state,
+            run_id=run_id,
+            checkpointer=store,
+            start=self._entry,
+            resume_answers=[],
+        )
+
+    async def resume(
+        self, run_id: str, value: Any = None, *, checkpointer: Any = None, seq: int | None = None
+    ) -> Any:
+        """Continue a run paused at an :class:`Interrupt`, injecting ``value``.
+
+        Loads the latest checkpoint, or the explicit ``seq`` when given.
+        """
+        store = checkpointer if checkpointer is not None else self.checkpointer
+        if store is None:
+            raise GraphError("resume requires a checkpointer")
+        record = await store.get(run_id, seq) if seq is not None else await store.latest(run_id)
+        if record is None:
+            raise GraphError(f"unknown run_id: {run_id!r}")
+        payload = getattr(record, "state", None)
+        if not isinstance(payload, Mapping) or "next" not in payload or "state" not in payload:
+            raise GraphError(f"run {run_id!r} has no resumable interrupt")
+        record_seq = int(getattr(record, "seq", 0) or 0)
+        answers = list(payload.get("answers") or [])
+        answers.append(value)
+        return await self._loop(
+            payload["state"],
+            run_id=run_id,
+            checkpointer=store,
+            start=payload["next"],
+            resume_answers=answers,
+            start_seq=record_seq + 1,
+        )
+
+    async def _loop(
+        self,
+        state: Any,
+        *,
+        run_id: str | None,
+        checkpointer: Any,
+        start: str,
+        resume_answers: list[Any],
+        start_seq: int = 0,
+        on_step: Callable[[str, Any], Any] | None = None,
+    ) -> Any:
+        resolved_run_id = run_id or f"graph:{uuid4().hex}"
+        current: str = start
+        steps = 0
+        seq = start_seq
+        node_token = _current_node.set(current)
+        answers_token = _answers.set(list(resume_answers))
+        index_token = _answer_index.set(0)
+        try:
+            while current != END:
+                steps += 1
+                if steps > self.max_steps:
+                    raise GraphError(f"graph exceeded {self.max_steps} steps (cycle?)")
+                node = self._nodes.get(current)
+                if node is None:
+                    raise GraphError(f"unknown node: {current}")
+                _current_node.set(current)
+                try:
+                    result = node(state)
+                    if inspect.isawaitable(result):
+                        result = await result
+                except GraphInterrupt as pause:
+                    pending = pause.node or current
+                    await self._save(
+                        checkpointer,
+                        resolved_run_id,
+                        seq,
+                        state,
+                        pending,
+                        list(_answers.get() or []),
+                    )
+                    return Interrupt(
+                        run_id=resolved_run_id,
+                        node=pending,
+                        payload=pause.payload,
+                        state=copy.deepcopy(state),
+                        seq=seq,
+                    )
+                state = _merge(state, result)
+                if on_step is not None:
+                    outcome = on_step(current, state)
+                    if inspect.isawaitable(outcome):
+                        await outcome
+                current = self._next(current, state)  # type: ignore[arg-type]
+                if checkpointer is not None:
+                    await self._save(checkpointer, resolved_run_id, seq, state, current, [])
+                    seq += 1
+            return state
+        finally:
+            _current_node.reset(node_token)
+            _answers.reset(answers_token)
+            _answer_index.reset(index_token)
+
+    async def _save(
+        self,
+        store: Any,
+        run_id: str,
+        seq: int,
+        state: Any,
+        next_node: str,
+        answers: list[Any],
+    ) -> None:
+        if store is None:
+            return
+        with contextlib.suppress(Exception):  # a checkpoint must never break the run
+            await store.put(
+                run_id,
+                seq,
+                {"state": copy.deepcopy(state), "next": next_node, "answers": list(answers)},
+                label=next_node,
+            )
 
     def _validate(self) -> None:
         for name in self._nodes:
@@ -130,7 +315,13 @@ class StateGraph:
 
     # -- pydantic-graph compilation -------------------------------------
     def to_pydantic_graph(self, *, name: str = "state_graph") -> Any:
-        """Compile to a :class:`pydantic_graph.Graph` (durable-execution ready)."""
+        """Compile to a :class:`pydantic_graph.Graph` for interop.
+
+        The compiled graph is a plain :mod:`pydantic_graph` graph: useful for
+        interop with PydanticAI, but it is **not** checkpointed and does not
+        support :func:`interrupt`/:meth:`resume`. Use :meth:`run_durable` for
+        durable execution.
+        """
         if self._entry is None:
             raise GraphError("no entry node set")
         builder = GraphBuilder(
@@ -203,39 +394,20 @@ class StateGraph:
 
         return step
 
-    async def _run_graph(self, state: Any) -> Any:
-        graph = self.to_pydantic_graph()
-        await graph.run(state=state, inputs={})
-        return state
-
-    # -- built-in fallback ----------------------------------------------
+    # -- built-in loop --------------------------------------------------
     async def run_steps(self, state: Any, *, on_step: Callable[[str, Any], Any] | None = None) -> Any:
         """Run the node loop, optionally invoking ``on_step(node_name, state)`` after each."""
         if self._entry is None:
             raise GraphError("no entry node set")
         self._validate()
-        current = self._entry
-        steps = 0
-        while current != END:
-            steps += 1
-            if steps > self.max_steps:
-                raise GraphError(f"graph exceeded {self.max_steps} steps (cycle?)")
-            node = self._nodes.get(current)  # type: ignore[arg-type]
-            if node is None:
-                raise GraphError(f"unknown node: {current}")
-            result = node(state)
-            if inspect.isawaitable(result):
-                result = await result
-            state = _merge(state, result)
-            if on_step is not None:
-                outcome = on_step(current, state)
-                if inspect.isawaitable(outcome):
-                    await outcome
-            current = self._next(current, state)  # type: ignore[arg-type]
-        return state
-
-    async def _run_internal(self, state: Any) -> Any:
-        return await self.run_steps(state)
+        return await self._loop(
+            state,
+            run_id=None,
+            checkpointer=None,
+            start=self._entry,
+            resume_answers=[],
+            on_step=on_step,
+        )
 
     def _next(self, current: str, state: Any) -> str:
         router = self._routers.get(current)

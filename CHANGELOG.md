@@ -33,6 +33,90 @@ All notable changes to this project are documented here. The format follows
   documented `from agentkit import Agent` import works.
 - New guide page [Class & Functional Duality](/guide/duality); `docs/guide/class-based.md`
   corrected from "Removed functional forms" to "Both forms are first-class".
+- **Temporal durability driver** (`durability_driver=temporal`, new
+  `agentkit[temporal]` extra): a `TemporalDurability` driver implements the
+  `Durability` contract (`init`/`register_queue`/`enqueue`/`apply_schedules`) and
+  `init_scheduler` now launches the tick through the configured driver. `dbos`
+  stays the default; Temporal workflows are submitted by fully-qualified name, so
+  the target worker must register them.
+- **Repository-backed mailbox spool** (`RepositoryMailboxSpool`, new
+  `mailbox_messages` table): with `mailbox_durable`, a message spooled in one
+  process is drained by `receive` in another (at-least-once, cross-process). The
+  in-process `MemorySpool` remains the default.
+- **Persistent gateway pairing** (`pairing_driver=repository`, new
+  `gateway_pairings` table): `RepositoryPairingRegistry` preserves the sync pairing
+  API but stores pairings durably; `channel_pairing_enabled` now opts gateways into
+  pairing. In-memory pairing stays the default.
+- **Durable graph entry point**: `StateGraph.run_durable(...)` is the documented
+  checkpointing entry point (`run` delegates to it).
+
+### Fixed
+- **`Tool.cache_ttl` is now honored on the `Tool`-class path.** `tool_options()`
+  emitted `cache_ttl`, which PydanticAI's `Agent.tool` rejects; the value is now
+  popped and applied via `cached_tool` (both `Agent.tool` and `Tool.install`).
+- **Turn middleware now runs on `App.stream` and `App.resume`** (previously only
+  `App.run` wrapped the `Turn`), and all three paths pass the `Turn` context to
+  `model_resolver`/`ModelRouter` (previously `None` on stream/resume).
+- **Peer-tool sender identity** (`send_to`/`ask_agent`/`broadcast`) now resolves
+  from the per-run `RunContext.agent`, so the sender is no longer usually `None`.
+- **Optional-extra failures are uniform:** `GatewayError` now subclasses
+  `ConfigurationError` (Slack/Discord previously raised a bare `RuntimeError`).
+- **Chat checkpoints are continuous per conversation** (seq no longer resets each
+  turn), so the latest checkpoint can be restored or branched reliably.
+- **`to_pydantic_graph()` no longer claims durable execution.** The compiled
+  pydantic-graph form is interop-only (not checkpointed, no interrupt/resume); use
+  `StateGraph.run_durable(...)` for durable runs.
+- **Inert settings wired:** `memory_consolidate_duplicate_threshold` (consolidate
+  task), `run_events_retention` (run recorder), `channel_pairing_enabled` (gateway
+  pairing), and `a2a_public_url`/`a2a_card_name` (A2A card defaults in
+  `build_card`). A guard test now asserts every settings field is read in source.
+
+### Added
+- **Agent middleware** (`AgentMiddleware` hooks): `Agent.agent_middleware(...)` and
+  `AgentMiddlewareCapability` bridge `before/after/wrap_model` and
+  `before/after/wrap_tool` onto PydanticAI hooks. The previously-unwired
+  `agent_middleware_driver` (`noop` default) now takes effect; a shared
+  `AgentCallContext.state` lets hooks enrich what later hooks observe.
+- **Guardrails are opt-in and honored:** `Agent.guardrails(wrap_untrusted=…)` (or
+  `guardrails_wrap_untrusted`) attaches the injection-scanning hooks; policy
+  `require_approval` now marks tools (`requires_approval`) so policy-driven
+  approvals work; `learning_eval_gate` holds back lessons unless the latest eval
+  run passed.
+- **Driver wiring (defaults unchanged):** memory recall (`memory_recall_driver`),
+  RAG chunker/retriever/reranker, learning extractor/strategy/sink, the embedder
+  manager, and ingest now resolve through their managers instead of hard-coded
+  calls. The `MemoryStore` contract spans the capability surface
+  (`add`/`list`/`record_use`) so `memory_driver=in_memory` backs the capability.
+- **Graph interrupt/resume** (`StateGraph.run`/`resume`, `interrupt()`), persisted
+  through the existing `CheckpointStore`; supports repeated interrupts and an
+  explicit `seq`. `GraphInterrupt`/`Interrupt`/`interrupt` are public.
+- **Branch/restore conversations from checkpoints:** `App.resume_from_checkpoint`,
+  a `POST /api/studio/conversations/{id}/resume` endpoint, and `runs:resume` CLI.
+- **Multi-agent durability & semantics:** durable mailbox receive/replay (spool),
+  remote A2A handoff via `AgentHandle.invoke`, `TaskAgentExecutor.cancel`, and
+  distinct Swarm/Handoff/Mesh topologies plus speaker-aware `GroupChatTopology.send`.
+- **Working memory** (`Agent.working_memory()`): thread-scoped `memory_set`/
+  `memory_get`/`memory_list`/`memory_forget` tools with `memory`/`repository`
+  drivers (new `working_memory` table).
+- **Vector stores** (`contracts.VectorStore`, `vector_store_driver`): the default
+  `repository` driver ranks with the numpy cosine scan (parity-preserved), plus a
+  real `sqlite_vec` driver (persisted `vec_distance_cosine`) and a `pgvector`
+  driver. Memory recall and RAG retrieval rank through the store.
+- **Eval datasets** (`DatasetStore`, `dataset_driver`): `memory`/`repository`
+  stores and `load_dataset_file` (CSV/JSON/JSONL import).
+- **Online scoring** (`online_scoring_enabled`/`online_scoring_grader`):
+  every turn is graded automatically after its trace is recorded (when enabled),
+  and on demand via `app.online_scorer` / `score_run`, `agentkit evals:score <run_id>`,
+  and `POST /api/studio/runs/{id}/score`; scores land in `eval_runs`.
+- `guardrails_enabled` setting (attaches the injection-scanning hooks to every
+  built agent); the capability stack view (`GET /api/studio/app`, `app.drivers()`)
+  now reports the vector/dataset/working-memory drivers and guardrails/fallback
+  settings; new `app.vector_store` / `app.datasets` / `app.working_memory` /
+  `app.online_scorer` accessors.
+- **Model fallback chains** (`model_fallbacks`): the primary model is wrapped in a
+  PydanticAI `FallbackModel`; `ChatResult.model` records the model that answered.
+- **OpenAI-compatible streaming now emits real token deltas** when the app has a
+  streaming runner, instead of simulating a chunked reply.
 
 ## [0.3.0] - 2026-10-16
 

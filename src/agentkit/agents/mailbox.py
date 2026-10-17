@@ -7,8 +7,10 @@
 
 In-process delivery is default: a subscribed agent receives messages on its own
 queue, and ``ask`` invokes the target handle and returns its reply. ``durable``
-mode persists messages through DBOS ``send``/``recv`` so they survive a restart.
-Remote handles always go over A2A (via the handle).
+mode spools messages for at-least-once delivery: the default spool is in-process
+(:class:`MemorySpool`), and ``spool=RepositoryMailboxSpool(app)`` persists them to
+the database so they survive a restart and are visible across processes. Remote
+handles always go over A2A (via the handle).
 """
 
 from __future__ import annotations
@@ -20,10 +22,68 @@ from typing import Any
 
 from agentkit.agents.registry import AgentRegistry
 
-__all__ = ["Mailbox"]
+__all__ = ["Mailbox", "MemorySpool", "RepositoryMailboxSpool", "default_spool"]
 
 Handler = Callable[[str], Awaitable[None]]
 DEFAULT_MAX_CONCURRENCY = 8
+
+
+class MemorySpool:
+    """An in-process durable spool for at-least-once delivery.
+
+    Share one spool between ``Mailbox`` instances to survive a restart: a message
+    sent by one is drained by ``receive`` on another. For cross-process durability
+    use :class:`RepositoryMailboxSpool`, which spools to the database.
+    """
+
+    def __init__(self) -> None:
+        self._rows: dict[str, list[dict[str, Any]]] = {}
+
+    async def append(self, to: str, message: str, *, sender: str | None = None) -> None:
+        self._rows.setdefault(to, []).append({"to": to, "message": message, "sender": sender})
+
+    async def drain(self, to: str) -> list[dict[str, Any]]:
+        return self._rows.pop(to, [])
+
+    async def peek(self, to: str) -> list[dict[str, Any]]:
+        return list(self._rows.get(to, []))
+
+
+class RepositoryMailboxSpool:
+    """A repository-backed spool: at-least-once delivery across processes.
+
+    Opens a fresh repositories session per operation (mirroring
+    ``RepositoryWorkingMemory``), so a message appended by one process is drained
+    by ``receive`` on another.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def append(self, to: str, message: str, *, sender: str | None = None) -> None:
+        async with self.app.repositories() as repos:
+            await repos.mailbox.append(to, message, sender)
+
+    async def drain(self, to: str) -> list[dict[str, Any]]:
+        async with self.app.repositories() as repos:
+            messages = await repos.mailbox.drain(to)
+        return [{"to": to, "message": message} for message in messages]
+
+    async def peek(self, to: str) -> list[dict[str, Any]]:
+        async with self.app.repositories() as repos:
+            messages = await repos.mailbox.peek(to)
+        return [{"to": to, "message": message} for message in messages]
+
+
+_DEFAULT_SPOOL: MemorySpool | None = None
+
+
+def default_spool() -> MemorySpool:
+    """A process-wide spool used when a durable mailbox has no explicit one."""
+    global _DEFAULT_SPOOL
+    if _DEFAULT_SPOOL is None:
+        _DEFAULT_SPOOL = MemorySpool()
+    return _DEFAULT_SPOOL
 
 
 class Mailbox:
@@ -36,10 +96,12 @@ class Mailbox:
         durable: bool = False,
         events: Any = None,
         max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+        spool: MemorySpool | RepositoryMailboxSpool | None = None,
     ) -> None:
         self.registry = registry
         self.durable = durable
         self.events = events
+        self.spool = spool if spool is not None else (default_spool() if durable else None)
         self._inboxes: dict[str, asyncio.Queue[str]] = {}
         self._subscribers: dict[str, Handler] = {}
         self._lock = asyncio.Lock()
@@ -53,7 +115,21 @@ class Mailbox:
         self._subscribers.pop(name, None)
 
     async def receive(self, name: str) -> str:
+        """The next message for ``name``: in-process inbox first, then the spool."""
+        inbox = self._inboxes.get(name)
+        if inbox is not None and not inbox.empty():
+            return await inbox.get()
+        if self.durable and self.spool is not None:
+            rows = await self.spool.drain(name)
+            if rows:
+                return str(rows[0]["message"])
         return await self._inbox(name).get()
+
+    async def replay(self, name: str) -> list[str]:
+        """Spooled (undrained) messages for ``name`` (at-least-once inspection)."""
+        if not self.durable or self.spool is None:
+            return []
+        return [str(row["message"]) for row in await self.spool.peek(name)]
 
     def _inbox(self, name: str) -> asyncio.Queue[str]:
         inbox = self._inboxes.get(name)
@@ -123,6 +199,9 @@ class Mailbox:
 
     # -- durable mode ---------------------------------------------------
     async def _durable_send(self, to: str, message: str, sender: str | None) -> None:
+        if self.spool is not None:
+            with contextlib.suppress(Exception):
+                await self.spool.append(to, message, sender=sender)
         try:  # pragma: no cover - depends on DBOS being initialised
             from agentkit import durability
 

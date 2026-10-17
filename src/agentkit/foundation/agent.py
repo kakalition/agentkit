@@ -118,6 +118,9 @@ class AgentDefinition:
     code: bool = False
     subagents: Any = None
     policy: Any = None
+    agent_middleware: Sequence[Any] = ()
+    guardrails: bool = False
+    working_memory: bool = False
 
     # -- hooks ----------------------------------------------------------
     def configure(self, agent: Agent) -> Agent:
@@ -172,6 +175,15 @@ class AgentDefinition:
                 agent.knowledge(None if self.knowledge is True else self.knowledge)
         if self.policy is not None and not self.safety:
             agent.policy(self.policy)
+
+        if self.agent_middleware:
+            agent.agent_middleware(*self.agent_middleware)
+
+        if self.guardrails:
+            agent.guardrails()
+
+        if self.working_memory:
+            agent.working_memory()
 
         blocks = [self.instructions] if isinstance(self.instructions, str) else list(self.instructions)
         for block in blocks:
@@ -251,7 +263,11 @@ class Agent:
         self._specialists: list[tuple[Any, str, str]] = []
         self._capabilities: list[Any] = []
         self._policies: list[Any] = []
+        self._agent_middleware: list[Any] = []
+        self._guardrails = False
+        self._guardrails_wrap: bool | None = None
         self._memory = False
+        self._working_memory = False
         self._approvals = False
         self._output_type: Any = str
         self._output_validators: list[Any] = []
@@ -355,6 +371,11 @@ class Agent:
         if isinstance(item, Tool):
             options.update(item.tool_options())
             target = item.function()
+            class_cache_ttl = options.pop("cache_ttl", None)
+            if class_cache_ttl is not None:
+                from agentkit.cache import cached_tool
+
+                target = cached_tool(target, ttl=class_cache_ttl)
         else:
             target = item
             if cache_ttl is not None:
@@ -480,8 +501,36 @@ class Agent:
         self._approvals = enabled
         return self
 
+    def working_memory(self, enabled: bool = True) -> Agent:
+        """Add thread-scoped working-memory tools (``memory_set``/``memory_get``/…)."""
+        self._working_memory = enabled
+        return self
+
     def policy(self, policy: Any) -> Agent:
         self._policies.append(policy)
+        return self
+
+    def agent_middleware(self, *middleware: Any) -> Agent:
+        """Register model/tool-level middleware (see :class:`AgentMiddlewareCapability`).
+
+        Hooks wrap each model request and tool execution inside a turn. When no
+        middleware is registered explicitly, the app's configured
+        ``agent_middleware`` driver is used (``agent_middleware_driver``, default
+        ``noop`` — a pass-through).
+        """
+        self._agent_middleware.extend(item for item in middleware if item is not None)
+        return self
+
+    def guardrails(self, enabled: bool = True, *, wrap_untrusted: bool | None = None) -> Agent:
+        """Scan tool results for prompt injection (opt-in).
+
+        When enabled, tool results are scanned and ``guardrails.injection`` is
+        emitted on a hit. ``wrap_untrusted`` (or the ``guardrails_wrap_untrusted``
+        setting) additionally wraps string results so the model treats them as data.
+        """
+        self._guardrails = enabled
+        if wrap_untrusted is not None:
+            self._guardrails_wrap = wrap_untrusted
         return self
 
     def subagent(
@@ -880,12 +929,28 @@ class Agent:
         if self._approvals:
             capabilities.append(approval_capability)
         capabilities.extend(policy_hooks(policy) for policy in self._policies)
-        if self._skills_enforce and self._resolved_skills is not None:
-            from agentkit.policy import ToolPolicy
+        from agentkit.policy import ToolPolicy
 
-            policy = self._resolved_skills.tool_policy()
-            if isinstance(policy, ToolPolicy) and policy.allow:
-                capabilities.append(policy_hooks(policy))
+        policies = list(self._policies)
+        if self._skills_enforce and self._resolved_skills is not None:
+            skill_policy = self._resolved_skills.tool_policy()
+            if isinstance(skill_policy, ToolPolicy) and skill_policy.allow:
+                capabilities.append(policy_hooks(skill_policy))
+                policies.append(skill_policy)
+        approval_names: set[str] = set()
+        for policy in policies:
+            approval_names |= set(getattr(policy, "require_approval", ()) or ())
+        wrap_untrusted = self._guardrails_wrap
+        if wrap_untrusted is None:
+            wrap_untrusted = bool(getattr(resolved_settings, "guardrails_wrap_untrusted", False))
+        guardrails_enabled = bool(getattr(resolved_settings, "guardrails_enabled", False))
+        if self._guardrails or guardrails_enabled or wrap_untrusted:
+            from agentkit.foundation.middleware import guardrails_hooks
+
+            capabilities.append(guardrails_hooks(wrap_untrusted=bool(wrap_untrusted)))
+        middleware_hooks = self._agent_middleware_hooks()
+        if middleware_hooks is not None:
+            capabilities.append(middleware_hooks)
 
         built: PydanticAgent[Any, Any] = PydanticAgent(
             resolved_model,
@@ -899,8 +964,13 @@ class Agent:
             toolsets=self._toolsets or None,
         )
         for tool, options in self._tools:
-            if options:
-                built.tool(**options)(tool)
+            opts = dict(options)
+            if self._approvals and not opts.get("requires_approval"):
+                name = opts.get("name") or getattr(tool, "__name__", None)
+                if name and name in approval_names:
+                    opts["requires_approval"] = True
+            if opts:
+                built.tool(**opts)(tool)
             else:
                 built.tool(tool)
         for validator in self._output_validators:
@@ -913,6 +983,12 @@ class Agent:
             built.tool(make_delegate(specialist, tool_name=tool_name, description=description))
         if self._memory:
             MemoryCapability().install(built)
+        if self._working_memory or bool(
+            getattr(resolved_settings, "working_memory_enabled", False)
+        ):
+            from agentkit.working_memory import WorkingMemoryCapability
+
+            WorkingMemoryCapability().install(built)
         self._attach_agents(built, resolved_settings, events or self._events)
         self._attach_skills(built, resolved_settings)
         self._attach_knowledge(built, resolved_settings)
@@ -924,6 +1000,36 @@ class Agent:
         self._attach_artifacts(built, resolved_settings)
         self._built = built
         return built
+
+    def _agent_middleware_hooks(self) -> Any:
+        """Resolve agent middleware into a capability (explicit list, else the app's driver).
+
+        Returns ``None`` when only the pass-through default is configured, so an
+        unset builder adds no capability and behavior is unchanged.
+        """
+        from agentkit.foundation.agent_middleware import (
+            AgentMiddlewareCapability,
+            NoopMiddleware,
+        )
+
+        middlewares: list[Any] = list(self._agent_middleware)
+        if not middlewares:
+            try:
+                from agentkit.foundation.facade import get_current_app
+
+                app: Any = get_current_app()
+            except Exception:  # pragma: no cover - defensive
+                app = None
+            if app is not None:
+                try:
+                    resolved = app.agent_middleware
+                except Exception:  # pragma: no cover - defensive
+                    resolved = None
+                if resolved is not None:
+                    middlewares.append(resolved)
+        if not middlewares or all(isinstance(item, NoopMiddleware) for item in middlewares):
+            return None
+        return AgentMiddlewareCapability(middlewares).hooks()
 
     def _attach_agents(
         self, agent: PydanticAgent[Any, Any], settings: Any, events: Any
@@ -941,10 +1047,20 @@ class Agent:
             registry.register(handle)
         mailbox = self._mailbox
         if mailbox is None:
-            from agentkit.agents.mailbox import Mailbox
+            from agentkit.agents.mailbox import Mailbox, RepositoryMailboxSpool
 
             durable = bool(getattr(settings, "mailbox_durable", False)) if settings else False
-            mailbox = Mailbox(registry, durable=durable, events=events)
+            spool = None
+            if durable:
+                try:
+                    from agentkit.foundation.facade import get_current_app
+
+                    app = get_current_app()
+                except Exception:  # pragma: no cover - defensive
+                    app = None
+                if app is not None:
+                    spool = RepositoryMailboxSpool(app)
+            mailbox = Mailbox(registry, durable=durable, events=events, spool=spool)
         from agentkit.agents.tools import AgentsCapability
 
         max_handoffs = getattr(settings, "max_handoffs", None) if settings else None

@@ -77,6 +77,24 @@ async with app.repositories() as repos:
 
 Each `ChatResult.usage` also carries the per-turn totals.
 
+## Fallback chains
+
+When a provider is unavailable, advance to the next model instead of failing. Set
+`model_fallbacks` (an ordered list of `provider:model`) and the primary model is
+wrapped in a PydanticAI `FallbackModel` automatically:
+
+```python
+# kilo.json / environment
+model_name=openai:gpt-5-mini
+model_fallbacks=["anthropic:claude-haiku-4", "openai:gpt-4o-mini"]
+```
+
+Fallback triggers on provider errors (`ModelAPIError` subclasses), and
+`ChatResult.model` records which model actually answered — useful when you need to
+know a turn was served by a backup.
+
+The same behaviour is available per router with `.with_fallbacks(...)`.
+
 ## Putting it together
 
 ```python

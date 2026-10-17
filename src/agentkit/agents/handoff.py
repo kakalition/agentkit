@@ -57,6 +57,9 @@ async def _run_target(
     deps: Any,
     message_history: list[Any] | None,
 ) -> str:
+    if handle.is_remote:
+        # Remote peers are reached over A2A (the handle owns the client/url).
+        return await handle.invoke(None, prompt)
     agent = handle.agent
     if agent is None:
         return f"(agent {handle.name!r} has no implementation)"

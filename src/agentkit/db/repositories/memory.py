@@ -28,6 +28,7 @@ MEMORY_STATUSES = ("active", "proposed", "rejected")
 
 def _recency(memory: Memory, now: datetime, half_life_days: float) -> float:
     anchor = memory.last_used_at or memory.updated_at or memory.created_at
+
     if anchor is None:
         return 0.0
     if anchor.tzinfo is None:
@@ -36,6 +37,28 @@ def _recency(memory: Memory, now: datetime, half_life_days: float) -> float:
     if half_life_days <= 0:
         return 1.0
     return float(2.0 ** (-age_days / half_life_days))
+
+
+async def _semantic_scores_for(
+    query_vector: list[float], candidates: list[Memory], vectors: list[list[float]]
+) -> list[float]:
+    """Cosine scores for ``candidates``, ranked via the vector store when one is configured.
+
+    With the default ``repository`` driver this is the numpy cosine scan, so the
+    scores are identical to the built-in path.
+    """
+    from agentkit.vector_store import current_vector_store
+
+    store = current_vector_store()
+    if store is not None:
+        items = [
+            (str(memory.id), vector)
+            for memory, vector in zip(candidates, vectors, strict=True)
+        ]
+        hits = await store.rank("__memory__", query_vector, items)
+        by_id = {hit.id: hit.score for hit in hits}
+        return [by_id.get(str(memory.id), 0.0) for memory in candidates]
+    return similarity_scores(query_vector, vectors)
 
 
 class MemoryRepo:
@@ -225,6 +248,27 @@ class MemoryRepo:
             float(getattr(settings, "memory_recall_half_life_days", 30.0)),
         )
 
+    def _recall_strategy(self) -> Any:
+        """The configured recall strategy (``memory_recall_driver``), or ``None``.
+
+        Resolved from the current app so the driver selection takes effect; a
+        ``None`` result means use the built-in hybrid blend, which reproduces the
+        historical default exactly.
+        """
+        try:
+            import agentkit.memory  # noqa: F401 - registers the recall manager
+            from agentkit.foundation.facade import get_current_app
+
+            app = get_current_app()
+        except Exception:  # pragma: no cover - defensive
+            return None
+        if app is None:
+            return None
+        try:
+            return app.manager("memory_recall").driver()
+        except Exception:  # pragma: no cover - defensive
+            return None
+
     async def search(
         self, query: str, *, kind: str | None = None, limit: int = 5, status: str | None = "active"
     ) -> list[Memory]:
@@ -240,17 +284,24 @@ class MemoryRepo:
             rows.setdefault(memory.id, memory)
             similarity[memory.id] = max(similarity.get(memory.id, 0.0), 1.0)
 
-        w_sim, w_rec, w_imp, half_life = self._weights()
         now = datetime.now(UTC)
-        ranked = [
-            (
-                w_sim * similarity[memory_id]
-                + w_rec * _recency(memory, now, half_life)
-                + w_imp * float(memory.importance or 0.0),
-                memory,
-            )
-            for memory_id, memory in rows.items()
-        ]
+        strategy = self._recall_strategy()
+        if strategy is None:
+            w_sim, w_rec, w_imp, half_life = self._weights()
+            ranked = [
+                (
+                    w_sim * similarity[memory_id]
+                    + w_rec * _recency(memory, now, half_life)
+                    + w_imp * float(memory.importance or 0.0),
+                    memory,
+                )
+                for memory_id, memory in rows.items()
+            ]
+        else:
+            ranked = [
+                (strategy.score(query, similarity[memory_id], memory, now), memory)
+                for memory_id, memory in rows.items()
+            ]
         ranked.sort(key=lambda pair: pair[0], reverse=True)
         return [memory for _, memory in ranked[:limit]]
 
@@ -294,7 +345,7 @@ class MemoryRepo:
                 continue
             candidates.append(memory)
             vectors.append(vector)
-        scores = similarity_scores(query_vector, vectors)
+        scores = await _semantic_scores_for(query_vector, candidates, vectors)
         return list(zip(candidates, scores, strict=True))
 
     # -- consolidation helpers -----------------------------------------

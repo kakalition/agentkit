@@ -6,6 +6,7 @@ and timeouts/retries live on the underlying async OpenAI client.
 
 from __future__ import annotations
 
+import contextlib
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ from agentkit.support.kinds import (
     MemoryDriver,
     NotificationChannelDriver,
     ObservabilityDriver,
+    PairingDriver,
     PlanningDriver,
     PricingDriver,
     PromptsDriver,
@@ -57,6 +59,8 @@ from agentkit.support.kinds import (
     StorageDriver,
     TaskDriver,
     VaultDriver,
+    VectorStoreDriver,
+    WorkingMemoryDriver,
 )
 
 DEFAULT_WORKSPACE_ROOT = "~/.agentkit"
@@ -92,6 +96,8 @@ class AgentSettings(BaseSettings):
     mistral_api_key: str | None = None
     ollama_base_url: str | None = None
     model_name: str = "openai:gpt-4o-mini"
+    #: ordered fallback models (``provider:model``) tried when the primary fails.
+    model_fallbacks: list[str] = Field(default_factory=list)
     model_timeout: float = 60.0
     model_retries: int = 2
     usage_request_limit: int | None = None
@@ -103,6 +109,13 @@ class AgentSettings(BaseSettings):
     # posture — the opinionated default layer set for ``.full()``. ``hybrid``
     # reproduces the historical behavior, so this is safe to leave at the default.
     agent_posture: Posture = Posture.HYBRID
+
+    # working memory — thread-scoped scratch state (per conversation), opt-in.
+    working_memory_enabled: bool = False
+    working_memory_driver: WorkingMemoryDriver = WorkingMemoryDriver.MEMORY
+
+    # vector store — nearest-neighbour search backend for semantic recall.
+    vector_store_driver: VectorStoreDriver = VectorStoreDriver.REPOSITORY
 
     # memory — durable facts about the owner (name, preferences, …) the agent can
     # save and recall across conversations. Recall is semantic by default.
@@ -209,7 +222,9 @@ class AgentSettings(BaseSettings):
         validation_alias=AliasChoices("AGENTKIT_CREDENTIALS_KEY", "CREDENTIALS_KEY"),
     )
 
-    # guardrails — wrap tool results from untrusted sources (web/MCP/A2A) as data
+    # guardrails — scan tool results for prompt injection (opt-in) and optionally
+    # wrap results from untrusted sources (web/MCP/A2A) so the model treats them as data.
+    guardrails_enabled: bool = False
     guardrails_wrap_untrusted: bool = False
 
     # human-in-the-loop approvals
@@ -243,6 +258,10 @@ class AgentSettings(BaseSettings):
     storage_driver: StorageDriver = StorageDriver.LOCAL
     rate_limit_driver: RateLimitDriver = RateLimitDriver.DATABASE
     durability_driver: DurabilityDriver = DurabilityDriver.DBOS
+    # Temporal connection (``durability_driver=temporal``; needs the ``temporal`` extra)
+    temporal_address: str = "localhost:7233"
+    temporal_namespace: str = "default"
+    temporal_task_queue: str = "agentkit"
     auth_driver: AuthDriver = AuthDriver.DEFAULT
     vault_driver: VaultDriver = VaultDriver.FERNET
     guardrails_driver: GuardrailDriver = GuardrailDriver.REGEX
@@ -266,6 +285,11 @@ class AgentSettings(BaseSettings):
     catalog_driver: CatalogDriver = CatalogDriver.LOCAL
     dataset_driver: DatasetDriver = DatasetDriver.REPOSITORY
     eval_grader_driver: EvalGraderDriver = EvalGraderDriver.EXACT
+    # gateway DM pairing — in-memory by default; ``repository`` persists pairings.
+    pairing_driver: PairingDriver = PairingDriver.MEMORY
+    # online scoring — grade live run traces with a registered grader (opt-in).
+    online_scoring_enabled: bool = False
+    online_scoring_grader: str = "trace"
 
     # run tracing — uniform RunEvents for the Playground + trace grading. Cheap
     # (in-memory buffered) and flushed to the ``run_events`` table when enabled.
@@ -445,12 +469,28 @@ def build_model(settings: AgentSettings | None = None):
 
     A thin wrapper over :func:`agentkit.model_providers.resolve_model`, which
     dispatches on the provider prefix (openai, anthropic, google, groq, mistral,
-    ollama, and any registered provider).
+    ollama, and any registered provider). When ``model_fallbacks`` is set, the
+    primary is wrapped in a PydanticAI ``FallbackModel`` tried in order.
     """
     from agentkit.model_providers import resolve_model
 
     settings = settings or get_settings()
-    return resolve_model(settings.model_name, settings)
+    primary = resolve_model(settings.model_name, settings)
+    fallbacks = [str(name) for name in (getattr(settings, "model_fallbacks", None) or []) if name]
+    if not fallbacks:
+        return primary
+    models = [primary]
+    for name in fallbacks:
+        with contextlib.suppress(Exception):
+            models.append(resolve_model(name, settings))
+    if len(models) < 2:
+        return primary
+    from pydantic_ai.models.fallback import FallbackModel
+
+    try:
+        return FallbackModel(*models)
+    except Exception:  # pragma: no cover - defensive
+        return primary
 
 
 def model_settings(settings: AgentSettings | None = None):

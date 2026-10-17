@@ -16,6 +16,7 @@ from agentkit.contracts.codeexec import CodeExecutor
 from agentkit.contracts.comms import Topology
 from agentkit.contracts.computer import Computer
 from agentkit.contracts.database import Dialect
+from agentkit.contracts.dataset import DatasetStore
 from agentkit.contracts.durability import Durability
 from agentkit.contracts.embeddings import EmbedderContract
 from agentkit.contracts.eval_dataset import Dataset, Grader
@@ -42,6 +43,8 @@ from agentkit.contracts.storage import FileSystem
 from agentkit.contracts.subagent import ContextStrategy
 from agentkit.contracts.tasks import PlanningStrategy, TaskStore
 from agentkit.contracts.vault import Vault
+from agentkit.contracts.vector_store import VectorHit, VectorStore
+from agentkit.contracts.working_memory import WorkingMemory
 
 __all__ = [
     "AgentMiddleware",
@@ -56,6 +59,7 @@ __all__ = [
     "Computer",
     "ContextStrategy",
     "Dataset",
+    "DatasetStore",
     "Dialect",
     "DocumentLoader",
     "Durability",
@@ -93,5 +97,8 @@ __all__ = [
     "Tracer",
     "Transcriber",
     "Vault",
+    "VectorHit",
+    "VectorStore",
+    "WorkingMemory",
 ]
 

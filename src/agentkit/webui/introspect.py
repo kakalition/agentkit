@@ -96,6 +96,16 @@ def stack_view(settings: Any, app: Any = None) -> dict[str, Any]:
             "enabled": settings.memory_enabled,
             "embedding_backend": settings.memory_embedding_backend,
         },
+        "vector_store": {
+            "driver": str(getattr(settings, "vector_store_driver", "repository")),
+        },
+        "working_memory": {
+            "enabled": bool(getattr(settings, "working_memory_enabled", False)),
+            "driver": str(getattr(settings, "working_memory_driver", "memory")),
+        },
+        "datasets": {
+            "driver": str(getattr(settings, "dataset_driver", "repository")),
+        },
         "skills": {"enabled": settings.skills_enabled, "dir": settings.skills_dir},
         "approvals": settings.approvals_enabled,
         "subagents": {
@@ -145,6 +155,13 @@ def stack_view(settings: Any, app: Any = None) -> dict[str, Any]:
         "interfaces": {
             "openai_api": bool(getattr(settings, "openai_api_enabled", False)),
             "webhooks": bool(getattr(settings, "webhooks_enabled", False)),
+        },
+        "guardrails": {
+            "enabled": bool(getattr(settings, "guardrails_enabled", False)),
+            "wrap_untrusted": bool(getattr(settings, "guardrails_wrap_untrusted", False)),
+        },
+        "resilience": {
+            "model_fallbacks": list(getattr(settings, "model_fallbacks", []) or []),
         },
     }
 

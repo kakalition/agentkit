@@ -15,14 +15,22 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from agentkit.deps import ApprovalRequest
+from agentkit.errors import ConfigurationError
 
 __all__ = ["Gateway", "GatewayError"]
 
 APPROVAL_TIMEOUT = 300.0
 
 
-class GatewayError(RuntimeError):
-    pass
+class GatewayError(ConfigurationError):
+    """A gateway failure: missing optional extra or unconfigured credentials.
+
+    Subclasses :class:`~agentkit.errors.ConfigurationError` so optional-extra and
+    configuration failures are reported uniformly across surfaces; it remains a
+    distinct type for callers that catch gateways specifically.
+    """
+
+    code = "gateway_error"
 
 
 class Gateway(abc.ABC):
@@ -44,6 +52,10 @@ class Gateway(abc.ABC):
         self.app = app
         self.settings = settings if settings is not None else getattr(app, "settings", None)
         self.allowed = list(allowed_channel_ids or [])
+        if pairing is None and app is not None and bool(
+            getattr(self.settings, "channel_pairing_enabled", False)
+        ):
+            pairing = getattr(app, "pairing", None)
         self.pairing = pairing
         self.timeout = timeout
         self.status_interval_s = status_interval_s
@@ -67,9 +79,12 @@ class Gateway(abc.ABC):
     def pair(self, external_id: Any, *, code: str | None = None) -> str:
         """Issue (and optionally send) a pairing code for ``external_id``."""
         if self.pairing is None:
-            from agentkit.gateways.pairing import PairingRegistry
+            pairing = getattr(self.app, "pairing", None) if self.app is not None else None
+            if pairing is None:
+                from agentkit.gateways.pairing import PairingRegistry
 
-            self.pairing = PairingRegistry()
+                pairing = PairingRegistry()
+            self.pairing = pairing
         return self.pairing.request(external_id, code=code)
 
     def confirm_pairing(self, external_id: Any, code: str) -> bool:

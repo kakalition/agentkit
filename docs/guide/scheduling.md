@@ -199,16 +199,16 @@ print(app.manager(DriverKind.DURABILITY).configured_driver()) # -> "dbos"
 | Driver | What it does | When to pick it |
 | --- | --- | --- |
 | `dbos` (default) | DBOS Transact: durable workflows and steps, queues, and schedules, backed by a local SQLite system database. Steps are retried and a workflow interrupted by a crash resumes from its last completed step. | Multi-step processes (`@durability.workflow()`) that must not lose progress. |
-| `temporal` | An optional driver that requires the `agentkit[temporal]` extra. It is **not implemented yet**: selecting it (or missing `temporalio`) raises a `ConfigurationError`. | Not yet — pick `dbos` today. |
+| `temporal` | An optional driver (needs the `agentkit[temporal]` extra) that connects to a Temporal cluster and submits workflows by name; schedules map to Temporal schedules. Missing `temporalio` raises a `ConfigurationError` naming the extra. | When you already run Temporal and want its durability for the same workflows. |
 
 The durability driver is reached through `app.durability`. The DBOS driver is
 what keeps the exactly-once guarantees described above; the scheduler's tick
 workflow is itself a durable DBOS workflow.
 
-::: warning `temporal` is not a working alternative yet
-Selecting `DURABILITY_DRIVER=temporal` will raise: without the `temporalio`
-package it names the missing extra, and with it the driver still reports that it
-is not implemented. Use `DURABILITY_DRIVER=dbos`.
+::: warning `temporal` needs a worker
+Temporal submits workflows by their fully-qualified name, so the target worker must
+register the workflow classes (`temporalio.workflow.defn`) on the task queue;
+agentkit's DBOS-style decorators do not register a workflow with a Temporal worker.
 :::
 
 ### How to select a driver
@@ -217,7 +217,7 @@ Set the environment variable (in the shell, `.env`, or your process manager):
 
 ```bash
 SCHEDULER_DRIVER=dbos      # dbos | memory
-DURABILITY_DRIVER=dbos     # dbos | temporal (needs an extra; not implemented)
+DURABILITY_DRIVER=dbos     # dbos | temporal (needs the temporal extra)
 ```
 
 Selection follows the standard driver precedence:
@@ -266,7 +266,7 @@ conformance-test approach.
 
 | Symptom | Likely cause |
 | --- | --- |
-| `ConfigurationError` naming `temporalio` or an extra | You selected `DURABILITY_DRIVER=temporal`; it needs `pip install agentkit[temporal]` and is not implemented yet. |
+| `ConfigurationError` naming `temporalio` or an extra | You selected `DURABILITY_DRIVER=temporal`; it needs `pip install agentkit[temporal]`. |
 | Jobs silently disappear after a restart | You selected `SCHEDULER_DRIVER=memory`, which is in-process only. |
 | `ConfigurationError: unknown scheduler driver 'x'` | The driver name is misspelled or not registered — register it with `app.extend(...)` or `@register_driver` first. |
 | A changed setting had no effect | The manager caches drivers per app; call `app.manager(DriverKind.SCHEDULER).forget()` or restart the process. |

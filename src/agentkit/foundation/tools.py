@@ -80,7 +80,14 @@ class Tool:
 
     def install(self, agent: Any) -> Any:
         """Register this tool on a built PydanticAI agent."""
-        agent.tool(self.function(), **self.tool_options())
+        options = self.tool_options()
+        cache_ttl = options.pop("cache_ttl", None)
+        function = self.function()
+        if cache_ttl is not None:
+            from agentkit.cache import cached_tool
+
+            function = cached_tool(function, ttl=cache_ttl)
+        agent.tool(function, **options)
         return agent
 
     # -- override -------------------------------------------------------

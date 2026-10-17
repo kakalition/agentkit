@@ -49,6 +49,28 @@ def _store(deps: Any) -> Any:
     return getattr(getattr(deps, "repos", None), "memories", None)
 
 
+def _current_store(deps: Any) -> Any:
+    """The active memory store: the ``in_memory`` driver when configured, else the repo store.
+
+    Keeps the default (``repository``) path byte-identical while letting
+    ``memory_driver=in_memory`` actually back :class:`MemoryCapability`.
+    """
+    try:
+        from agentkit.foundation.facade import get_current_app
+
+        app = get_current_app()
+    except Exception:  # pragma: no cover - defensive
+        app = None
+    if app is not None:
+        configured = str(getattr(getattr(app, "settings", None), "memory_driver", "") or "").strip()
+        if configured == "in_memory":
+            try:
+                return app.manager("memory").driver()
+            except Exception:  # pragma: no cover - defensive
+                return _store(deps)
+    return _store(deps)
+
+
 def _profile_store(deps: Any) -> Any:
     return getattr(getattr(deps, "repos", None), "profile", None)
 
@@ -86,17 +108,10 @@ def _profile_line(profile: Any) -> str | None:
     return None
 
 
-async def memory_digest(repos: Any, *, limit: int = DEFAULT_DIGEST_LIMIT) -> str | None:
-    """A grouped bullet list of everything remembered, or ``None`` if empty."""
-    store = getattr(repos, "memories", None)
-    if store is None or limit <= 0:
-        return None
+def _group_digest(rows: Any, profile_line: str | None = None) -> str | None:
     lines: list[str] = []
-    if hasattr(repos, "profile"):
-        profile_line = _profile_line(await repos.profile.get())
-        if profile_line:
-            lines.append(profile_line)
-    rows = await store.list(limit=limit)
+    if profile_line:
+        lines.append(profile_line)
     groups: dict[str, list[Any]] = {}
     for row in rows:
         groups.setdefault(getattr(row, "kind", "fact"), []).append(row)
@@ -107,6 +122,28 @@ async def memory_digest(repos: Any, *, limit: int = DEFAULT_DIGEST_LIMIT) -> str
     if not lines:
         return None
     return "\n".join(lines)
+
+
+async def memory_digest(repos: Any, *, limit: int = DEFAULT_DIGEST_LIMIT) -> str | None:
+    """A grouped bullet list of everything remembered, or ``None`` if empty."""
+    store = getattr(repos, "memories", None)
+    if store is None or limit <= 0:
+        return None
+    profile_line = None
+    if hasattr(repos, "profile"):
+        profile_line = _profile_line(await repos.profile.get())
+    rows = await store.list(limit=limit)
+    return _group_digest(rows, profile_line)
+
+
+async def store_digest(
+    store: Any, *, limit: int = DEFAULT_DIGEST_LIMIT, profile_line: str | None = None
+) -> str | None:
+    """A grouped bullet list for any :class:`MemoryStore` (driver-agnostic)."""
+    if store is None or limit <= 0:
+        return None
+    rows = await store.list(limit=limit)
+    return _group_digest(rows, profile_line)
 
 
 class MemoryCapability(Capability):
@@ -125,7 +162,7 @@ class MemoryCapability(Capability):
                 fact: The fact to remember (short and factual).
                 kind: One of fact, preference, person, date, episodic, procedural.
             """
-            store = _store(ctx.deps)
+            store = _current_store(ctx.deps)
             if store is None or not _writable(ctx.deps):
                 return "memory is unavailable"
             try:
@@ -142,7 +179,7 @@ class MemoryCapability(Capability):
                 name: The person's name.
                 note: An optional detail about them.
             """
-            store = _store(ctx.deps)
+            store = _current_store(ctx.deps)
             if store is None or not _writable(ctx.deps):
                 return "memory is unavailable"
             content = f"{name} — {note}" if note else name
@@ -157,7 +194,7 @@ class MemoryCapability(Capability):
                 query: What to look for.
                 kind: Optionally restrict to one memory kind.
             """
-            store = _store(ctx.deps)
+            store = _current_store(ctx.deps)
             if store is None or not _enabled(ctx.deps):
                 return "(memory unavailable)"
             hits = await store.search(query, kind=kind)
@@ -169,7 +206,7 @@ class MemoryCapability(Capability):
         @agent.tool
         async def forget_memory(ctx: RunContext[Any], memory_id: int) -> str:
             """Delete a remembered fact by its id."""
-            store = _store(ctx.deps)
+            store = _current_store(ctx.deps)
             if store is None or not _writable(ctx.deps):
                 return "memory is unavailable"
             return "forgotten" if await store.forget(memory_id) else "no such memory"
@@ -224,7 +261,12 @@ class MemoryCapability(Capability):
             parts = [MEMORY_GUIDE]
             if owner_name and owner_name != "Owner":
                 parts.append(f"The user's name is {owner_name}.")
-            digest = await memory_digest(ctx.deps.repos)
+            repo_store = _store(ctx.deps)
+            store = _current_store(ctx.deps)
+            if store is repo_store:
+                digest = await memory_digest(ctx.deps.repos)
+            else:
+                digest = await store_digest(store)
             if digest:
                 parts.append(digest)
             return "\n\n".join(parts)
@@ -239,7 +281,13 @@ class MemoryCapability(Capability):
 
 
 class InMemoryStore:
-    """An in-process memory store (no database); useful for ephemeral agents/tests."""
+    """An in-process memory store (no database); useful for ephemeral agents/tests.
+
+    Implements both the legacy :class:`~agentkit.contracts.memory.MemoryStore`
+    surface (``remember``/``search``/``all``/``forget``) and the capability-facing
+    surface (``add``/``list``/``record_use``) so it can back
+    :class:`MemoryCapability` when ``memory_driver=in_memory``.
+    """
 
     def __init__(self) -> None:
         self._rows: dict[int, SimpleNamespace] = {}
@@ -249,23 +297,69 @@ class InMemoryStore:
         memory_id = self._next
         self._next += 1
         self._rows[memory_id] = SimpleNamespace(
-            id=memory_id, content=content.strip(), kind=kind
+            id=memory_id,
+            content=content.strip(),
+            kind=kind,
+            status="active",
+            importance=0.5,
+            access_count=0,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+            last_used_at=None,
         )
         return memory_id
 
-    async def search(self, query: str, *, limit: int = 5) -> list[Any]:
+    async def add(
+        self,
+        content: str,
+        *,
+        kind: str = "fact",
+        importance: float = 0.5,
+        status: str = "active",
+        **_: Any,
+    ) -> Any:
+        memory_id = await self.remember(content, kind=kind)
+        row = self._rows[memory_id]
+        row.importance = float(importance)
+        row.status = status
+        return row
+
+    async def search(
+        self,
+        query: str,
+        *,
+        kind: str | None = None,
+        limit: int = 5,
+        status: str | None = "active",
+    ) -> list[Any]:
         needle = (query or "").strip().lower()
         if not needle:
             return []
         hits = [
             row
             for row in self._rows.values()
-            if needle in row.content.lower() or needle in row.kind.lower()
+            if (status is None or row.status == status)
+            and (kind is None or row.kind == kind)
+            and (needle in row.content.lower() or needle in row.kind.lower())
         ]
         return hits[:limit]
 
+    async def record_use(self, memories: Any) -> int:
+        if isinstance(memories, int):
+            memories = [memories]
+        touched = 0
+        now = datetime.now(UTC)
+        for item in memories:
+            row = self._rows.get(item) if isinstance(item, int) else item
+            if row is None:
+                continue
+            row.access_count = int(getattr(row, "access_count", 0) or 0) + 1
+            row.last_used_at = now
+            touched += 1
+        return touched
+
     async def all(self, limit: int | None = None) -> list[Any]:
-        rows = list(self._rows.values())
+        rows = [*self._rows.values()]
         return rows[:limit] if limit is not None else rows
 
     async def forget(self, memory_id: int) -> bool:
@@ -276,6 +370,16 @@ class InMemoryStore:
         if not rows:
             return None
         return "\n".join(f"- #{row.id} {row.content}" for row in rows)
+
+    async def list(
+        self, limit: int | None = None, *, kind: str | None = None, status: str | None = "active"
+    ) -> list[Any]:
+        rows = [
+            row
+            for row in self._rows.values()
+            if (status is None or row.status == status) and (kind is None or row.kind == kind)
+        ]
+        return rows[:limit] if limit is not None else rows
 
 
 class MemoryManager(Manager):
@@ -383,4 +487,5 @@ __all__ = [
     "RecencyRecall",
     "MemoryCapability",
     "memory_digest",
+    "store_digest",
 ]

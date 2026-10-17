@@ -225,19 +225,47 @@ def ensure_configured(
     return _runtime
 
 
+def _durability_driver(settings: AgentSettings, app: Any) -> Any:
+    """Resolve the configured durability driver, preferring the app's manager."""
+    if app is None:
+        try:
+            from agentkit.foundation.facade import get_current_app
+
+            app = get_current_app()
+        except Exception:  # pragma: no cover - defensive
+            app = None
+    if app is not None:
+        return app.manager("durability").driver()
+    from agentkit.durability import TemporalDurability
+
+    return TemporalDurability(None, settings=settings)
+
+
 def init_scheduler(
     settings: AgentSettings | None = None,
     *,
     repos_factory: type[Repositories] = Repositories,
     tick_cron: str = "* * * * *",
+    app: Any = None,
 ) -> Runtime:
-    """Launch DBOS, register the worker queue + the every-minute tick."""
+    """Launch the durability backend, register the worker queue + the every-minute tick.
+
+    The default ``dbos`` driver keeps the DBOS module path (byte-identical). With
+    any other ``durability_driver`` (e.g. ``temporal``) the launch goes through the
+    configured driver, resolved from ``app`` (or the current app).
+    """
     settings = settings or get_settings()
+    schedule = [{"schedule_name": TICK_SCHEDULE_NAME, "workflow_fn": tick, "schedule": tick_cron}]
+    driver_name = str(getattr(settings, "durability_driver", "dbos") or "dbos")
+    if driver_name != "dbos":
+        driver = _durability_driver(settings, app)
+        driver.init(settings, queues=[WORKER_QUEUE])
+        runtime = configure(settings, repos_factory=repos_factory)
+        driver.apply_schedules(schedule)
+        return runtime
     durability.init(settings, queues=[WORKER_QUEUE])
     runtime = configure(settings, repos_factory=repos_factory)
-    durability.apply_schedules(
-        [{"schedule_name": TICK_SCHEDULE_NAME, "workflow_fn": tick, "schedule": tick_cron}]
-    )
+    durability.apply_schedules(schedule)
     return runtime
 
 

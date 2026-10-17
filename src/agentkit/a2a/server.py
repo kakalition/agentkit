@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -57,6 +59,7 @@ class TaskAgentExecutor(AgentExecutor):
 
     def __init__(self, answer: Answer) -> None:
         self._answer = answer
+        self._tasks: dict[str, asyncio.Task[Any]] = {}
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task_id = context.task_id or str(uuid.uuid4())
@@ -70,8 +73,14 @@ class TaskAgentExecutor(AgentExecutor):
         )
         updater = TaskUpdater(event_queue, task_id, context_id)
         await updater.start_work()
+        work = asyncio.ensure_future(self._answer(context.get_user_input()))
+        self._tasks[task_id] = work
         try:
-            text = await self._answer(context.get_user_input())
+            text = await work
+        except asyncio.CancelledError:
+            with contextlib.suppress(Exception):
+                await updater.cancel()
+            return
         except Exception as exc:
             await updater.failed(
                 message=t.Message(
@@ -83,23 +92,50 @@ class TaskAgentExecutor(AgentExecutor):
                 )
             )
             return
+        finally:
+            self._tasks.pop(task_id, None)
         await updater.add_artifact([t.Part(text=text)], name="result")
         await updater.complete()
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        return
+        """Cancel an in-flight task and report the canceled status."""
+        task_id = context.task_id or ""
+        work = self._tasks.pop(task_id, None)
+        if work is not None and not work.done():
+            work.cancel()
+        updater = TaskUpdater(event_queue, task_id, context.context_id or "")
+        with contextlib.suppress(Exception):
+            await updater.cancel()
+
+
+def _card_defaults(settings: Any) -> tuple[str, str]:
+    if settings is None:
+        try:
+            from agentkit.config import get_settings
+
+            settings = get_settings()
+        except Exception:  # pragma: no cover - defensive
+            settings = None
+    name = str(getattr(settings, "a2a_card_name", "") or "Agent")
+    url = str(getattr(settings, "a2a_public_url", "") or "http://127.0.0.1:9000")
+    return name, url
 
 
 def build_card(
     *,
-    name: str,
+    name: str | None = None,
     description: str,
-    url: str,
+    url: str | None = None,
     version: str = "1.0.0",
     skills: list[dict[str, Any]] | None = None,
     input_modes: list[str] | None = None,
     output_modes: list[str] | None = None,
+    settings: Any = None,
 ) -> t.AgentCard:
+    if name is None or url is None:
+        default_name, default_url = _card_defaults(settings)
+        name = name if name is not None else default_name
+        url = url if url is not None else default_url
     skill_models = [
         t.AgentSkill(
             id=skill["id"],
