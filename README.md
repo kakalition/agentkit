@@ -62,8 +62,14 @@ console for exploring and operating the running agent.
   (`sqlite+aiosqlite`), so concurrent turns, sub-agents and channels share one
   event loop; the engine/repositories/ORM/web UI/CLI are all async.
 - **Multi-provider models.** `MODEL_NAME=provider:model` builds OpenAI,
-  Anthropic, Google, Groq, Mistral, Ollama or any OpenAI-compatible endpoint
-  (extend with `register_model_provider`).
+  Anthropic, Google, Groq, Mistral, Ollama, Amazon Bedrock, OpenRouter, Azure
+  OpenAI, LiteLLM, DeepSeek, Together, Fireworks, Cerebras, Vercel or any
+  OpenAI-compatible endpoint (extend with `register_model_provider`). See
+  [Multiple Model Providers](/guide/multi-provider).
+- **One runtime, both camps.** Freeform generalists and lean harnesses run on the
+  same runtime: pick [specialized / hybrid / free](/guide/posture), author with a
+  class, the fluent builder, or raw PydanticAI, and steer an in-flight turn with
+  `App.steer`. See [Positioning](/guide/positioning).
 - **Typed memory.** Facts/preferences/people/dates with a hybrid
   similarity+recency+importance recall, an owner **profile**, and a daily durable
   `memory:consolidate` task (dedupe/summarize/prune).

@@ -11,7 +11,9 @@ prefix::
     model = resolve_model("my-provider:foo", settings)
 
 Built-in prefixes: ``openai``, ``openai-compatible``, ``anthropic``, ``google``,
-``groq``, ``mistral``, ``ollama``. A missing provider key raises
+``groq``, ``mistral``, ``ollama``, ``bedrock``, ``openrouter``, ``azure``,
+``litellm``, ``deepseek``, ``together``, ``fireworks``, ``cerebras``, ``vercel``.
+A missing provider key raises
 :class:`~agentkit.errors.ConfigurationError` naming the env var; an unknown
 prefix raises it naming the supported set.
 """
@@ -141,6 +143,74 @@ def _ollama(model: str, settings: Any) -> Any:
     return OllamaModel(model, provider=OllamaProvider(base_url=base_url))
 
 
+def _bedrock(model: str, settings: Any) -> Any:
+    try:
+        from pydantic_ai.models.bedrock import BedrockConverseModel
+        from pydantic_ai.providers.bedrock import BedrockProvider
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ConfigurationError(
+            "the bedrock provider needs the 'boto3' package (pip install agentkit[bedrock])"
+        ) from exc
+    provider = BedrockProvider(
+        region_name=settings.bedrock_region,
+        profile_name=settings.aws_profile,
+    )
+    return BedrockConverseModel(model, provider=provider)
+
+
+def _openrouter(model: str, settings: Any) -> Any:
+    from pydantic_ai.models.openrouter import OpenRouterModel
+    from pydantic_ai.providers.openrouter import OpenRouterProvider
+
+    api_key = _require_key(settings, "openrouter_api_key", "OPENROUTER_API_KEY")
+    return OpenRouterModel(model, provider=OpenRouterProvider(api_key=api_key))
+
+
+def _azure(model: str, settings: Any) -> Any:
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.azure import AzureProvider
+
+    api_key = _require_key(settings, "azure_api_key", "AZURE_API_KEY")
+    if not settings.azure_endpoint:
+        raise ConfigurationError(
+            "missing AZURE_ENDPOINT for the azure provider (set AZURE_ENDPOINT)"
+        )
+    if not settings.azure_api_version:
+        raise ConfigurationError(
+            "missing AZURE_API_VERSION for the azure provider (set AZURE_API_VERSION)"
+        )
+    provider = AzureProvider(
+        azure_endpoint=settings.azure_endpoint,
+        api_version=settings.azure_api_version,
+        api_key=api_key,
+    )
+    return OpenAIChatModel(model, provider=provider)
+
+
+def _litellm(model: str, settings: Any) -> Any:
+    try:
+        from pydantic_ai.models.openai import OpenAIChatModel
+        from pydantic_ai.providers.litellm import LiteLLMProvider
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ConfigurationError(
+            "the litellm provider needs the 'litellm' package (pip install agentkit[litellm])"
+        ) from exc
+    return OpenAIChatModel(model, provider=LiteLLMProvider())
+
+
+def _openai_compatible_factory(attribute: str, env_var: str, module: str, provider: str) -> ModelFactory:
+    def factory(model: str, settings: Any) -> Any:
+        from importlib import import_module
+
+        from pydantic_ai.models.openai import OpenAIChatModel
+
+        provider_cls = getattr(import_module(f"pydantic_ai.providers.{module}"), provider)
+        api_key = _require_key(settings, attribute, env_var)
+        return OpenAIChatModel(model, provider=provider_cls(api_key=api_key))
+
+    return factory
+
+
 register_model_provider("openai", _openai)
 register_model_provider("openai-compatible", _openai_compatible)
 register_model_provider("anthropic", _anthropic)
@@ -148,6 +218,30 @@ register_model_provider("google", _google)
 register_model_provider("groq", _groq)
 register_model_provider("mistral", _mistral)
 register_model_provider("ollama", _ollama)
+register_model_provider("bedrock", _bedrock)
+register_model_provider("openrouter", _openrouter)
+register_model_provider("azure", _azure)
+register_model_provider("litellm", _litellm)
+register_model_provider(
+    "deepseek",
+    _openai_compatible_factory("deepseek_api_key", "DEEPSEEK_API_KEY", "deepseek", "DeepSeekProvider"),
+)
+register_model_provider(
+    "together",
+    _openai_compatible_factory("together_api_key", "TOGETHER_API_KEY", "together", "TogetherProvider"),
+)
+register_model_provider(
+    "fireworks",
+    _openai_compatible_factory("fireworks_api_key", "FIREWORKS_API_KEY", "fireworks", "FireworksProvider"),
+)
+register_model_provider(
+    "cerebras",
+    _openai_compatible_factory("cerebras_api_key", "CEREBRAS_API_KEY", "cerebras", "CerebrasProvider"),
+)
+register_model_provider(
+    "vercel",
+    _openai_compatible_factory("vercel_api_key", "VERCEL_API_KEY", "vercel", "VercelProvider"),
+)
 
 
 def resolve_model(name: str, settings: Any = None) -> Any:

@@ -95,6 +95,19 @@ class AgentSettings(BaseSettings):
     groq_api_key: str | None = None
     mistral_api_key: str | None = None
     ollama_base_url: str | None = None
+    openrouter_api_key: str | None = None
+    azure_api_key: str | None = None
+    azure_endpoint: str | None = None
+    azure_api_version: str | None = None
+    #: Bedrock region; AWS credentials come from the standard boto3 chain
+    #: (env vars, shared config, instance role), so only the region is pinned.
+    bedrock_region: str | None = None
+    aws_profile: str | None = None
+    deepseek_api_key: str | None = None
+    together_api_key: str | None = None
+    fireworks_api_key: str | None = None
+    cerebras_api_key: str | None = None
+    vercel_api_key: str | None = None
     model_name: str = "openai:gpt-4o-mini"
     #: ordered fallback models (``provider:model``) tried when the primary fails.
     model_fallbacks: list[str] = Field(default_factory=list)

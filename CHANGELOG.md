@@ -7,6 +7,25 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **More model providers.** `MODEL_NAME=provider:model` now also builds
+  `bedrock`, `openrouter`, `azure`, `litellm`, `deepseek`, `together`,
+  `fireworks`, `cerebras`, and `vercel`, each a thin factory over the matching
+  PydanticAI provider following the existing lazy-import pattern. New settings:
+  `openrouter_api_key`, `azure_api_key`/`azure_endpoint`/`azure_api_version`,
+  `bedrock_region`, `aws_profile`, and `<name>_api_key` for the
+  OpenAI-compatible batch.
+- **Declared the missing provider extras** (`groq`, `mistral`) and added
+  `bedrock` (`boto3`) and `litellm` extras, so every `ConfigurationError` now
+  names an extra that actually exists.
+- **Mid-run steering** (Strands-style steerability): `App.steer(conversation_id,
+  text, priority=…)` and `ChatRunner.steer(...)` inject a message into the
+  in-flight turn via PydanticAI's `AgentRun.enqueue` queue (`asap` interrupts,
+  `when_idle` queues to the end). Emits a `turn.steer` lifecycle event; raises
+  `SteeringUnavailable` when no turn is running. `App.cancel` remains the
+  hard-stop path.
+- New guide page [Positioning](/guide/positioning): the "same runtime, both
+  camps" thesis (posture + authoring duality) mapped against Strands,
+  DeepAgents, Mastra, nanobot, and Hermes.
 - **Class & functional duality** (Laravel-faithful, additive): every author-facing
   seam now accepts both a class form and a closure/callable/`"module:attr"` form,
   normalized through one shared layer. New `foundation.callable`

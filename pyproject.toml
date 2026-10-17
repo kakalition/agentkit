@@ -85,6 +85,11 @@ browser = ["playwright>=1.48"]
 realtime = ["pydantic-ai-slim[realtime]>=2.55.0,<3"]
 # durable execution: Temporal (``durability_driver=temporal``)
 temporal = ["temporalio>=1.7"]
+# model providers backed by an optional SDK (``MODEL_NAME=provider:model``)
+groq = ["groq>=0.13"]
+mistral = ["mistralai>=1.0"]
+bedrock = ["boto3>=1.35"]
+litellm = ["litellm>=1.55"]
 
 [project.scripts]
 agentkit = "agentkit.cli:main"

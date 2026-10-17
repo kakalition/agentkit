@@ -76,3 +76,10 @@ class BudgetExceeded(AgentKitError):
 
     code = "budget_exceeded"
     http_status = 429
+
+
+class SteeringUnavailable(AgentKitError):
+    """Raised when steering is requested but no turn is in flight."""
+
+    code = "steering_unavailable"
+    http_status = 409

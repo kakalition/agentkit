@@ -21,6 +21,7 @@ export const NAV: Record<Section, NavGroup[]> = {
         { slug: "class-based", label: "Laravel → agentkit" },
         { slug: "duality", label: "Class & Functional Duality" },
         { slug: "philosophy", label: "Philosophy" },
+        { slug: "positioning", label: "Positioning" },
       ],
     },
     {

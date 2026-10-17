@@ -17,12 +17,17 @@ from pydantic_ai.messages import (
     ModelMessage,
     ModelMessagesTypeAdapter,
     ModelRequest,
+    PartDeltaEvent,
+    PartStartEvent,
+    TextPart,
+    TextPartDelta,
     ToolCallPart,
     UserPromptPart,
 )
 
 from agentkit.config import get_settings, model_settings, usage_limits
 from agentkit.deps import Deps
+from agentkit.errors import SteeringUnavailable
 
 DEFAULT_MAX_HISTORY = 40
 
@@ -146,6 +151,35 @@ class StreamEvent:
     result: ChatResult | None = None
 
 
+def _text_delta(event: Any) -> str | None:
+    """Extract the incremental text carried by a model stream event."""
+    if isinstance(event, PartStartEvent) and isinstance(event.part, TextPart):
+        return event.part.content or None
+    if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+        return event.delta.content_delta or None
+    return None
+
+
+@dataclass
+class TurnHandle:
+    """A live handle to an in-flight PydanticAI run.
+
+    Wraps the running ``AgentRun`` so callers can inject a message mid-turn via
+    :meth:`enqueue` (PydanticAI's first-class pending-message queue). ``asap``
+    interrupts before the next model request; ``when_idle`` queues to the end.
+    """
+
+    conversation_id: str
+    run: Any
+
+    @property
+    def run_id(self) -> str | None:
+        return getattr(self.run, "run_id", None)
+
+    def enqueue(self, text: Any, *, priority: str = "asap") -> str | None:
+        return self.run.enqueue(text, priority=priority)
+
+
 class ChatRunner:
     """Run an agent against one conversation, persisting history."""
 
@@ -173,8 +207,41 @@ class ChatRunner:
         self.checkpointer = checkpointer
         # Set by ``_begin`` when a history processor shrank the window.
         self._compaction: dict[str, int] | None = None
+        # The live run handle while a turn is in flight (for ``steer``).
+        self._turn: TurnHandle | None = None
         # Make the conversation id available to tools (e.g. to deliver later).
         self.deps.extras["conversation_id"] = conversation_id
+
+    # -- steering -------------------------------------------------------
+    @property
+    def turn(self) -> TurnHandle | None:
+        """The live handle for the in-flight turn, or ``None`` when idle."""
+        return self._turn
+
+    async def steer(self, text: Any, *, priority: str = "asap") -> str | None:
+        """Inject a message into the in-flight turn (see :class:`TurnHandle`).
+
+        Raises :class:`~agentkit.errors.SteeringUnavailable` when no turn is
+        running.
+        """
+        handle = self._turn
+        if handle is None:
+            raise SteeringUnavailable(
+                f"no turn is running for conversation {self.conversation_id!r}"
+            )
+        enqueue_id = handle.enqueue(text, priority=priority)
+        preview = text if isinstance(text, str) else _content_repr(text)
+        self._record("steer", text=preview, data={"priority": priority})
+        from agentkit.foundation.facade import emit
+
+        await emit(
+            "turn.steer",
+            conversation_id=self.conversation_id,
+            text=preview,
+            priority=priority,
+            enqueue_id=enqueue_id,
+        )
+        return enqueue_id
 
     # -- run tracing ----------------------------------------------------
     def _record(self, kind: str, **fields: Any) -> None:
@@ -276,19 +343,27 @@ class ChatRunner:
         await self._checkpoint("start", self._history_state(history))
         self.deps.artifacts.clear()
         try:
-            result = await self.agent.run(
+            async with self.agent.iter(
                 text,
                 deps=self.deps,
                 message_history=history,
                 model=self.deps.model,
                 model_settings=model_settings(self.deps.settings),
                 usage_limits=usage_limits(self.deps.settings),
-            )
+            ) as run:
+                self._turn = TurnHandle(self.conversation_id, run)
+                try:
+                    async for _node in run:
+                        pass
+                finally:
+                    self._turn = None
+                result = run.result
         except Exception:
             metrics.record_turn("error")
             self._record("error", text=str(text)[:200])
             await self._flush_recorder()
             raise
+        assert result is not None
         chat_result = await self._finish(
             repos, channel, history, result.all_messages(), result.output, self._usage_of(result)
         )
@@ -308,21 +383,31 @@ class ChatRunner:
             dropped = self._compaction["messages"]
             self._record("compaction", text=f"context compacted ({dropped} messages)")
             yield StreamEvent("compaction", text=f"context compacted ({dropped} messages)")
-        async with self.agent.run_stream(
+        async with self.agent.iter(
             text,
             deps=self.deps,
             message_history=history,
             model=self.deps.model,
             model_settings=model_settings(self.deps.settings),
             usage_limits=usage_limits(self.deps.settings),
-        ) as streamed:
-            async for chunk in streamed.stream_text(delta=True):
-                if chunk:
-                    yield StreamEvent("text", text=chunk)
-            output = await streamed.get_output()
-            all_messages = streamed.all_messages()
-            run_usage = getattr(streamed, "usage", None)
-        chat_result = await self._finish(repos, channel, history, all_messages, output, run_usage)
+        ) as run:
+            self._turn = TurnHandle(self.conversation_id, run)
+            try:
+                async for node in run:
+                    if not self.agent.is_model_request_node(node):
+                        continue
+                    async with node.stream(run.ctx) as streamed:
+                        async for event in streamed:
+                            chunk = _text_delta(event)
+                            if chunk:
+                                yield StreamEvent("text", text=chunk)
+            finally:
+                self._turn = None
+            result = run.result
+        assert result is not None
+        chat_result = await self._finish(
+            repos, channel, history, result.all_messages(), result.output, self._usage_of(result)
+        )
         await self._checkpoint("finish", self._finish_state(chat_result))
         self._record_final(chat_result)
         await self._flush_recorder()
@@ -441,7 +526,8 @@ class ChatRunner:
     @staticmethod
     def _usage_of(result: Any) -> Any:
         try:
-            return result.usage()
+            usage = result.usage
+            return usage() if callable(usage) else usage
         except Exception:  # pragma: no cover - defensive
             return None
 

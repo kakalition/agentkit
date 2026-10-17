@@ -167,6 +167,7 @@ class App:
         self._agent_jobs: dict[str, Any] = {}
         self._credential_service: Any = None
         self._running: dict[str, Any] = {}
+        self._turns: dict[str, Any] = {}
         self._approval_queue: Any = None
         self._posture: str | None = None
         self._extension_manifests: list[Any] = []
@@ -740,6 +741,22 @@ class App:
         task.cancel()
         return True
 
+    async def steer(self, conversation_id: str, text: str, *, priority: str = "asap") -> str | None:
+        """Inject ``text`` into the in-flight turn for ``conversation_id``.
+
+        ``priority='asap'`` interrupts before the next model request;
+        ``priority='when_idle'`` queues to the end of the turn. Raises
+        :class:`~agentkit.errors.SteeringUnavailable` when no turn is running.
+        """
+        from agentkit.errors import SteeringUnavailable
+
+        runner = self._turns.get(conversation_id)
+        if runner is None or runner.turn is None:
+            raise SteeringUnavailable(
+                f"no turn is running for conversation {conversation_id!r}"
+            )
+        return await runner.steer(text, priority=priority)
+
     def _track(self, conversation_id: str) -> Any:
         import asyncio
 
@@ -751,6 +768,7 @@ class App:
     def _untrack(self, conversation_id: str, task: Any) -> None:
         if task is not None and self._running.get(conversation_id) is task:
             self._running.pop(conversation_id, None)
+        self._turns.pop(conversation_id, None)
 
     async def fork(self, source: str, target: str, *, upto: int | None = None) -> int:
         """Copy a conversation's messages into ``target`` (branching)."""
@@ -1193,6 +1211,7 @@ class App:
                     recorder=self._make_recorder(current.conversation_id, repos),
                     checkpointer=self._make_checkpointer(repos),
                 )
+                self._turns[current.conversation_id] = runner
                 current.result = await runner.send(current.text)
             return current
 
@@ -1234,6 +1253,7 @@ class App:
                     recorder=self._make_recorder(current.conversation_id, repos),
                     checkpointer=self._make_checkpointer(repos),
                 )
+                self._turns[current.conversation_id] = runner
                 async for event in runner.stream(current.text):
                     if getattr(event, "kind", None) == "final":
                         current.result = getattr(event, "result", None)
@@ -1271,6 +1291,7 @@ class App:
                     recorder=self._make_recorder(current.conversation_id, repos),
                     checkpointer=self._make_checkpointer(repos),
                 )
+                self._turns[current.conversation_id] = runner
                 current.result = await runner.resume(deferred_tool_results)
             return current
 

@@ -18,11 +18,26 @@ ANTHROPIC_API_KEY=sk-ant-...
 | `openai-compatible` | `OPENAI_BASE_URL`, `OPENAI_API_KEY` (optional) | any OpenAI-compatible endpoint |
 | `anthropic` | `ANTHROPIC_API_KEY` | |
 | `google` | `GOOGLE_API_KEY` | |
-| `groq` | `GROQ_API_KEY` | needs the `groq` package |
-| `mistral` | `MISTRAL_API_KEY` | needs the `mistralai` package |
+| `groq` | `GROQ_API_KEY` | needs `agentkit[groq]` |
+| `mistral` | `MISTRAL_API_KEY` | needs `agentkit[mistral]` |
 | `ollama` | `OLLAMA_BASE_URL` | local models, no key |
+| `bedrock` | `AWS_*`, `BEDROCK_REGION`, `AWS_PROFILE` | needs `agentkit[bedrock]`; standard AWS credential chain |
+| `openrouter` | `OPENROUTER_API_KEY` | model names are `openrouter:<upstream>/<model>`, e.g. `openrouter:openai/gpt-4o` |
+| `azure` | `AZURE_API_KEY`, `AZURE_ENDPOINT`, `AZURE_API_VERSION` | Azure OpenAI; uses the core `openai` package |
+| `litellm` | underlying provider env vars | needs `agentkit[litellm]`; `litellm:<provider>/<model>` |
+| `deepseek` | `DEEPSEEK_API_KEY` | |
+| `together` | `TOGETHER_API_KEY` | |
+| `fireworks` | `FIREWORKS_API_KEY` | |
+| `cerebras` | `CEREBRAS_API_KEY` | |
+| `vercel` | `VERCEL_API_KEY` | Vercel AI Gateway |
 
-A missing key raises a `ConfigurationError` naming the env var; an unknown prefix
+```bash
+MODEL_NAME=bedrock:us.anthropic.claude-3-5-sonnet-20241022-v2:0
+BEDROCK_REGION=us-east-1
+```
+
+A missing key raises a `ConfigurationError` naming the env var; a missing optional
+package raises it naming the `agentkit[<extra>]` to install; an unknown prefix
 names the supported set.
 
 ## Resolving programmatically

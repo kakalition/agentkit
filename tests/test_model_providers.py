@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 import agentkit.model_providers as mp
@@ -22,6 +24,15 @@ def _clear_provider_env(monkeypatch):
         "GROQ_API_KEY",
         "MISTRAL_API_KEY",
         "OLLAMA_BASE_URL",
+        "OPENROUTER_API_KEY",
+        "AZURE_API_KEY",
+        "AZURE_ENDPOINT",
+        "AZURE_API_VERSION",
+        "DEEPSEEK_API_KEY",
+        "TOGETHER_API_KEY",
+        "FIREWORKS_API_KEY",
+        "CEREBRAS_API_KEY",
+        "VERCEL_API_KEY",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -31,6 +42,17 @@ def test_supported_prefixes_and_custom_registration():
     assert {"openai", "openai-compatible", "anthropic", "google", "groq", "mistral", "ollama"} <= set(
         prefixes
     )
+    assert {
+        "bedrock",
+        "openrouter",
+        "azure",
+        "litellm",
+        "deepseek",
+        "together",
+        "fireworks",
+        "cerebras",
+        "vercel",
+    } <= set(prefixes)
 
     previous = mp._REGISTRY.get("demo")
     try:
@@ -162,3 +184,146 @@ def test_router_holds_models_from_multiple_providers(monkeypatch):
     router = ModelRouter().route(small, when=lambda ctx: ctx == "small").otherwise(large)
     assert router.select("small") == {"openai": "gpt-4o-mini"}
     assert router.select("other") == {"demo": "big"}
+
+
+def test_resolve_openrouter_builds_provider(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, **kwargs):
+            captured["provider"] = kwargs
+
+    class FakeModel:
+        def __init__(self, name, provider=None):
+            captured["model"] = (name, provider)
+
+    import pydantic_ai.models.openrouter as om
+    import pydantic_ai.providers.openrouter as op
+
+    monkeypatch.setattr(op, "OpenRouterProvider", FakeProvider)
+    monkeypatch.setattr(om, "OpenRouterModel", FakeModel)
+
+    mp.resolve_model(
+        "openrouter:openai/gpt-4o", _settings(openrouter_api_key="or-key")
+    )
+    assert captured["provider"]["api_key"] == "or-key"
+    assert captured["model"][0] == "openai/gpt-4o"
+
+
+def test_resolve_azure_requires_triple(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, **kwargs):
+            captured["provider"] = kwargs
+
+    class FakeModel:
+        def __init__(self, name, provider=None):
+            captured["model"] = (name, provider)
+
+    import pydantic_ai.models.openai as om
+    import pydantic_ai.providers.azure as ap
+
+    monkeypatch.setattr(ap, "AzureProvider", FakeProvider)
+    monkeypatch.setattr(om, "OpenAIChatModel", FakeModel)
+
+    settings = _settings(
+        azure_api_key="az-key",
+        azure_endpoint="https://example.openai.azure.com",
+        azure_api_version="2024-10-21",
+    )
+    mp.resolve_model("azure:gpt-4o", settings)
+    assert captured["provider"]["api_key"] == "az-key"
+    assert captured["provider"]["api_version"] == "2024-10-21"
+
+    with pytest.raises(ConfigurationError, match="AZURE_ENDPOINT"):
+        mp.resolve_model("azure:gpt-4o", _settings(azure_api_key="az-key"))
+    with pytest.raises(ConfigurationError, match="AZURE_API_VERSION"):
+        mp.resolve_model(
+            "azure:gpt-4o",
+            _settings(azure_api_key="az-key", azure_endpoint="https://x.openai.azure.com"),
+        )
+
+
+def test_resolve_litellm_builds_provider(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, **kwargs):
+            captured["provider"] = kwargs
+
+    class FakeModel:
+        def __init__(self, name, provider=None):
+            captured["model"] = (name, provider)
+
+    import pydantic_ai.models.openai as om
+    import pydantic_ai.providers.litellm as lp
+
+    monkeypatch.setattr(lp, "LiteLLMProvider", FakeProvider)
+    monkeypatch.setattr(om, "OpenAIChatModel", FakeModel)
+
+    mp.resolve_model("litellm:openai/gpt-4o", _settings())
+    assert captured["model"][0] == "openai/gpt-4o"
+
+
+@pytest.mark.parametrize(
+    ("prefix", "attribute", "env_var", "module", "provider_name"),
+    [
+        ("deepseek", "deepseek_api_key", "DEEPSEEK_API_KEY", "deepseek", "DeepSeekProvider"),
+        ("together", "together_api_key", "TOGETHER_API_KEY", "together", "TogetherProvider"),
+        ("fireworks", "fireworks_api_key", "FIREWORKS_API_KEY", "fireworks", "FireworksProvider"),
+        ("cerebras", "cerebras_api_key", "CEREBRAS_API_KEY", "cerebras", "CerebrasProvider"),
+        ("vercel", "vercel_api_key", "VERCEL_API_KEY", "vercel", "VercelProvider"),
+    ],
+)
+def test_openai_compatible_batch(
+    monkeypatch, prefix, attribute, env_var, module, provider_name
+):
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, **kwargs):
+            captured["provider"] = kwargs
+
+    class FakeModel:
+        def __init__(self, name, provider=None):
+            captured["model"] = (name, provider)
+
+    from importlib import import_module
+
+    import pydantic_ai.models.openai as om
+
+    provider_module = import_module(f"pydantic_ai.providers.{module}")
+    monkeypatch.setattr(provider_module, provider_name, FakeProvider)
+    monkeypatch.setattr(om, "OpenAIChatModel", FakeModel)
+
+    mp.resolve_model(f"{prefix}:some-model", _settings(**{attribute: "k"}))
+    assert captured["provider"]["api_key"] == "k"
+    assert captured["model"][0] == "some-model"
+
+    with pytest.raises(ConfigurationError, match=env_var):
+        mp.resolve_model(f"{prefix}:some-model", _settings())
+
+
+def test_missing_extra_messages_name_declared_extras(monkeypatch):
+    import tomllib
+    from pathlib import Path
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    declared = tomllib.loads(pyproject.read_text())["project"]["optional-dependencies"]
+
+    for extra in ("groq", "mistral", "bedrock", "litellm"):
+        assert extra in declared, f"extra {extra!r} referenced but not declared"
+
+    for module_name, factory, extra in (
+        ("pydantic_ai.providers.groq", mp._groq, "groq"),
+        ("pydantic_ai.providers.mistral", mp._mistral, "mistral"),
+        ("pydantic_ai.providers.bedrock", mp._bedrock, "bedrock"),
+        ("pydantic_ai.providers.litellm", mp._litellm, "litellm"),
+    ):
+        with monkeypatch.context() as ctx:
+            ctx.setitem(sys.modules, module_name, None)
+            with pytest.raises(ConfigurationError) as excinfo:
+                factory("m", _settings())
+            assert f"agentkit[{extra}]" in str(excinfo.value)
+
