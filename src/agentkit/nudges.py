@@ -10,41 +10,53 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentkit.foundation.events import Listener
+
 __all__ = ["register_memory_nudges"]
+
+
+class MemoryNudgeListener(Listener):
+    """A ``turn.end`` listener that proposes memories every ``cadence`` turns."""
+
+    event = "turn.end"
+
+    def __init__(self, app: Any, *, cadence: int) -> None:
+        self.app = app
+        self.settings = app.settings
+        self.cadence = cadence
+        self.counts: dict[str, int] = {}
+
+    async def handle(self, event: Any) -> None:
+        conversation_id = _field(event, "conversation_id")
+        if not conversation_id:
+            return
+        self.counts[conversation_id] = self.counts.get(conversation_id, 0) + 1
+        if self.counts[conversation_id] % self.cadence:
+            return
+        from agentkit.learning import propose_memories
+
+        async with self.app.repositories() as repos:
+            await propose_memories(
+                repos,
+                model=getattr(self.app, "_model", None),
+                conversation_id=conversation_id,
+                settings=self.settings,
+            )
 
 
 def register_memory_nudges(app: Any, *, every: int | None = None) -> Any:
     """Register a ``turn.end`` listener that proposes memories every ``every`` turns.
 
-    Returns the listener (or ``None`` when the cadence is non-positive). The
-    cadence defaults to the ``memory_nudge_every`` setting; it is counted per
-    conversation.
+    Returns the :class:`MemoryNudgeListener` (or ``None`` when the cadence is
+    non-positive). The cadence defaults to the ``memory_nudge_every`` setting; it
+    is counted per conversation.
     """
-    settings = app.settings
-    cadence = int(every if every is not None else getattr(settings, "memory_nudge_every", 0) or 0)
+    cadence = int(every if every is not None else getattr(app.settings, "memory_nudge_every", 0) or 0)
     if cadence <= 0:
         return None
-    counts: dict[str, int] = {}
-
-    async def on_turn_end(event: Any) -> None:
-        conversation_id = _field(event, "conversation_id")
-        if not conversation_id:
-            return
-        counts[conversation_id] = counts.get(conversation_id, 0) + 1
-        if counts[conversation_id] % cadence:
-            return
-        from agentkit.learning import propose_memories
-
-        async with app.repositories() as repos:
-            await propose_memories(
-                repos,
-                model=getattr(app, "_model", None),
-                conversation_id=conversation_id,
-                settings=settings,
-            )
-
-    app.on("turn.end", on_turn_end)
-    return on_turn_end
+    listener = MemoryNudgeListener(app, cadence=cadence)
+    app.listeners([listener])
+    return listener
 
 
 def _field(event: Any, name: str) -> Any:

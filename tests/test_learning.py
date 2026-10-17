@@ -5,19 +5,19 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+from click.testing import CliRunner
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
-from typer.testing import CliRunner
 
-from agentkit import Agent
 from agentkit.cli import app as cli_app
 from agentkit.config import AgentSettings, get_settings
 from agentkit.db.repositories import Repositories
 from agentkit.deps import Deps
+from agentkit.foundation.agent import Agent
 from agentkit.learning import (
     LESSON_TASK,
-    attach_learning,
+    LearningCapability,
     lessons_digest,
     reflect,
     register_reflect_task,
@@ -220,8 +220,8 @@ def test_attach_learning_registers_tools_and_is_idempotent():
     agent: PydanticAgent[Deps, str] = PydanticAgent(
         name="l", deps_type=Deps, output_type=str, instructions="x"
     )
-    attach_learning(agent)
-    attach_learning(agent)
+    LearningCapability().install(agent)
+    LearningCapability().install(agent)
     tools = set(agent._function_toolset.tools.keys())
     assert {"learn", "reflect", "list_lessons", "forget_lesson"} <= tools
 

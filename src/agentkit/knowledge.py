@@ -4,7 +4,7 @@
 and indexes the chunks with embeddings in the agent's database. The agent gets a
 ``search_knowledge`` tool that returns the most relevant passages.
 
-    from agentkit import Agent, KnowledgeBase
+    from agentkit.foundation.agent import Agent, KnowledgeBase
 
     kb = KnowledgeBase()                 # uses the default agent runtime
     kb.add_directory("docs")
@@ -28,7 +28,7 @@ from agentkit.config import get_settings
 from agentkit.contracts.rag import Chunker, Reranker, Retriever
 from agentkit.db.repositories import Repositories
 from agentkit.runtime import build_runtime, repositories
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import ChunkerDriver, DriverKind, RerankerDriver, RetrieverDriver
 from agentkit.support.manager import Manager
 
@@ -299,30 +299,27 @@ class RerankerManager(Manager):
 
 
 @register_driver(DriverKind.CHUNKER, ChunkerDriver.SEMANTIC)
-def _semantic_chunker_driver(app: Any) -> SemanticChunker:
-    return SemanticChunker()
-
-
+class SemanticChunkerDriver(Driver):
+    def build(self) -> SemanticChunker:
+        return SemanticChunker()
 @register_driver(DriverKind.CHUNKER, ChunkerDriver.FIXED)
-def _fixed_chunker_driver(app: Any) -> FixedChunker:
-    return FixedChunker()
-
-
+class FixedChunkerDriver(Driver):
+    def build(self) -> FixedChunker:
+        return FixedChunker()
 @register_driver(DriverKind.RETRIEVER, RetrieverDriver.REPOSITORY)
-def _repository_retriever_driver(app: Any) -> RepositoryRetriever:
-    return RepositoryRetriever(app)
-
-
+class RepositoryRetrieverDriver(Driver):
+    def build(self) -> RepositoryRetriever:
+        app = self.app
+        return RepositoryRetriever(app)
 @register_driver(DriverKind.RETRIEVER, RetrieverDriver.MEMORY)
-def _memory_retriever_driver(app: Any) -> InMemoryRetriever:
-    return InMemoryRetriever()
-
-
+class MemoryRetrieverDriver(Driver):
+    def build(self) -> InMemoryRetriever:
+        return InMemoryRetriever()
 @register_driver(DriverKind.RERANKER, RerankerDriver.IDENTITY)
-def _identity_reranker_driver(app: Any) -> IdentityReranker:
-    return IdentityReranker()
-
-
+class IdentityRerankerDriver(Driver):
+    def build(self) -> IdentityReranker:
+        return IdentityReranker()
 @register_driver(DriverKind.RERANKER, RerankerDriver.LEXICAL)
-def _lexical_reranker_driver(app: Any) -> LexicalReranker:
-    return LexicalReranker()
+class LexicalRerankerDriver(Driver):
+    def build(self) -> LexicalReranker:
+        return LexicalReranker()

@@ -18,7 +18,7 @@ from pydantic_ai import RunContext
 from agentkit.deps import Deps
 from agentkit.toolkits._common import actor_label, emit_event, repos_of, resolve_list
 
-__all__ = ["attach_scheduler"]
+__all__ = ["_attach_scheduler"]
 
 
 def _job_view(job: Any) -> dict[str, Any]:
@@ -34,7 +34,7 @@ def _job_view(job: Any) -> dict[str, Any]:
     }
 
 
-def attach_scheduler(
+def _attach_scheduler(
     agent: Any, tasks: list[str] | None = None, *, flag: str = "scheduler_tools_enabled"
 ) -> Any:
     """Register the scheduler tools on a built PydanticAI agent (idempotent)."""

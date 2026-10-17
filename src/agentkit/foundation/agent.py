@@ -21,7 +21,7 @@ this builder is the application-facing façade.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,7 @@ from pydantic_ai import RunContext
 
 from agentkit.approvals import approval_capability
 from agentkit.deps import Deps
-from agentkit.memory import attach_memory
+from agentkit.memory import MemoryCapability
 from agentkit.orchestrator import make_delegate
 from agentkit.soul import compose_instructions, load_soul
 
@@ -61,43 +61,165 @@ def _snake_case(name: str) -> str:
 
 
 class AgentDefinition:
-    """Base class for convention-discovered agents under ``app/Agents/``.
+    """Declarative, class-based definition of an agent (the primary API).
 
-    Subclasses declare ``name`` (default: the class name in snake_case), may set
-    ``posture``/``description``, and implement :meth:`define` to configure the
-    builder. :class:`~agentkit.foundation.discovery` builds and registers every
-    subclass automatically, so no manual ``app.agent(...)`` call is needed::
+    Declare the agent with class attributes; the framework assembles the
+    PydanticAI agent from them. Convention discovery under ``app/Agents/`` builds
+    and registers every subclass automatically, so no manual ``app.agent(...)``
+    call is needed::
 
         class Assistant(AgentDefinition):
             name = "assistant"
-            posture = "hybrid"
+            instructions = "You are a concise, helpful assistant."
+            tools = [current_time]
+            full = True                  # persona + memory + skills + HITL + safety
+            output = str
+            posture = "hybrid"           # or "specialized" / "free"
 
-            def define(self, agent):
-                return agent.instructions("...").memory().full()
+    Everything the fluent builder can do is expressed here as a declaration; use
+    :meth:`configure` (or :meth:`define`) as the escape hatch for anything not
+    covered by a field.
 
     Subclasses must be instantiable with no arguments.
     """
 
+    # -- identity -------------------------------------------------------
     name: str = ""
     description: str | None = None
+
+    #: ``specialized`` (closed specialist) | ``hybrid`` (default) | ``free``.
     posture: str | None = None
 
+    # -- instructions ---------------------------------------------------
+    instructions: str | Sequence[str] = ()
+    persona: bool = False
+    prompts: Sequence[Any] = ()
+
+    # -- capabilities ---------------------------------------------------
+    tools: Sequence[Any] = ()
+    toolsets: Sequence[Any] = ()
+    specialists: Mapping[str, tuple[Any, str]] = {}
+    model: Any = None
+    output: Any = str
+    output_validators: Sequence[Any] = ()
+    deps_type: type = Deps
+    retries: int | None = None
+
+    #: Enable the full capability stack (each layer toggleable below).
+    full: bool = False
+    memory: bool = False
+    skills: bool = False
+    knowledge: Any = None
+    approvals: bool = False
+    safety: bool = False
+    workspace: Any = None
+    learning: bool = False
+    todos: bool = False
+    code: bool = False
+    subagents: Any = None
+    policy: Any = None
+
+    # -- hooks ----------------------------------------------------------
+    def configure(self, agent: Agent) -> Agent:
+        """Apply the declarative fields to ``agent`` (override to customise)."""
+        return agent
+
     def define(self, agent: Agent) -> Agent:
-        """Configure and return the builder (override in subclasses)."""
+        """Legacy escape hatch: configure and return the builder."""
+        return agent
+
+    # -- assembly -------------------------------------------------------
+    def _apply_declarations(self, agent: Agent) -> Agent:
+        if self.posture:
+            agent.posture(self.posture)
+        if self.model is not None:
+            agent.model(self.model)
+
+        if self.full:
+            agent.full(
+                persona=self.persona or None,
+                memory=self.memory or None,
+                skills=self.skills or None,
+                knowledge=self.knowledge,
+                hitl=self.approvals or None,
+                safety=self.safety or None,
+                workspace=self.workspace,
+                subagents=self.subagents,
+                learning=self.learning or None,
+                todos=self.todos or None,
+                code=self.code or None,
+            )
+        else:
+            if self.persona:
+                agent.persona()
+            if self.memory:
+                agent.memory()
+            if self.skills:
+                agent.skills()
+            if self.approvals:
+                agent.approvals()
+            if self.safety:
+                from agentkit.policy import default_policy
+
+                agent.policy(self.policy or default_policy())
+            if self.learning:
+                agent.learning()
+            if self.todos:
+                agent.todos()
+            if self.code:
+                agent.code_execution()
+            if self.knowledge is not None:
+                agent.knowledge(None if self.knowledge is True else self.knowledge)
+        if self.policy is not None and not self.safety:
+            agent.policy(self.policy)
+
+        blocks = [self.instructions] if isinstance(self.instructions, str) else list(self.instructions)
+        for block in blocks:
+            if block:
+                agent.instructions(block)
+        for prompt in self.prompts:
+            agent.prompt(prompt)
+        for tool in self.tools:
+            agent.tool(tool)
+        for toolset in self.toolsets:
+            agent.toolset(toolset)
+        for name, (specialist, description) in self.specialists.items():
+            agent.specialist(specialist, name=name, description=description)
+        for validator in self.output_validators:
+            agent.output_validator(validator)
+        if self.retries is not None:
+            agent.retries(self.retries)
+        if self.output is not None:
+            agent.output(self.output)
+        return agent
+
+    def configure_all(self, agent: Agent) -> Agent:
+        """Apply declarations, then :meth:`configure`, then :meth:`define`."""
+        agent = self._apply_declarations(agent)
+        agent = self.configure(agent)
+        if type(self).define is not AgentDefinition.define:
+            agent = self.define(agent)
         return agent
 
     @classmethod
     def to_builder(cls, *, settings: Any = None, events: Any = None) -> Agent:
-        """Build the :class:`Agent` builder for this definition."""
+        """Build the configured :class:`Agent` builder for this definition."""
         builder = Agent.make(
             cls.name or _snake_case(cls.__name__),
             settings=settings,
             events=events,
             description=cls.description,
+            deps_type=cls.deps_type,
         )
-        if cls.posture:
-            builder.posture(cls.posture)
-        return cls().define(builder)
+        return cls().configure_all(builder)
+
+    @classmethod
+    def build(cls, *, settings: Any = None, events: Any = None, model: Any = None) -> Any:
+        """Assemble and return the PydanticAI agent for this definition."""
+        builder = cls.to_builder(settings=settings, events=events)
+        if model is not None:
+            builder.model(model)
+        return builder.build(settings=settings, events=events)
 
 
 class Agent:
@@ -776,7 +898,7 @@ class Agent:
         for specialist, tool_name, description in self._specialists:
             built.tool(make_delegate(specialist, tool_name=tool_name, description=description))
         if self._memory:
-            attach_memory(built)
+            MemoryCapability().install(built)
         self._attach_agents(built, resolved_settings, events or self._events)
         self._attach_skills(built, resolved_settings)
         self._attach_knowledge(built, resolved_settings)
@@ -809,16 +931,15 @@ class Agent:
 
             durable = bool(getattr(settings, "mailbox_durable", False)) if settings else False
             mailbox = Mailbox(registry, durable=durable, events=events)
-        from agentkit.agents.tools import attach_agents
+        from agentkit.agents.tools import AgentsCapability
 
         max_handoffs = getattr(settings, "max_handoffs", None) if settings else None
-        attach_agents(
-            agent,
+        AgentsCapability(
             registry,
             mailbox,
             include_handoff=True,
             max_handoffs=max_handoffs,
-        )
+        ).install(agent)
         self._registry = registry
         self._mailbox = mailbox
 
@@ -914,9 +1035,9 @@ class Agent:
             enabled |= enabled_toolkits(settings)
         if not enabled:
             return
-        from agentkit.toolkits import attach_toolkits
+        from agentkit.toolkits import install_toolkits
 
-        attach_toolkits(
+        install_toolkits(
             agent,
             enabled=enabled,
             settings=settings,
@@ -928,32 +1049,32 @@ class Agent:
     def _attach_learning(self, agent: PydanticAgent[Any, Any], settings: Any) -> None:
         if not self._learning_requested:
             return
-        from agentkit.learning import attach_learning
+        from agentkit.learning import LearningCapability
 
-        attach_learning(agent, settings=settings)
+        LearningCapability(settings=settings).install(agent)
 
     def _attach_tasks(self, agent: PydanticAgent[Any, Any]) -> None:
         if not self._todos_requested:
             return
-        from agentkit.tasks import attach_tasks
+        from agentkit.tasks import TasksCapability
 
-        attach_tasks(agent)
+        TasksCapability().install(agent)
 
     def _attach_code(self, agent: PydanticAgent[Any, Any]) -> None:
         if not self._code_requested:
             return
-        from agentkit.executors import attach_code_executor
+        from agentkit.executors import CodeExecutorCapability
 
-        attach_code_executor(agent)
+        CodeExecutorCapability().install(agent)
 
     def _attach_artifacts(self, agent: PydanticAgent[Any, Any], settings: Any) -> None:
         if settings is None:
             return
         if int(getattr(settings, "tool_output_offload_threshold", 0) or 0) <= 0:
             return
-        from agentkit.offload import attach_artifacts
+        from agentkit.offload import ArtifactsCapability
 
-        attach_artifacts(agent, getattr(settings, "artifacts_dir", "."))
+        ArtifactsCapability(getattr(settings, "artifacts_dir", ".")).install(agent)
 
     def _attach_workspace(self, agent: PydanticAgent[Any, Any]) -> None:
         if not self._workspace_requested:

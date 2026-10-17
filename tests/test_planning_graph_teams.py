@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from agentkit import END, Agent, Deps, StateGraph, Supervisor
+from agentkit import END, Deps, StateGraph, Supervisor
+from agentkit.foundation.agent import Agent
 from agentkit.graph import GraphError
 from agentkit.planning import Planner, parse_plan
 from agentkit.teams import spawn_tool

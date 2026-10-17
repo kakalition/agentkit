@@ -4,8 +4,9 @@ import pytest
 from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
 
-from agentkit import Agent, App, Feedback, ModerationPolicy
+from agentkit import App, Feedback, ModerationPolicy
 from agentkit.errors import ContentBlocked
+from agentkit.foundation.agent import Agent
 from agentkit.guardrails import redact_pii, scan_pii
 from agentkit.moderation import check_output, moderation_middleware
 from agentkit.runtime import Runtime

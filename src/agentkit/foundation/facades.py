@@ -127,9 +127,6 @@ class EventsService:
     def listen(self, event: str, listener: Any) -> Any:
         return self.app.events.listen(event, listener)
 
-    def on(self, event: str, listener: Any) -> Any:
-        return self.app.events.listen(event, listener)
-
     def dispatch(self, event: str, **payload: Any) -> list[Any]:
         return self.app.events.dispatch(event, **payload)
 
@@ -340,6 +337,14 @@ class Queue(Facade):
         return "queue"
 
 
+class Gate(Facade):
+    """Class-method facade over the app's :class:`~agentkit.foundation.gate.Gate`."""
+
+    @classmethod
+    def binding(cls) -> str:
+        return "gate"
+
+
 __all__ = [
     "Cache",
     "CacheService",
@@ -349,6 +354,7 @@ __all__ = [
     "EventsService",
     "Feedback",
     "FeedbackService",
+    "Gate",
     "Log",
     "LogService",
     "Memory",

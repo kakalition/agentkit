@@ -16,7 +16,7 @@ from typing import Any
 
 from agentkit.contracts.middleware import AgentMiddleware
 from agentkit.logging import get_logger
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import AgentMiddlewareDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -81,10 +81,10 @@ class AgentMiddlewareManager(Manager):
 
 
 @register_driver(DriverKind.AGENT_MIDDLEWARE, AgentMiddlewareDriver.NOOP)
-def _noop_middleware_driver(app: Any) -> NoopMiddleware:
-    return NoopMiddleware()
-
-
+class NoopMiddlewareDriver(Driver):
+    def build(self) -> NoopMiddleware:
+        return NoopMiddleware()
 @register_driver(DriverKind.AGENT_MIDDLEWARE, AgentMiddlewareDriver.LOGGING)
-def _logging_middleware_driver(app: Any) -> LoggingMiddleware:
-    return LoggingMiddleware()
+class LoggingMiddlewareDriver(Driver):
+    def build(self) -> LoggingMiddleware:
+        return LoggingMiddleware()

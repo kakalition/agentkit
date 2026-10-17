@@ -8,9 +8,10 @@ registered against a nested ``(kind, name)`` key so kinds never collide::
     from agentkit.support.kinds import CacheDriver
 
     @register_driver(DriverKind.CACHE, CacheDriver.ARRAY)
-    def _array(app):
-        return CacheStore()
-
+    class ArrayDriver(Driver):
+        def build(self) -> Any:
+            app = self.app
+            return CacheStore()
 Resolution is intentionally global and import-time-safe (mirroring
 :mod:`agentkit.model_providers`): registering a driver has no side effects, and
 libraries may ship drivers that an application selects purely through settings.
@@ -22,9 +23,10 @@ the same nested tuple keys.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 __all__ = [
+    "Driver",
     "DriverFactory",
     "available",
     "kinds",
@@ -38,6 +40,41 @@ __all__ = [
 
 DriverFactory = Callable[[Any], Any]
 """A driver factory: ``factory(app) -> driver``."""
+
+
+class Driver:
+    """Class-based driver: registered by class, instantiated per app.
+
+        @register_driver(DriverKind.CACHE, CacheDriver.REDIS)
+        class RedisCache(Driver):
+            kind = DriverKind.CACHE
+            name = CacheDriver.REDIS
+
+            def build(self):
+                return RedisStore(self.app)
+    """
+
+    kind: ClassVar[str] = ""
+    name: ClassVar[str] = ""
+
+    def __init__(self, app: Any = None) -> None:
+        self.app = app
+
+    def build(self) -> Any:
+        raise NotImplementedError
+
+    @classmethod
+    def factory(cls) -> DriverFactory:
+        def make(app: Any) -> Any:
+            return cls(app).build()
+
+        return make
+
+    @classmethod
+    def supported(cls) -> bool:
+        """Whether this driver can run in the current environment."""
+        return True
+
 
 _REGISTRY: dict[tuple[str, str], DriverFactory] = {}
 
@@ -56,17 +93,28 @@ def parse(spec: str | tuple[str, str]) -> tuple[str, str]:
     return _key(kind, name)
 
 
-def register(kind: str, name: str, factory: DriverFactory) -> None:
-    """Register (or replace) the factory for ``(kind, name)``."""
-    _REGISTRY[_key(kind, name)] = factory
+def register(kind: str, name: str, driver: Any) -> None:
+    """Register (or replace) the :class:`Driver` subclass for ``(kind, name)``."""
+    if not (isinstance(driver, type) and issubclass(driver, Driver)):
+        raise TypeError(
+            f"drivers must be Driver subclasses; got {driver!r}. "
+            "Define a class with a build() method and register the class."
+        )
+    _REGISTRY[_key(kind, name)] = driver.factory()
 
 
 def register_driver(kind: str, name: str):
-    """Decorator form of :func:`register`: ``@register_driver("cache", "redis")``."""
+    """Decorator form of :func:`register` for a :class:`Driver` subclass.
 
-    def decorator(factory: DriverFactory) -> DriverFactory:
-        register(kind, name, factory)
-        return factory
+        @register_driver(DriverKind.CACHE, "redis")
+        class RedisCacheDriver(Driver):
+            def build(self):
+                return RedisCache(self.app.settings.redis_url)
+    """
+
+    def decorator(driver: Any) -> Any:
+        register(kind, name, driver)
+        return driver
 
     return decorator
 

@@ -12,7 +12,7 @@ same well-tested primitives PydanticAI uses:
 into an agent with the builder's ``.workspace(...)``, which adds
 ``read_file``/``list_files``/``write_file``/``run_command`` tools::
 
-    from agentkit import Agent, Sandbox
+    from agentkit.foundation.agent import Agent, Sandbox
 
     agent = Agent.make("coder").instructions("…").workspace(Sandbox("./work")).build()
 

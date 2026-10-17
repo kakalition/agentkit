@@ -18,6 +18,7 @@ export const NAV: Record<Section, NavGroup[]> = {
         { slug: "introduction", label: "Introduction" },
         { slug: "installation", label: "Installation" },
         { slug: "getting-started", label: "Getting Started" },
+        { slug: "class-based", label: "Laravel → agentkit" },
         { slug: "philosophy", label: "Philosophy" },
       ],
     },

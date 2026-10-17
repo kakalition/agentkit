@@ -42,10 +42,10 @@ def test_computer_tools_are_approval_gated():
     from pydantic_ai.models.test import TestModel
 
     from agentkit.deps import Deps
-    from agentkit.toolkits.computer import attach_computer_tools
+    from agentkit.toolkits.computer import _attach_computer_tools
 
     agent = PydanticAgent(TestModel(), deps_type=Deps)
-    attach_computer_tools(agent, LoopbackComputer())
+    _attach_computer_tools(agent, LoopbackComputer())
     names = {
         tool.name
         for tool in getattr(agent._function_toolset, "tools", {}).values()  # noqa: SLF001

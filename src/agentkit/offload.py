@@ -16,7 +16,9 @@ from typing import Any
 from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelMessage, ToolReturnPart
 
-__all__ = ["PREVIEW_HEAD", "PREVIEW_TAIL", "attach_artifacts", "estimate_tokens", "offload_messages"]
+from agentkit.capability import Capability
+
+__all__ = ["PREVIEW_HEAD", "PREVIEW_TAIL", "ArtifactsCapability", "estimate_tokens", "offload_messages"]
 
 PREVIEW_HEAD = 800
 PREVIEW_TAIL = 400
@@ -70,25 +72,33 @@ def offload_messages(
     return count
 
 
-def attach_artifacts(agent: Any, root: str | Path) -> Any:
-    """Attach the ``read_artifact`` tool (idempotent), confined to ``root``."""
-    if getattr(agent, "_agentkit_artifacts_attached", False):
+class ArtifactsCapability(Capability):
+    name = "artifacts"
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = root
+
+    def install(self, agent: Any) -> Any:
+        root = self.root
+
+        """Attach the ``read_artifact`` tool (idempotent), confined to ``root``."""
+        if getattr(agent, "_agentkit_artifacts_attached", False):
+            return agent
+        base = Path(root).expanduser().resolve()
+
+        @agent.tool
+        async def read_artifact(ctx: RunContext[Any], path: str) -> str:
+            """Read a previously offloaded tool output in full.
+
+            Args:
+                path: The artifact path reported in an offload preview.
+            """
+            resolved = Path(path).expanduser().resolve()
+            if resolved != base and base not in resolved.parents:
+                return "ERROR: path is outside the artifacts directory"
+            if not resolved.is_file():
+                return "ERROR: no artifact at that path"
+            return resolved.read_text(encoding="utf-8")
+
+        agent._agentkit_artifacts_attached = True  # type: ignore[attr-defined]
         return agent
-    base = Path(root).expanduser().resolve()
-
-    @agent.tool
-    async def read_artifact(ctx: RunContext[Any], path: str) -> str:
-        """Read a previously offloaded tool output in full.
-
-        Args:
-            path: The artifact path reported in an offload preview.
-        """
-        resolved = Path(path).expanduser().resolve()
-        if resolved != base and base not in resolved.parents:
-            return "ERROR: path is outside the artifacts directory"
-        if not resolved.is_file():
-            return "ERROR: no artifact at that path"
-        return resolved.read_text(encoding="utf-8")
-
-    agent._agentkit_artifacts_attached = True  # type: ignore[attr-defined]
-    return agent

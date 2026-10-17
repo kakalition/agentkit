@@ -1,6 +1,6 @@
 """Task planning: an in-loop todo store plus planning strategies.
 
-    from agentkit import Agent
+    from agentkit.foundation.agent import Agent
     from agentkit.tasks import attach_tasks
 
     agent = Agent.make("planner").instructions("…").build()
@@ -18,8 +18,9 @@ from typing import Any
 
 from pydantic_ai import RunContext
 
+from agentkit.capability import Capability
 from agentkit.contracts.tasks import PlanningStrategy, TaskStore
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, PlanningDriver, TaskDriver
 from agentkit.support.manager import Manager
 
@@ -31,7 +32,7 @@ __all__ = [
     "SingleStepPlanning",
     "TaskManager",
     "TaskStore",
-    "attach_tasks",
+    "TasksCapability",
 ]
 
 _TODO_STATUSES = ("pending", "in_progress", "completed")
@@ -115,20 +116,17 @@ class PlanningManager(Manager):
 
 
 @register_driver(DriverKind.TASKS, TaskDriver.MEMORY)
-def _memory_task_store_driver(app: Any) -> InMemoryTaskStore:
-    return InMemoryTaskStore()
-
-
+class MemoryTaskStoreDriver(Driver):
+    def build(self) -> InMemoryTaskStore:
+        return InMemoryTaskStore()
 @register_driver(DriverKind.PLANNING, PlanningDriver.SINGLE)
-def _single_planning_driver(app: Any) -> SingleStepPlanning:
-    return SingleStepPlanning()
-
-
+class SinglePlanningDriver(Driver):
+    def build(self) -> SingleStepPlanning:
+        return SingleStepPlanning()
 @register_driver(DriverKind.PLANNING, PlanningDriver.BATCHED)
-def _batched_planning_driver(app: Any) -> BatchedPlanning:
-    return BatchedPlanning()
-
-
+class BatchedPlanningDriver(Driver):
+    def build(self) -> BatchedPlanning:
+        return BatchedPlanning()
 def _store(ctx: RunContext[Any]) -> Any:
     deps = getattr(ctx, "deps", None)
     extras = getattr(deps, "extras", None)
@@ -141,59 +139,67 @@ def _format(todos: list[dict[str, Any]]) -> str:
     return "\n".join(f"#{todo['id']} [{todo['status']}] {todo['text']}" for todo in todos)
 
 
-def attach_tasks(agent: Any, *, store: Any = None) -> Any:
-    """Register the todo tools on a built agent (idempotent)."""
-    if getattr(agent, "_agentkit_tasks_attached", False):
+class TasksCapability(Capability):
+    name = "tasks"
+
+    def __init__(self, store: Any = None) -> None:
+        self.store = store
+
+    def install(self, agent: Any) -> Any:
+        store = self.store
+
+        """Register the todo tools on a built agent (idempotent)."""
+        if getattr(agent, "_agentkit_tasks_attached", False):
+            return agent
+        fallback = store if store is not None else InMemoryTaskStore()
+
+        def resolve(ctx: RunContext[Any]) -> Any:
+            return _store(ctx) or fallback
+
+        @agent.tool
+        async def write_todos(ctx: RunContext[Any], todos: list[str]) -> str:
+            """Replace the todo list with a fresh set of steps.
+
+            Args:
+                todos: The ordered list of steps to work through.
+            """
+            store_ = resolve(ctx)
+            written = await store_.write([{"text": text} for text in todos])
+            return _format(written)
+
+        @agent.tool
+        async def read_todos(ctx: RunContext[Any]) -> str:
+            """Show the current todo list."""
+            return _format(await resolve(ctx).read())
+
+        @agent.tool
+        async def add_todo(ctx: RunContext[Any], text: str) -> str:
+            """Append a step to the todo list.
+
+            Args:
+                text: The step to add.
+            """
+            todo = await resolve(ctx).add(text)
+            return f"added #{todo['id']}"
+
+        @agent.tool
+        async def update_todo(ctx: RunContext[Any], id: int, status: str = "completed") -> str:
+            """Change a todo's status (pending | in_progress | completed).
+
+            Args:
+                id: The todo id.
+                status: The new status.
+            """
+            if status not in _TODO_STATUSES:
+                return f"unknown status {status!r}; expected {', '.join(_TODO_STATUSES)}"
+            todo = await resolve(ctx).update(id, status=status)
+            return f"updated #{todo['id']} -> {todo['status']}" if todo else "no such todo"
+
+        @agent.tool
+        async def clear_todos(ctx: RunContext[Any]) -> str:
+            """Remove every todo."""
+            count = await resolve(ctx).clear()
+            return f"cleared {count} todo(s)"
+
+        agent._agentkit_tasks_attached = True  # type: ignore[attr-defined]
         return agent
-    fallback = store if store is not None else InMemoryTaskStore()
-
-    def resolve(ctx: RunContext[Any]) -> Any:
-        return _store(ctx) or fallback
-
-    @agent.tool
-    async def write_todos(ctx: RunContext[Any], todos: list[str]) -> str:
-        """Replace the todo list with a fresh set of steps.
-
-        Args:
-            todos: The ordered list of steps to work through.
-        """
-        store_ = resolve(ctx)
-        written = await store_.write([{"text": text} for text in todos])
-        return _format(written)
-
-    @agent.tool
-    async def read_todos(ctx: RunContext[Any]) -> str:
-        """Show the current todo list."""
-        return _format(await resolve(ctx).read())
-
-    @agent.tool
-    async def add_todo(ctx: RunContext[Any], text: str) -> str:
-        """Append a step to the todo list.
-
-        Args:
-            text: The step to add.
-        """
-        todo = await resolve(ctx).add(text)
-        return f"added #{todo['id']}"
-
-    @agent.tool
-    async def update_todo(ctx: RunContext[Any], id: int, status: str = "completed") -> str:
-        """Change a todo's status (pending | in_progress | completed).
-
-        Args:
-            id: The todo id.
-            status: The new status.
-        """
-        if status not in _TODO_STATUSES:
-            return f"unknown status {status!r}; expected {', '.join(_TODO_STATUSES)}"
-        todo = await resolve(ctx).update(id, status=status)
-        return f"updated #{todo['id']} -> {todo['status']}" if todo else "no such todo"
-
-    @agent.tool
-    async def clear_todos(ctx: RunContext[Any]) -> str:
-        """Remove every todo."""
-        count = await resolve(ctx).clear()
-        return f"cleared {count} todo(s)"
-
-    agent._agentkit_tasks_attached = True  # type: ignore[attr-defined]
-    return agent

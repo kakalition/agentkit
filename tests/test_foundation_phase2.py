@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from conftest import Recorder
 from pydantic_ai import RunContext
 from pydantic_ai.messages import (
     ModelMessage,
@@ -12,9 +13,10 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from agentkit import Agent, App, ToolPolicy
+from agentkit import App, ToolPolicy
 from agentkit.deps import Deps
 from agentkit.errors import PermissionDenied
+from agentkit.foundation.agent import Agent
 from agentkit.foundation.middleware import guardrails_hooks
 from agentkit.runtime import Runtime
 
@@ -47,9 +49,29 @@ async def test_turn_and_channel_events_are_emitted(runtime: Runtime):
     app = _app(runtime, model)
     app.agent(Agent.make("phase2").instructions("x").output(str))
     seen: list[tuple[str, object]] = []
-    app.on("turn.start", lambda e: seen.append(("start", e.text)))
-    app.on("channel.message", lambda e: seen.append(("channel", e.channel)))
-    app.on("turn.end", lambda e: seen.append(("end", e.output)))
+
+    class _TurnStart(Recorder):
+        event = "turn.start"
+
+        @staticmethod
+        def transform(event):
+            return ("start", event.text)
+
+    class _Channel(Recorder):
+        event = "channel.message"
+
+        @staticmethod
+        def transform(event):
+            return ("channel", event.channel)
+
+    class _TurnEnd(Recorder):
+        event = "turn.end"
+
+        @staticmethod
+        def transform(event):
+            return ("end", event.output)
+
+    app.listeners([_TurnStart(seen), _Channel(seen), _TurnEnd(seen)])
     app.boot()
 
     await app.run("hello")
@@ -66,8 +88,22 @@ async def test_tool_events_are_emitted(runtime: Runtime):
     app = _app(runtime, _model("work", {"value": "a"}))
     app.agent(Agent.make("phase2").instructions("x").tool(work).output(str))
     seen: list[tuple[str, str]] = []
-    app.on("tool.start", lambda e: seen.append(("start", e.tool)))
-    app.on("tool.end", lambda e: seen.append(("end", e.tool)))
+
+    class _ToolStart(Recorder):
+        event = "tool.start"
+
+        @staticmethod
+        def transform(event):
+            return ("start", event.tool)
+
+    class _ToolEnd(Recorder):
+        event = "tool.end"
+
+        @staticmethod
+        def transform(event):
+            return ("end", event.tool)
+
+    app.listeners([_ToolStart(seen), _ToolEnd(seen)])
     app.boot()
 
     await app.run("go")
@@ -89,7 +125,15 @@ async def test_approval_asked_event(runtime: Runtime):
         .output(str)
     )
     seen: list[list[str]] = []
-    app.on("approval.asked", lambda e: seen.append([r["tool_name"] for r in e.requests]))
+
+    class _Approvals(Recorder):
+        event = "approval.asked"
+
+        @staticmethod
+        def transform(event):
+            return [r["tool_name"] for r in event.requests]
+
+    app.listeners([_Approvals(seen)])
     app.boot()
 
     await app.run("go")
@@ -155,7 +199,14 @@ async def test_guardrails_hook_flags_injection(runtime: Runtime):
         Agent.make("phase2").instructions("x").capability(guardrails_hooks()).tool(fetch).output(str)
     )
     seen: list[list[str]] = []
-    app.on("guardrails.injection", lambda e: seen.append(list(e.signals)))
+    class _Flagged(Recorder):
+        event = "guardrails.injection"
+
+        @staticmethod
+        def transform(event):
+            return list(event.signals)
+
+    app.listeners([_Flagged(seen)])
     app.boot()
 
     await app.run("go")

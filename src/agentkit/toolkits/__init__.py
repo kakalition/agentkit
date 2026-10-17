@@ -1,7 +1,7 @@
 """Native toolkits: every agentkit capability as first-class, agent-callable tools.
 
-Each module exposes an ``attach_<name>(agent, ...)`` that registers its tools on a
-*built* PydanticAI agent (idempotent). :func:`attach_toolkits` attaches the
+Each :class:`~agentkit.foundation.tools.Toolkit` subclass registers its tools on a
+*built* PydanticAI agent (idempotent). :func:`install_toolkits` installs the
 settings-enabled set — used by ``Agent.full()``/``Agent.native()``. Reachable
 models/tasks/jobs stay deny-by-default (empty allow-lists) and writes require
 approval, so enabling a toolkit is safe.
@@ -11,29 +11,31 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentkit.toolkits.database import attach_database
-from agentkit.toolkits.history import attach_history
-from agentkit.toolkits.knowledge_admin import attach_knowledge_admin
-from agentkit.toolkits.notifications import attach_notifications
-from agentkit.toolkits.queue import RunRegisteredTask, attach_queue
-from agentkit.toolkits.scheduler import attach_scheduler
-from agentkit.toolkits.skills_admin import attach_skill_authoring
-from agentkit.toolkits.usage import attach_usage
+from agentkit.foundation.tools import Toolkit
+from agentkit.toolkits.database import _attach_database
+from agentkit.toolkits.history import _attach_history
+from agentkit.toolkits.knowledge_admin import _attach_knowledge_admin
+from agentkit.toolkits.notifications import _attach_notifications
+from agentkit.toolkits.queue import RunRegisteredTask, _attach_queue
+from agentkit.toolkits.scheduler import _attach_scheduler
+from agentkit.toolkits.skills_admin import _attach_skill_authoring
+from agentkit.toolkits.usage import _attach_usage
 
 __all__ = [
     "TOOLKITS",
+    "TOOLKIT_CLASSES",
+    "DatabaseToolkit",
+    "HistoryToolkit",
+    "KnowledgeAdminToolkit",
+    "NotificationsToolkit",
+    "QueueToolkit",
     "RunRegisteredTask",
-    "attach_database",
-    "attach_history",
-    "attach_knowledge_admin",
-    "attach_notifications",
-    "attach_queue",
-    "attach_scheduler",
-    "attach_skill_authoring",
-    "attach_toolkit",
-    "attach_toolkits",
-    "attach_usage",
+    "SchedulerToolkit",
+    "SkillAuthoringToolkit",
+    "UsageToolkit",
     "enabled_toolkits",
+    "install_toolkits",
+    "toolkit_for",
 ]
 
 # Toolkit name -> the settings flag that enables it.
@@ -49,6 +51,98 @@ TOOLKITS: dict[str, str] = {
 }
 
 
+# -- class-based toolkits (thin wrappers over the attach_* helpers) ---------
+class DatabaseToolkit(Toolkit):
+    name = "database"
+
+    def __init__(self, models: dict[str, Any] | None = None, **options: Any) -> None:
+        super().__init__(models=models, **options)
+        self.models = models
+
+    def install(self, agent: Any) -> Any:
+        return _attach_database(agent, self.models)
+
+
+class SchedulerToolkit(Toolkit):
+    name = "scheduler"
+
+    def __init__(self, tasks: list[str] | None = None, **options: Any) -> None:
+        super().__init__(tasks=tasks, **options)
+        self.tasks = tasks
+
+    def install(self, agent: Any) -> Any:
+        return _attach_scheduler(agent, self.tasks)
+
+
+class QueueToolkit(Toolkit):
+    name = "queue"
+
+    def __init__(
+        self, jobs: dict[str, Any] | None = None, tasks: list[str] | None = None, **options: Any
+    ) -> None:
+        super().__init__(jobs=jobs, tasks=tasks, **options)
+        self.jobs = jobs
+        self.tasks = tasks
+
+    def install(self, agent: Any) -> Any:
+        return _attach_queue(agent, self.jobs, self.tasks)
+
+
+class NotificationsToolkit(Toolkit):
+    name = "notifications"
+
+    def install(self, agent: Any) -> Any:
+        return _attach_notifications(agent)
+
+
+class HistoryToolkit(Toolkit):
+    name = "history"
+
+    def install(self, agent: Any) -> Any:
+        return _attach_history(agent)
+
+
+class UsageToolkit(Toolkit):
+    name = "usage"
+
+    def install(self, agent: Any) -> Any:
+        return _attach_usage(agent)
+
+
+class KnowledgeAdminToolkit(Toolkit):
+    name = "knowledge_admin"
+
+    def install(self, agent: Any) -> Any:
+        return _attach_knowledge_admin(agent)
+
+
+class SkillAuthoringToolkit(Toolkit):
+    name = "skills_admin"
+
+    def install(self, agent: Any) -> Any:
+        return _attach_skill_authoring(agent)
+
+
+TOOLKIT_CLASSES: dict[str, type[Toolkit]] = {
+    "database": DatabaseToolkit,
+    "scheduler": SchedulerToolkit,
+    "queue": QueueToolkit,
+    "notifications": NotificationsToolkit,
+    "history": HistoryToolkit,
+    "usage": UsageToolkit,
+    "knowledge_admin": KnowledgeAdminToolkit,
+    "skills_admin": SkillAuthoringToolkit,
+}
+
+
+def toolkit_for(name: str) -> type[Toolkit]:
+    """The :class:`~agentkit.foundation.tools.Toolkit` class for a toolkit name."""
+    klass = TOOLKIT_CLASSES.get(name)
+    if klass is None:
+        raise KeyError(f"unknown toolkit {name!r}")
+    return klass
+
+
 def enabled_toolkits(settings: Any = None) -> set[str]:
     """The toolkits whose settings flag is on (all, when there are no settings)."""
     if settings is None:
@@ -60,24 +154,7 @@ def enabled_toolkits(settings: Any = None) -> set[str]:
     }
 
 
-def attach_toolkit(agent: Any, name: str, **options: Any) -> Any:
-    """Attach one toolkit by name onto a built agent."""
-    attach: Any = {
-        "database": attach_database,
-        "scheduler": attach_scheduler,
-        "queue": attach_queue,
-        "notifications": attach_notifications,
-        "history": attach_history,
-        "usage": attach_usage,
-        "knowledge_admin": attach_knowledge_admin,
-        "skills_admin": attach_skill_authoring,
-    }.get(name)
-    if attach is None:
-        raise KeyError(f"unknown toolkit {name!r}")
-    return attach(agent, **options)
-
-
-def attach_toolkits(
+def install_toolkits(
     agent: Any,
     *,
     enabled: set[str] | None = None,
@@ -86,22 +163,16 @@ def attach_toolkits(
     tasks: list[str] | None = None,
     jobs: dict[str, Any] | None = None,
 ) -> set[str]:
-    """Attach the enabled toolkits on a built agent; returns the names attached."""
+    """Install the enabled :class:`Toolkit` classes on a built agent (returns names)."""
     names = set(enabled) if enabled is not None else enabled_toolkits(settings)
-    if "database" in names:
-        attach_database(agent, models)
-    if "scheduler" in names:
-        attach_scheduler(agent, tasks)
-    if "queue" in names:
-        attach_queue(agent, jobs, tasks)
-    if "notifications" in names:
-        attach_notifications(agent)
-    if "history" in names:
-        attach_history(agent)
-    if "usage" in names:
-        attach_usage(agent)
-    if "knowledge_admin" in names:
-        attach_knowledge_admin(agent)
-    if "skills_admin" in names:
-        attach_skill_authoring(agent)
+    options: dict[str, dict[str, Any]] = {
+        "database": {"models": models},
+        "scheduler": {"tasks": tasks},
+        "queue": {"jobs": jobs, "tasks": tasks},
+    }
+    for name in sorted(names):
+        klass = TOOLKIT_CLASSES.get(name)
+        if klass is None:
+            raise KeyError(f"unknown toolkit {name!r}")
+        klass(**options.get(name, {})).install(agent)
     return names

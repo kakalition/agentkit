@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from click.testing import CliRunner
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
@@ -11,7 +12,6 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
-from typer.testing import CliRunner
 
 from agentkit.cli import app as cli_app
 from agentkit.db.repositories import Repositories
@@ -94,7 +94,8 @@ def test_read_prompts_handles_text_and_jsonl(tmp_path: Path):
 def test_generate_batch_writes_jsonl(tmp_path: Path, monkeypatch):
     module = tmp_path / "gen_bootstrap.py"
     module.write_text(
-        "from agentkit import Agent, App\n"
+        "from agentkit import App\n"
+        "from agentkit.foundation.agent import Agent\n"
         "from pydantic_ai.messages import ModelResponse, TextPart\n"
         "from pydantic_ai.models.function import FunctionModel\n"
         "app = App('gen', discover=False)\n"

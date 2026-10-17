@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 from pydantic_ai.messages import ModelResponse, TextPart
 
-from agentkit import Agent
 from agentkit.deps import Deps
+from agentkit.foundation.agent import Agent
 from agentkit.session import serialize_message
 
 

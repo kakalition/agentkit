@@ -8,6 +8,7 @@ classes remain the *default drivers*; new behavior is opt-in.
 """
 
 from agentkit.support.drivers import (
+    Driver,
     DriverFactory,
     register,
     register_driver,
@@ -18,6 +19,7 @@ from agentkit.support.kinds import DriverKind
 from agentkit.support.manager import Manager, manager_class, registered_managers
 
 __all__ = [
+    "Driver",
     "DriverFactory",
     "DriverKind",
     "Manager",

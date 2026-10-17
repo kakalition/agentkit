@@ -7,9 +7,10 @@ from pydantic_ai import RunContext
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 
-from agentkit import Agent, App
+from agentkit import App
 from agentkit.deps import Deps
 from agentkit.evals import Case, EvalSuite
+from agentkit.foundation.agent import Agent
 from agentkit.runtime import Runtime
 from agentkit.session import ChatResult
 

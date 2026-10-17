@@ -13,7 +13,7 @@ from typing import Any
 
 from agentkit.contracts.ratelimit import RateLimiterContract
 from agentkit.errors import RateLimited
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, RateLimitDriver
 from agentkit.support.manager import Manager
 
@@ -186,19 +186,19 @@ def _limiter_options(app: Any) -> dict[str, Any]:
 
 
 @register_driver(DriverKind.RATELIMIT, RateLimitDriver.DATABASE)
-def _database_limiter_driver(app: Any) -> RateLimiter:
-    return RateLimiter(app.runtime, **_limiter_options(app))
-
-
+class DatabaseLimiterDriver(Driver):
+    def build(self) -> RateLimiter:
+        app = self.app
+        return RateLimiter(app.runtime, **_limiter_options(app))
 @register_driver(DriverKind.RATELIMIT, RateLimitDriver.MEMORY)
-def _memory_limiter_driver(app: Any) -> InMemoryRateLimiter:
-    settings = getattr(app, "settings", None)
-    return InMemoryRateLimiter(
-        owner_id=str(getattr(settings, "owner_id", "owner") or "owner"),
-        **_limiter_options(app),
-    )
-
-
+class MemoryLimiterDriver(Driver):
+    def build(self) -> InMemoryRateLimiter:
+        app = self.app
+        settings = getattr(app, "settings", None)
+        return InMemoryRateLimiter(
+            owner_id=str(getattr(settings, "owner_id", "owner") or "owner"),
+            **_limiter_options(app),
+        )
 __all__ = [
     "WINDOW_SECONDS",
     "InMemoryRateLimiter",

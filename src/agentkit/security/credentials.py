@@ -14,7 +14,7 @@ from typing import Any
 
 from agentkit.contracts.vault import Vault
 from agentkit.errors import ConfigurationError
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, VaultDriver
 from agentkit.support.manager import Manager
 
@@ -169,15 +169,15 @@ class VaultManager(Manager):
 
 
 @register_driver(DriverKind.VAULT, VaultDriver.FERNET)
-def _fernet_vault_driver(app: Any) -> Credentials:
-    return Credentials(app.runtime)
-
-
+class FernetVaultDriver(Driver):
+    def build(self) -> Credentials:
+        app = self.app
+        return Credentials(app.runtime)
 @register_driver(DriverKind.VAULT, VaultDriver.ENV)
-def _env_vault_driver(app: Any) -> EnvVault:
-    return EnvVault(app.settings)
-
-
+class EnvVaultDriver(Driver):
+    def build(self) -> EnvVault:
+        app = self.app
+        return EnvVault(app.settings)
 __all__ = [
     "Credentials",
     "EnvVault",

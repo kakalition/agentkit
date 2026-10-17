@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentkit.contracts.search import SearchHit, SearchIndex
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, SearchDriver
 from agentkit.support.manager import Manager
 
@@ -96,10 +96,10 @@ class SearchManager(Manager):
 
 
 @register_driver(DriverKind.SEARCH, SearchDriver.FTS)
-def _fts_search_driver(app: Any) -> FtsSearchIndex:
-    return FtsSearchIndex()
-
-
+class FtsSearchDriver(Driver):
+    def build(self) -> FtsSearchIndex:
+        return FtsSearchIndex()
 @register_driver(DriverKind.SEARCH, SearchDriver.SCAN)
-def _scan_search_driver(app: Any) -> ScanSearchIndex:
-    return ScanSearchIndex()
+class ScanSearchDriver(Driver):
+    def build(self) -> ScanSearchIndex:
+        return ScanSearchIndex()

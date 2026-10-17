@@ -3,7 +3,8 @@ from __future__ import annotations
 from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
 
-from agentkit import Agent, App, ModelPrice, ModelRouter, Pricing, default_pricing
+from agentkit import App, ModelPrice, ModelRouter, Pricing, default_pricing
+from agentkit.foundation.agent import Agent
 
 
 def test_pricing_cost_and_normalization():

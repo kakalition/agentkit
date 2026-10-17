@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
@@ -11,11 +12,11 @@ from pydantic_ai.messages import (
     ToolReturnPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
-from typer.testing import CliRunner
 
-from agentkit import Agent, Skill, SkillRegistry, load_skill_file, parse_front_matter
+from agentkit import Skill, SkillRegistry, load_skill_file, parse_front_matter
 from agentkit.cli import app as cli_app
 from agentkit.config import AgentSettings
+from agentkit.foundation.agent import Agent
 
 
 def _write_skill(

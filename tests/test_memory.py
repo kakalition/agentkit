@@ -6,7 +6,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from agentkit.db.repositories import MemoryRepo, Repositories
 from agentkit.deps import Deps
-from agentkit.memory import attach_memory, memory_digest
+from agentkit.memory import MemoryCapability, memory_digest
 
 
 async def test_memory_repo_crud(repos: Repositories):
@@ -77,15 +77,15 @@ def _has_tool_return(messages: list[ModelMessage]) -> bool:
 
 def test_attach_memory_registers_tools_and_is_idempotent():
     agent: Agent[Deps, str] = Agent(name="m", deps_type=Deps, output_type=str, instructions="x")
-    attach_memory(agent)
-    attach_memory(agent)
+    MemoryCapability().install(agent)
+    MemoryCapability().install(agent)
     tools = set(agent._function_toolset.tools.keys())
     assert {"remember", "recall", "forget_memory"} <= tools
 
 
 async def test_agent_remembers_via_tool(deps: Deps):
     agent: Agent[Deps, str] = Agent(name="m", deps_type=Deps, output_type=str, instructions="x")
-    attach_memory(agent)
+    MemoryCapability().install(agent)
 
     def model_fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         if _has_tool_return(messages):

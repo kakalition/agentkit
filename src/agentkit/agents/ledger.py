@@ -20,12 +20,13 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import RunContext
 
+from agentkit.capability import Capability
 from agentkit.deps import Deps
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentkit.agents.team import TeamLedger
 
-__all__ = ["attach_team_ledger", "read_ledger", "write_ledger"]
+__all__ = ["TeamLedgerCapability", "read_ledger", "write_ledger"]
 
 
 def _ledger_of(ctx: Any) -> TeamLedger | None:
@@ -111,33 +112,41 @@ def _tool_target(agent: Any) -> Any:
     return None
 
 
-def attach_team_ledger(agent: Any, *, name: str | None = None) -> Any:
-    """Register ``read_ledger`` / ``write_ledger`` on ``agent`` (idempotent).
+class TeamLedgerCapability(Capability):
+    name = "team_ledger"
 
-    Works on anything with ``.tool`` (a PydanticAI agent or the ``Agent`` builder)
-    or on :class:`~agentkit.agents.handle.AgentHandle` (via its ``.agent``). A plain
-    callable or remote handle has no tools and is returned unchanged. The calling
-    member's ``name`` is bound into the write tool for ownership checks.
-    """
-    target = _tool_target(agent)
-    if target is None:
+    def __init__(self, name: str | None = None) -> None:
+        self.agent_name = name
+
+    def install(self, agent: Any) -> Any:
+        name = self.agent_name
+
+        """Register ``read_ledger`` / ``write_ledger`` on ``agent`` (idempotent).
+
+        Works on anything with ``.tool`` (a PydanticAI agent or the ``Agent`` builder)
+        or on :class:`~agentkit.agents.handle.AgentHandle` (via its ``.agent``). A plain
+        callable or remote handle has no tools and is returned unchanged. The calling
+        member's ``name`` is bound into the write tool for ownership checks.
+        """
+        target = _tool_target(agent)
+        if target is None:
+            return agent
+        if getattr(target, "_agentkit_team_ledger_attached", False):
+            return agent
+
+        async def _tool_read(ctx: RunContext[Deps]) -> str:
+            return await read_ledger(ctx)
+
+        _tool_read.__name__ = "read_ledger"
+
+        async def _tool_write(
+            ctx: RunContext[Deps], fact: str | None = None, complete: int | None = None
+        ) -> str:
+            return await write_ledger(ctx, fact=fact, complete=complete, _member=name)
+
+        _tool_write.__name__ = "write_ledger"
+
+        target.tool(_tool_read)
+        target.tool(_tool_write)
+        target._agentkit_team_ledger_attached = True  # type: ignore[attr-defined]
         return agent
-    if getattr(target, "_agentkit_team_ledger_attached", False):
-        return agent
-
-    async def _tool_read(ctx: RunContext[Deps]) -> str:
-        return await read_ledger(ctx)
-
-    _tool_read.__name__ = "read_ledger"
-
-    async def _tool_write(
-        ctx: RunContext[Deps], fact: str | None = None, complete: int | None = None
-    ) -> str:
-        return await write_ledger(ctx, fact=fact, complete=complete, _member=name)
-
-    _tool_write.__name__ = "write_ledger"
-
-    target.tool(_tool_read)
-    target.tool(_tool_write)
-    target._agentkit_team_ledger_attached = True  # type: ignore[attr-defined]
-    return agent

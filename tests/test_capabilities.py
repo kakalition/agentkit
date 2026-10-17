@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from agentkit import Agent, Sandbox
+from agentkit import Sandbox
+from agentkit.foundation.agent import Agent
 
 
 def test_web_and_reasoning_capability_shortcuts_build():

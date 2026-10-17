@@ -3,8 +3,9 @@ from __future__ import annotations
 from pydantic_ai.messages import BinaryContent, ImageUrl, ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
 
-from agentkit import Agent, App
+from agentkit import App
 from agentkit.audio import synthesize, transcribe
+from agentkit.foundation.agent import Agent
 from agentkit.multimodal import collect_artifacts, content, document, image, text
 from agentkit.runtime import Runtime
 

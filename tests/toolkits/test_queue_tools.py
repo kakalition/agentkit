@@ -4,9 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentkit import Agent, App, scheduler
+from agentkit import App, scheduler
 from agentkit.config import AgentSettings
 from agentkit.deps import Deps
+from agentkit.foundation.agent import Agent
 from agentkit.foundation.queue import Job
 
 CALLS: list[dict] = []

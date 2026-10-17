@@ -13,7 +13,6 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from agentkit.app import AgentApp
 from agentkit.deps import Deps
 from agentkit.foundation import (
-    Agent,
     App,
     Container,
     Dispatcher,
@@ -25,6 +24,7 @@ from agentkit.foundation import (
     current_app,
     discover_providers,
 )
+from agentkit.foundation.agent import Agent
 from agentkit.foundation.container import BindingError
 from agentkit.foundation.facade import using
 from agentkit.foundation.facades import DB, Events, Log, Memory

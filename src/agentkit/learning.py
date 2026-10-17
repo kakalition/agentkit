@@ -30,10 +30,11 @@ from typing import Any
 
 from pydantic_ai import RunContext
 
+from agentkit.capability import Capability
 from agentkit.contracts.learning import Extractor, LearningSink, LearningStrategy
 from agentkit.deps import Deps
 from agentkit.guardrails import redact, redact_pii
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import (
     DriverKind,
     LearningExtractorDriver,
@@ -56,7 +57,7 @@ __all__ = [
     "NoopStrategy",
     "ReflectApplyStrategy",
     "approve_lesson",
-    "attach_learning",
+    "LearningCapability",
     "lessons_digest",
     "propose_memories",
     "proposed_lessons",
@@ -525,89 +526,96 @@ async def _reflect_for_ctx(ctx: RunContext[Deps], settings: Any) -> dict[str, An
 # ---------------------------------------------------------------------------
 
 
-def attach_learning(agent: Any, *, settings: Any = None) -> Any:
-    """Register the learning tools + lessons digest on a built agent (idempotent)."""
-    if getattr(agent, "_agentkit_learning_attached", False):
+class LearningCapability(Capability):
+    name = "learning"
+
+    def __init__(self, settings: Any = None) -> None:
+        self.settings = settings
+
+    def install(self, agent: Any) -> Any:
+        settings = self.settings
+
+        """Register the learning tools + lessons digest on a built agent (idempotent)."""
+        if getattr(agent, "_agentkit_learning_attached", False):
+            return agent
+
+        @agent.tool
+        async def learn(ctx: RunContext[Deps], insight: str, kind: str = "lesson") -> str:
+            """Record a reusable lesson (or preference/fact) right after a task.
+
+            Args:
+                insight: The lesson, written as "when X, do Y".
+                kind: One of lesson (default), preference, fact.
+            """
+            store = getattr(getattr(ctx.deps, "repos", None), "memories", None)
+            if store is None:
+                return "learning is unavailable"
+            memory_kind = {
+                "lesson": LESSON_KIND,
+                "procedural": LESSON_KIND,
+                "preference": "preference",
+                "fact": "fact",
+            }.get(kind, LESSON_KIND)
+            text = _truncate(redact(redact_pii((insight or "").strip())))
+            if not text:
+                return "nothing to learn"
+            deps_settings = getattr(ctx.deps, "settings", settings)
+            require_review = bool(getattr(deps_settings, "learning_require_review", True))
+            status = "proposed" if require_review and memory_kind == LESSON_KIND else "active"
+            row = await store.add(
+                text,
+                kind=memory_kind,
+                importance=_importance(text),
+                source_conversation_id=ctx.deps.conversation_id,
+                status=status,
+            )
+            await _emit("learning.lesson", conversation_id=ctx.deps.conversation_id, text=text)
+            return f"learned as #{row.id}" + (" (pending review)" if status == "proposed" else "")
+
+        @agent.tool
+        async def reflect(ctx: RunContext[Deps]) -> str:
+            """Review recent turns and distil durable lessons."""
+            summary = await _reflect_for_ctx(ctx, settings)
+            return json.dumps(summary, default=str)
+
+        @agent.tool
+        async def list_lessons(ctx: RunContext[Deps], limit: int = 20) -> str:
+            """List the lessons you have learned.
+
+            Args:
+                limit: Maximum lessons to list.
+            """
+            store = getattr(getattr(ctx.deps, "repos", None), "memories", None)
+            if store is None:
+                return "(learning unavailable)"
+            rows = await store.list(kind=LESSON_KIND, status="active")
+            if not rows:
+                return "(no lessons yet)"
+            rows.sort(key=lambda row: float(row.importance or 0.0), reverse=True)
+            return "\n".join(f"#{row.id} {row.content}" for row in rows[: max(1, int(limit))])
+
+        @agent.tool
+        async def forget_lesson(ctx: RunContext[Deps], id: int) -> str:
+            """Delete a lesson by id.
+
+            Args:
+                id: The lesson id (from list_lessons).
+            """
+            store = getattr(getattr(ctx.deps, "repos", None), "memories", None)
+            if store is None:
+                return "(learning unavailable)"
+            return "forgotten" if await store.forget(id) else "no such lesson"
+
+        @agent.instructions
+        async def _learning_instructions(ctx: RunContext[Deps]) -> str | None:
+            parts = [LESSON_GUIDE]
+            digest = await lessons_digest(getattr(ctx.deps, "repos", None))
+            if digest:
+                parts.append(digest)
+            return "\n\n".join(parts)
+
+        agent._agentkit_learning_attached = True  # type: ignore[attr-defined]
         return agent
-
-    @agent.tool
-    async def learn(ctx: RunContext[Deps], insight: str, kind: str = "lesson") -> str:
-        """Record a reusable lesson (or preference/fact) right after a task.
-
-        Args:
-            insight: The lesson, written as "when X, do Y".
-            kind: One of lesson (default), preference, fact.
-        """
-        store = getattr(getattr(ctx.deps, "repos", None), "memories", None)
-        if store is None:
-            return "learning is unavailable"
-        memory_kind = {
-            "lesson": LESSON_KIND,
-            "procedural": LESSON_KIND,
-            "preference": "preference",
-            "fact": "fact",
-        }.get(kind, LESSON_KIND)
-        text = _truncate(redact(redact_pii((insight or "").strip())))
-        if not text:
-            return "nothing to learn"
-        deps_settings = getattr(ctx.deps, "settings", settings)
-        require_review = bool(getattr(deps_settings, "learning_require_review", True))
-        status = "proposed" if require_review and memory_kind == LESSON_KIND else "active"
-        row = await store.add(
-            text,
-            kind=memory_kind,
-            importance=_importance(text),
-            source_conversation_id=ctx.deps.conversation_id,
-            status=status,
-        )
-        await _emit("learning.lesson", conversation_id=ctx.deps.conversation_id, text=text)
-        return f"learned as #{row.id}" + (" (pending review)" if status == "proposed" else "")
-
-    @agent.tool
-    async def reflect(ctx: RunContext[Deps]) -> str:
-        """Review recent turns and distil durable lessons."""
-        summary = await _reflect_for_ctx(ctx, settings)
-        return json.dumps(summary, default=str)
-
-    @agent.tool
-    async def list_lessons(ctx: RunContext[Deps], limit: int = 20) -> str:
-        """List the lessons you have learned.
-
-        Args:
-            limit: Maximum lessons to list.
-        """
-        store = getattr(getattr(ctx.deps, "repos", None), "memories", None)
-        if store is None:
-            return "(learning unavailable)"
-        rows = await store.list(kind=LESSON_KIND, status="active")
-        if not rows:
-            return "(no lessons yet)"
-        rows.sort(key=lambda row: float(row.importance or 0.0), reverse=True)
-        return "\n".join(f"#{row.id} {row.content}" for row in rows[: max(1, int(limit))])
-
-    @agent.tool
-    async def forget_lesson(ctx: RunContext[Deps], id: int) -> str:
-        """Delete a lesson by id.
-
-        Args:
-            id: The lesson id (from list_lessons).
-        """
-        store = getattr(getattr(ctx.deps, "repos", None), "memories", None)
-        if store is None:
-            return "(learning unavailable)"
-        return "forgotten" if await store.forget(id) else "no such lesson"
-
-    @agent.instructions
-    async def _learning_instructions(ctx: RunContext[Deps]) -> str | None:
-        parts = [LESSON_GUIDE]
-        digest = await lessons_digest(getattr(ctx.deps, "repos", None))
-        if digest:
-            parts.append(digest)
-        return "\n\n".join(parts)
-
-    agent._agentkit_learning_attached = True  # type: ignore[attr-defined]
-    return agent
-
 
 def register_reflect_task() -> str:
     """Register the durable ``learning:reflect`` scheduler task (idempotent)."""
@@ -717,25 +725,22 @@ class LearningSinkManager(Manager):
 
 
 @register_driver(DriverKind.LEARNING_EXTRACTOR, LearningExtractorDriver.MODEL)
-def _model_extractor_driver(app: Any) -> ModelExtractor:
-    return ModelExtractor()
-
-
+class ModelExtractorDriver(Driver):
+    def build(self) -> ModelExtractor:
+        return ModelExtractor()
 @register_driver(DriverKind.LEARNING_EXTRACTOR, LearningExtractorDriver.HEURISTIC)
-def _heuristic_extractor_driver(app: Any) -> HeuristicExtractor:
-    return HeuristicExtractor()
-
-
+class HeuristicExtractorDriver(Driver):
+    def build(self) -> HeuristicExtractor:
+        return HeuristicExtractor()
 @register_driver(DriverKind.LEARNING_STRATEGY, LearningStrategyDriver.REFLECT_APPLY)
-def _reflect_apply_strategy_driver(app: Any) -> ReflectApplyStrategy:
-    return ReflectApplyStrategy()
-
-
+class ReflectApplyStrategyDriver(Driver):
+    def build(self) -> ReflectApplyStrategy:
+        return ReflectApplyStrategy()
 @register_driver(DriverKind.LEARNING_STRATEGY, LearningStrategyDriver.NONE)
-def _noop_strategy_driver(app: Any) -> NoopStrategy:
-    return NoopStrategy()
-
-
+class NoopStrategyDriver(Driver):
+    def build(self) -> NoopStrategy:
+        return NoopStrategy()
 @register_driver(DriverKind.LEARNING_SINK, LearningSinkDriver.MEMORY)
-def _memory_sink_driver(app: Any) -> MemorySink:
-    return MemorySink()
+class MemorySinkDriver(Driver):
+    def build(self) -> MemorySink:
+        return MemorySink()

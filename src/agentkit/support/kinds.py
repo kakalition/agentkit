@@ -9,8 +9,9 @@ pydantic at settings load) instead of by convention.
         default_driver = CacheDriver.ARRAY
 
     @register_driver(DriverKind.CACHE, CacheDriver.NULL)
-    def _null(app): ...
-
+    class NullDriver(Driver):
+        def build(self) -> Any:
+            app = self.app
 Because ``StrEnum`` members *are* strings, ``CacheDriver.ARRAY == "array"`` and
 ``f"{CacheDriver.ARRAY}" == "array"``, so existing settings/env values keep
 working while the code gains real types.

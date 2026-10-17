@@ -1,17 +1,10 @@
-"""Browse and install catalog items (``agentkit catalog …``)."""
+"""Browse and install catalog items (``agentkit catalog …``) — class-based."""
 
 from __future__ import annotations
 
-import asyncio
-
 import typer
 
-from agentkit.cli._app import app
-
-__all__ = ["catalog_app"]
-
-catalog_app = typer.Typer(no_args_is_help=True, help="Browse and install catalog items.")
-app.add_typer(catalog_app, name="catalog")
+from agentkit.foundation import Command
 
 
 def _source(name: str | None = None):
@@ -21,51 +14,57 @@ def _source(name: str | None = None):
     return agent_app.manager("catalog").driver(name)
 
 
-@catalog_app.command("list")
-def catalog_list(
-    query: str = typer.Option("", "--query", "-q", help="Filter the catalog."),
-    driver: str | None = typer.Option(None, "--driver", help="Catalog driver name."),
-) -> None:
-    """List catalog items from the configured source."""
-    source = _source(driver)
-    items = asyncio.run(source.search(query))
-    if not items:
-        typer.echo("no items")
-        return
-    for item in items:
-        typer.echo(f"{item.id}\t{item.kind}\t{item.description}")
+class CatalogListCommand(Command):
+    group = 'catalog'
+    signature = "catalog:list {--query=} {--driver=}"
+    description = "List catalog items from the configured source."
 
-
-@catalog_app.command("install")
-def catalog_install(
-    item_id: str = typer.Argument(..., help="The catalog item id."),
-    into: str = typer.Option("definitions", "--into", help="definitions | skills | none."),
-    driver: str | None = typer.Option(None, "--driver", help="Catalog driver name."),
-) -> None:
-    """Install a catalog item into the definitions store or the skills dir."""
-
-    async def _run():
+    async def handle(self, query: str = "", driver: str | None = None) -> None:
         source = _source(driver)
-        if into == "none":
-            return await source.install(item_id, None)
-        if into == "skills":
-            from agentkit.catalog import SkillsTarget
+        items = await source.search(query)
+        if not items:
+            self.info("no items")
+            return
+        for item in items:
+            self.info(f"{item.id}\t{item.kind}\t{item.description}")
 
-            return await source.install(item_id, SkillsTarget())
-        from agentkit.catalog import DefinitionsTarget
-        from agentkit.runtime import build_runtime, repositories
-        from agentkit.specs import RepositorySpecStore
 
-        runtime = build_runtime()
-        async with repositories(runtime) as repos:
-            return await source.install(item_id, DefinitionsTarget(RepositorySpecStore(repos)))
+class CatalogInstallCommand(Command):
+    group = 'catalog'
+    signature = "catalog:install {item_id} {--into=definitions} {--driver=}"
+    description = "Install a catalog item into the definitions store or the skills dir."
 
-    try:
-        result = asyncio.run(_run())
-    except KeyError:
-        typer.echo(f"no item {item_id!r}", err=True)
-        raise typer.Exit(code=1) from None
-    except Exception as exc:
-        typer.echo(f"install failed: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    typer.echo(f"installed {item_id} -> {result}")
+    async def handle(
+        self, item_id: str, into: str = "definitions", driver: str | None = None
+    ) -> None:
+        source = _source(driver)
+        try:
+            if into == "none":
+                result = await source.install(item_id, None)
+            elif into == "skills":
+                from agentkit.catalog import SkillsTarget
+
+                result = await source.install(item_id, SkillsTarget())
+            else:
+                from agentkit.catalog import DefinitionsTarget
+                from agentkit.runtime import build_runtime, repositories
+                from agentkit.specs import RepositorySpecStore
+
+                runtime = build_runtime()
+                async with repositories(runtime) as repos:
+                    result = await source.install(
+                        item_id, DefinitionsTarget(RepositorySpecStore(repos))
+                    )
+        except KeyError:
+            self.error(f"no item {item_id!r}")
+            raise typer.Exit(code=1) from None
+        except Exception as exc:  # noqa: BLE001 - surface any install failure
+            self.error(f"install failed: {exc}")
+            raise typer.Exit(code=1) from exc
+        self.info(f"installed {item_id} -> {result}")
+
+
+COMMANDS: list[type] = [
+    CatalogListCommand,
+    CatalogInstallCommand,
+]

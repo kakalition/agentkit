@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentkit.capability import Capability
 from agentkit.contracts.computer import Computer
 from agentkit.errors import ConfigurationError
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import ComputerDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -22,7 +23,7 @@ __all__ = [
     "ComputerManager",
     "LoopbackComputer",
     "PlaywrightComputer",
-    "attach_computer",
+    "ComputerCapability",
 ]
 
 
@@ -153,20 +154,29 @@ class ComputerManager(Manager):
 
 
 @register_driver(DriverKind.COMPUTER, ComputerDriver.LOOPBACK)
-def _loopback_computer_driver(app: Any) -> LoopbackComputer:
-    return LoopbackComputer()
-
-
+class LoopbackComputerDriver(Driver):
+    def build(self) -> LoopbackComputer:
+        return LoopbackComputer()
 @register_driver(DriverKind.COMPUTER, ComputerDriver.PLAYWRIGHT)
-def _playwright_computer_driver(app: Any) -> PlaywrightComputer:
-    return PlaywrightComputer(
-        headless=bool(getattr(app.settings, "computer_headless", True)),
-        timeout_ms=int(getattr(app.settings, "computer_timeout_ms", 30_000) or 30_000),
-    )
+class PlaywrightComputerDriver(Driver):
+    def build(self) -> PlaywrightComputer:
+        app = self.app
+        return PlaywrightComputer(
+            headless=bool(getattr(app.settings, "computer_headless", True)),
+            timeout_ms=int(getattr(app.settings, "computer_timeout_ms", 30_000) or 30_000),
+        )
+class ComputerCapability(Capability):
+    name = "computer"
 
+    def __init__(self, computer: Any = None, requires_approval: bool = True) -> None:
+        self.computer = computer
+        self.requires_approval = requires_approval
 
-def attach_computer(agent: Any, computer: Any = None, *, requires_approval: bool = True) -> Any:
-    """Attach the approval-gated browser tools to an agent (see ``toolkits.computer``)."""
-    from agentkit.toolkits.computer import attach_computer_tools
+    def install(self, agent: Any) -> Any:
+        computer = self.computer
+        requires_approval = self.requires_approval
 
-    return attach_computer_tools(agent, computer, requires_approval=requires_approval)
+        """Attach the approval-gated browser tools to an agent (see ``toolkits.computer``)."""
+        from agentkit.toolkits.computer import _attach_computer_tools
+
+        return _attach_computer_tools(agent, computer, requires_approval=requires_approval)

@@ -13,7 +13,7 @@ from typing import Any
 
 from agentkit.contracts.ingest import DocumentLoader
 from agentkit.errors import DependencyMissing, InvalidInput
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, IngestDriver
 from agentkit.support.manager import Manager
 
@@ -175,15 +175,13 @@ class IngestManager(Manager):
 
 
 @register_driver(DriverKind.INGEST, IngestDriver.DEFAULT)
-def _default_loader_driver(app: Any) -> DefaultDocumentLoader:
-    return DefaultDocumentLoader()
-
-
+class DefaultLoaderDriver(Driver):
+    def build(self) -> DefaultDocumentLoader:
+        return DefaultDocumentLoader()
 @register_driver(DriverKind.INGEST, IngestDriver.TEXT)
-def _text_loader_driver(app: Any) -> TextDocumentLoader:
-    return TextDocumentLoader()
-
-
+class TextLoaderDriver(Driver):
+    def build(self) -> TextDocumentLoader:
+        return TextDocumentLoader()
 __all__ = [
     "SUPPORTED_SUFFIXES",
     "DefaultDocumentLoader",

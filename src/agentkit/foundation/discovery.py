@@ -38,6 +38,8 @@ __all__ = [
     "discover_channels",
     "discover_commands",
     "discover_config",
+    "discover_listeners",
+    "discover_policies",
     "discover_providers",
     "discover_repositories",
 ]
@@ -49,6 +51,8 @@ CONVENTIONAL_DIRS: dict[str, str] = {
     "commands": "app/Console/Commands",
     "config": "config",
     "repositories": "app/Repositories",
+    "policies": "app/Policies",
+    "listeners": "app/Listeners",
 }
 
 
@@ -113,19 +117,21 @@ def discover_commands(base_path: str | Path = ".") -> list[type]:
 
 
 def discover_channels(base_path: str | Path = ".") -> list[tuple[str, Callable[..., Any]]]:
-    """``(name, factory)`` for each ``*_channel`` factory under ``app/Channels/``."""
+    """``(name, ChannelClass)`` for each ``Channel`` subclass under ``app/Channels/``."""
+    from agentkit.foundation.channels import Channel
+
     found: list[tuple[str, Callable[..., Any]]] = []
     for stem, module_name in _module_specs(base_path, CONVENTIONAL_DIRS["channels"]):
         module = importlib.import_module(module_name)
         for obj in vars(module).values():
             if (
-                callable(obj)
-                and not isinstance(obj, type)
-                and _own(module, obj)
-                and obj.__name__.lower().endswith("channel")
+                isinstance(obj, type)
+                and issubclass(obj, Channel)
+                and obj is not Channel
+                and getattr(obj, "__module__", None) == module.__name__
             ):
-                name = obj.__name__[: -len("channel")].strip("_").lower() or stem
-                found.append((name, obj))
+                instance = obj()
+                found.append((instance.channel_name() or stem, obj))
     return found
 
 
@@ -137,6 +143,26 @@ def discover_config(base_path: str | Path = ".") -> dict[str, type]:
         sections = _subclasses(module, Section, exclude=(Section,))
         if sections:
             found[stem] = sections[0]
+    return found
+
+
+def discover_policies(base_path: str | Path = ".") -> list[type]:
+    """``Policy`` subclasses declared under ``app/Policies/``."""
+    from agentkit.foundation.gate import Policy
+
+    found: list[type] = []
+    for _stem, module_name in _module_specs(base_path, CONVENTIONAL_DIRS["policies"]):
+        found.extend(_subclasses(importlib.import_module(module_name), Policy, exclude=(Policy,)))
+    return found
+
+
+def discover_listeners(base_path: str | Path = ".") -> list[type]:
+    """``Listener`` subclasses declared under ``app/Listeners/``."""
+    from agentkit.foundation.events import Listener
+
+    found: list[type] = []
+    for _stem, module_name in _module_specs(base_path, CONVENTIONAL_DIRS["listeners"]):
+        found.extend(_subclasses(importlib.import_module(module_name), Listener, exclude=(Listener,)))
     return found
 
 

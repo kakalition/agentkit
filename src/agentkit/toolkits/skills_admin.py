@@ -17,7 +17,7 @@ from agentkit.deps import Deps
 from agentkit.skills import SkillRegistry, slugify_skill, write_skill_file
 from agentkit.toolkits._common import emit_event, settings_of
 
-__all__ = ["attach_skill_authoring"]
+__all__ = ["_attach_skill_authoring"]
 
 
 def _registry(ctx: RunContext[Deps]) -> SkillRegistry:
@@ -34,7 +34,7 @@ def skill_root(ctx: RunContext[Deps]) -> Path:
     return root
 
 
-def attach_skill_authoring(agent: Any, *, flag: str = "skill_authoring_enabled") -> Any:
+def _attach_skill_authoring(agent: Any, *, flag: str = "skill_authoring_enabled") -> Any:
     """Register the skill-authoring tools on a built PydanticAI agent (idempotent)."""
     if getattr(agent, "_agentkit_skill_authoring_attached", False):
         return agent

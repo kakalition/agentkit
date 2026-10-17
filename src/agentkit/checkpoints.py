@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from agentkit.contracts.checkpoint import CheckpointStore
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import CheckpointDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -213,17 +213,17 @@ def _retention(app: Any) -> int:
 
 
 @register_driver(DriverKind.CHECKPOINT, CheckpointDriver.MEMORY)
-def _memory_checkpoint_driver(app: Any) -> MemoryCheckpointStore:
-    return MemoryCheckpointStore(retention=_retention(app))
-
-
+class MemoryCheckpointDriver(Driver):
+    def build(self) -> MemoryCheckpointStore:
+        app = self.app
+        return MemoryCheckpointStore(retention=_retention(app))
 @register_driver(DriverKind.CHECKPOINT, CheckpointDriver.FILE)
-def _file_checkpoint_driver(app: Any) -> FileCheckpointStore:
-    return FileCheckpointStore(
-        Path(getattr(app.settings, "home", ".")) / "checkpoints", retention=_retention(app)
-    )
-
-
+class FileCheckpointDriver(Driver):
+    def build(self) -> FileCheckpointStore:
+        app = self.app
+        return FileCheckpointStore(
+            Path(getattr(app.settings, "home", ".")) / "checkpoints", retention=_retention(app)
+        )
 def checkpointer_for(repos: Any, *, enabled: bool = False, retention: int = 50) -> Any:
     """A repository-backed checkpoint store over a live ``repos`` container.
 

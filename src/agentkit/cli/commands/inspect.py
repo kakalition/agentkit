@@ -1,64 +1,73 @@
-"""Inspect a booted app (agent, tools, channels, config, stack)."""
+"""Inspect a booted app (agent, tools, channels, config, stack) — class-based."""
 
 from __future__ import annotations
 
 import json
 
-import typer
-
-from agentkit.cli._app import app
+from agentkit.foundation import Command
 from agentkit.foundation.commands import load_bootstrap
 
 
-@app.command()
-def inspect(
-    bootstrap: str | None = typer.Option(None, "--bootstrap"),
-    as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
-) -> None:
-    """Show the booted app's agent, tools, channels, commands and config."""
-    from agentkit.webui.introspect import stack_view
+class InspectCommand(Command):
+    signature = "inspect {--bootstrap=} {--json}"
+    description = "Show the booted app's agent, tools, channels, commands and config."
 
-    booted = load_bootstrap(bootstrap)
-    booted.boot()
-    agent = booted.agent()
-    toolset = getattr(agent, "_function_toolset", None)
-    data = {
-        "name": booted.name,
-        "agent": getattr(agent, "name", None),
-        "tools": sorted(getattr(toolset, "tools", {}).keys()),
-        "channels": sorted(booted.channels()),
-        "commands": sorted(booted._commands),
-        "config": sorted(booted._config_schemas),
-        "stack": stack_view(booted.settings, app=booted),
-    }
-    if as_json:
-        typer.echo(json.dumps(data, indent=2))
-        return
-    stack = data["stack"]
-    typer.echo(f"app: {data['name']}")
-    typer.echo(f"agent: {data['agent']}")
-    typer.echo(f"posture: {stack['posture']['name']}")
-    typer.echo(f"tools: {', '.join(data['tools']) or '(none)'}")
-    typer.echo(f"channels: {', '.join(data['channels']) or '(none)'}")
-    typer.echo(f"commands: {', '.join(data['commands']) or '(none)'}")
-    typer.echo(f"config: {', '.join(data['config']) or '(none)'}")
-    active = [name for name, on in stack["channels"].items() if on]
-    drivers = stack.get("drivers", {})
-    if drivers:
-        summary = ", ".join(f"{kind}={info['driver']}" for kind, info in sorted(drivers.items()))
-        typer.echo(f"drivers: {summary}")
-    typer.echo(f"model: {stack['model_name']} (providers: {', '.join(stack['model_providers'])})")
-    typer.echo(f"memory: {'on' if stack['memory']['enabled'] else 'off'} ({stack['memory']['embedding_backend']})")
-    typer.echo(f"subagents: {'on' if stack['subagents']['enabled'] else 'off'}")
-    native = stack["native_tools"]
-    typer.echo(f"native toolkits: {', '.join(native['enabled']) or '(none)'}")
-    if native["models"] or native["tasks"] or native["jobs"]:
-        typer.echo(
-            f"  exposed models: {', '.join(native['models']) or '(none)'}; "
-            f"tasks: {', '.join(native['tasks']) or '(none)'}; "
-            f"jobs: {', '.join(native['jobs']) or '(none)'}"
+    def handle(self, bootstrap: str | None = None, as_json: bool = False) -> None:
+        from agentkit.webui.introspect import stack_view
+
+        booted = load_bootstrap(bootstrap)
+        booted.boot()
+        agent = booted.agent()
+        toolset = getattr(agent, "_function_toolset", None)
+        data = {
+            "name": booted.name,
+            "agent": getattr(agent, "name", None),
+            "tools": sorted(getattr(toolset, "tools", {}).keys()),
+            "channels": sorted(booted.channels()),
+            "commands": sorted(booted._commands),
+            "config": sorted(booted._config_schemas),
+            "stack": stack_view(booted.settings, app=booted),
+        }
+        if as_json:
+            self.info(json.dumps(data, indent=2))
+            return
+        stack = data["stack"]
+        self.info(f"app: {data['name']}")
+        self.info(f"agent: {data['agent']}")
+        self.info(f"posture: {stack['posture']['name']}")
+        self.info(f"tools: {', '.join(data['tools']) or '(none)'}")
+        self.info(f"channels: {', '.join(data['channels']) or '(none)'}")
+        self.info(f"commands: {', '.join(data['commands']) or '(none)'}")
+        self.info(f"config: {', '.join(data['config']) or '(none)'}")
+        active = [name for name, on in stack["channels"].items() if on]
+        drivers = stack.get("drivers", {})
+        if drivers:
+            summary = ", ".join(
+                f"{kind}={info['driver']}" for kind, info in sorted(drivers.items())
+            )
+            self.info(f"drivers: {summary}")
+        self.info(
+            f"model: {stack['model_name']} (providers: {', '.join(stack['model_providers'])})"
         )
-    typer.echo(f"learning: {'on' if stack['learning']['enabled'] else 'off'}")
-    if stack.get("teams"):
-        typer.echo(f"teams: {', '.join(stack['teams'])}")
-    typer.echo(f"active channels: {', '.join(active) or '(none)'}")
+        self.info(
+            f"memory: {'on' if stack['memory']['enabled'] else 'off'} "
+            f"({stack['memory']['embedding_backend']})"
+        )
+        self.info(f"subagents: {'on' if stack['subagents']['enabled'] else 'off'}")
+        native = stack["native_tools"]
+        self.info(f"native toolkits: {', '.join(native['enabled']) or '(none)'}")
+        if native["models"] or native["tasks"] or native["jobs"]:
+            self.info(
+                f"  exposed models: {', '.join(native['models']) or '(none)'}; "
+                f"tasks: {', '.join(native['tasks']) or '(none)'}; "
+                f"jobs: {', '.join(native['jobs']) or '(none)'}"
+            )
+        self.info(f"learning: {'on' if stack['learning']['enabled'] else 'off'}")
+        if stack.get("teams"):
+            self.info(f"teams: {', '.join(stack['teams'])}")
+        self.info(f"active channels: {', '.join(active) or '(none)'}")
+
+
+COMMANDS: list[type] = [
+    InspectCommand,
+]

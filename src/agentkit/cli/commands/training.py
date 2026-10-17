@@ -1,54 +1,80 @@
-"""Training commands: trajectory export and batch generation."""
+"""Training commands: trajectory export and batch generation (class-based)."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import typer
-
-from agentkit.cli._app import app
+from agentkit.foundation import Command
 
 
-@app.command("trajectory")
-def trajectory(
-    conversation: str | None = typer.Option(
-        None, "--conversation", "-c", help="Export only this conversation id."
-    ),
-    out: Path | None = typer.Option(None, "--out", "-o", help="Write JSONL here (default stdout)."),
-    compress: bool = typer.Option(False, "--compress", help="Elide large tool outputs."),
-    limit: int = typer.Option(50, "--limit", help="Max conversations to export."),
-) -> None:
-    """Export conversation trajectories as JSONL (for training/evaluation)."""
-    import asyncio
+class TrajectoryCommand(Command):
+    signature = "trajectory {--conversation=} {--out=} {--compress} {--limit=50}"
+    description = "Export conversation trajectories as JSONL (for training/evaluation)."
 
-    from agentkit.config import get_settings
-    from agentkit.runtime import build_runtime, repositories
-    from agentkit.session import load_history
-    from agentkit.trajectory import export_trajectory, iter_trajectories, render_jsonl
+    async def handle(
+        self,
+        conversation: str | None = None,
+        out: Path | None = None,
+        compress: bool = False,
+        limit: int = 50,
+    ) -> None:
+        from agentkit.config import get_settings
+        from agentkit.runtime import build_runtime, repositories
+        from agentkit.session import load_history
+        from agentkit.trajectory import export_trajectory, iter_trajectories, render_jsonl
 
-    settings = get_settings()
-    runtime = build_runtime(settings)
+        settings = get_settings()
+        runtime = build_runtime(settings)
 
-    async def collect() -> list[dict]:
         async with repositories(runtime) as repos:
             if conversation is not None:
                 messages = await load_history(repos, conversation, max_messages=10_000)
-                return [export_trajectory(messages, compress=compress)] if messages else []
-            return [
-                item
-                async for item in iter_trajectories(
-                    repos, limit_conversations=limit, compress=compress
-                )
-            ]
+                items = [export_trajectory(messages, compress=compress)] if messages else []
+            else:
+                items = [
+                    item
+                    async for item in iter_trajectories(
+                        repos, limit_conversations=limit, compress=compress
+                    )
+                ]
 
-    items = asyncio.run(collect())
-    text = render_jsonl(items)
-    if out is not None:
-        out.write_text(text, encoding="utf-8")
-        typer.echo(f"wrote {len(items)} trajectories to {out}")
-    else:
-        typer.echo(text)
+        text = render_jsonl(items)
+        if out is not None:
+            out.write_text(text, encoding="utf-8")
+            self.info(f"wrote {len(items)} trajectories to {out}")
+        else:
+            self.info(text)
+
+
+class GenerateCommand(Command):
+    signature = "generate {prompts} {--out=generations.jsonl} {--n=1} {--bootstrap=}"
+    description = "Run the agent over a batch of prompts and write JSONL results."
+
+    async def handle(
+        self,
+        prompts: Path,
+        out: Path = Path("generations.jsonl"),
+        n: int = 1,
+        bootstrap: str | None = None,
+    ) -> None:
+        from agentkit.foundation.commands import load_bootstrap
+        from agentkit.trajectory import render_jsonl
+
+        prompt_list = _read_prompts(prompts)
+        booted = load_bootstrap(bootstrap)
+        booted.boot()
+
+        results: list[dict] = []
+        for index, prompt in enumerate(prompt_list):
+            for sample in range(max(1, n)):
+                result = await booted.run(
+                    prompt, conversation_id=f"batch:{index}:{sample}", ephemeral=True
+                )
+                results.append({"prompt": prompt, "output": result.output, "usage": result.usage})
+
+        out.write_text(render_jsonl(results), encoding="utf-8")
+        self.info(f"wrote {len(results)} generations to {out}")
 
 
 def _read_prompts(path: Path) -> list[str]:
@@ -69,33 +95,7 @@ def _read_prompts(path: Path) -> list[str]:
     return prompts
 
 
-@app.command("generate")
-def generate(
-    prompts: Path = typer.Argument(..., exists=True, help="JSONL or text file of prompts."),
-    out: Path = typer.Option(Path("generations.jsonl"), "--out", "-o"),
-    n: int = typer.Option(1, "--n", help="Samples per prompt."),
-    bootstrap: str | None = typer.Option(None, "--bootstrap"),
-) -> None:
-    """Run the agent over a batch of prompts and write JSONL results."""
-    import asyncio
-
-    from agentkit.foundation.commands import load_bootstrap
-    from agentkit.trajectory import render_jsonl
-
-    prompt_list = _read_prompts(prompts)
-    booted = load_bootstrap(bootstrap)
-    booted.boot()
-
-    async def run_all() -> list[dict]:
-        results: list[dict] = []
-        for index, prompt in enumerate(prompt_list):
-            for sample in range(max(1, n)):
-                result = await booted.run(
-                    prompt, conversation_id=f"batch:{index}:{sample}", ephemeral=True
-                )
-                results.append({"prompt": prompt, "output": result.output, "usage": result.usage})
-        return results
-
-    results = asyncio.run(run_all())
-    out.write_text(render_jsonl(results), encoding="utf-8")
-    typer.echo(f"wrote {len(results)} generations to {out}")
+COMMANDS: list[type] = [
+    TrajectoryCommand,
+    GenerateCommand,
+]

@@ -15,7 +15,7 @@ from typing import Any
 
 from agentkit.contracts.realtime import RealtimeSession
 from agentkit.errors import ConfigurationError
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, RealtimeDriver
 from agentkit.support.manager import Manager
 
@@ -146,10 +146,12 @@ class RealtimeManager(Manager):
 
 
 @register_driver(DriverKind.REALTIME, RealtimeDriver.LOOPBACK)
-def _loopback_realtime_driver(app: Any) -> LoopbackRealtime:
-    return LoopbackRealtime(model=getattr(app.settings, "realtime_model", None))
-
-
+class LoopbackRealtimeDriver(Driver):
+    def build(self) -> LoopbackRealtime:
+        app = self.app
+        return LoopbackRealtime(model=getattr(app.settings, "realtime_model", None))
 @register_driver(DriverKind.REALTIME, RealtimeDriver.PYDANTIC_AI)
-def _pydantic_realtime_driver(app: Any) -> PydanticAIRealtime:
-    return PydanticAIRealtime(model=getattr(app.settings, "realtime_model", None))
+class PydanticRealtimeDriver(Driver):
+    def build(self) -> PydanticAIRealtime:
+        app = self.app
+        return PydanticAIRealtime(model=getattr(app.settings, "realtime_model", None))

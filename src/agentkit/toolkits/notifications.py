@@ -16,7 +16,7 @@ from agentkit.foundation.notifications import Notification
 from agentkit.logging import get_logger
 from agentkit.toolkits._common import app_of, emit_event, repos_of
 
-__all__ = ["attach_notifications"]
+__all__ = ["_attach_notifications"]
 
 log = get_logger("agentkit.notifications")
 
@@ -66,7 +66,7 @@ def _assistant_message(text: str) -> Any:
     return ModelResponse(parts=[TextPart(text)])
 
 
-def attach_notifications(agent: Any, *, flag: str = "notification_tools_enabled") -> Any:
+def _attach_notifications(agent: Any, *, flag: str = "notification_tools_enabled") -> Any:
     """Register the notification tools on a built PydanticAI agent (idempotent)."""
     if getattr(agent, "_agentkit_notifications_attached", False):
         return agent

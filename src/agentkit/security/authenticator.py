@@ -16,7 +16,7 @@ from agentkit.errors import PermissionDenied
 from agentkit.security import API_KEY, Actor, system_actor
 from agentkit.security.jwt import JWKSVerifier, JWTError
 from agentkit.security.keys import hash_key, parse_api_keys
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import AuthDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -170,15 +170,15 @@ class AuthManager(Manager):
 
 
 @register_driver(DriverKind.AUTH, AuthDriver.DEFAULT)
-def _default_auth_driver(app: Any) -> Authenticator:
-    return Authenticator(app.settings)
-
-
+class DefaultAuthDriver(Driver):
+    def build(self) -> Authenticator:
+        app = self.app
+        return Authenticator(app.settings)
 @register_driver(DriverKind.AUTH, AuthDriver.ANONYMOUS)
-def _anonymous_auth_driver(app: Any) -> AnonymousAuth:
-    return AnonymousAuth(app.settings)
-
-
+class AnonymousAuthDriver(Driver):
+    def build(self) -> AnonymousAuth:
+        app = self.app
+        return AnonymousAuth(app.settings)
 __all__ = [
     "AnonymousAuth",
     "AuthError",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 from agentkit.cli import app as cli_app
 from agentkit.foundation.commands import load_bootstrap
@@ -81,7 +81,8 @@ def test_load_bootstrap_from_env(tmp_path: Path, monkeypatch):
 def test_cli_inspect_against_bootstrap(tmp_path: Path, monkeypatch):
     module = tmp_path / "inspect_bootstrap_mod.py"
     module.write_text(
-        "from agentkit import App, Agent\n"
+        "from agentkit import App\n"
+        "from agentkit.foundation.agent import Agent\n"
         "app = App('inspected', discover=False)\n"
         "app.agent(Agent.make('inspected').instructions('x').output(str))\n"
     )

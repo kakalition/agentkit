@@ -27,7 +27,7 @@ from agentkit.db.repositories import Repositories
 from agentkit.deps import ApprovalCallback
 from agentkit.foundation.agent import Agent as AgentBuilder
 from agentkit.foundation.container import Container
-from agentkit.foundation.events import Dispatcher
+from agentkit.foundation.events import Dispatcher, Listener
 from agentkit.foundation.facade import set_current_app
 from agentkit.foundation.facades import (
     CacheService,
@@ -140,6 +140,8 @@ class App:
         self._provider_instances: list[Provider] = []
         self._deferred: dict[Any, Provider] = {}
         self._middlewares: list[Any] = []
+        self._fakes: dict[str, Any] = {}
+        self._middleware_groups: dict[str, list[Any]] = {}
         self._booted = False
         self._agent_builder: AgentBuilder | None = None
         self._agent: Any = None
@@ -291,6 +293,14 @@ class App:
             provider.register(self)
             for command in provider.commands():
                 self.command(command)
+            contributed_listeners = provider.listeners()
+            if contributed_listeners:
+                self.listeners(contributed_listeners)
+            for middleware in provider.middleware():
+                self.middleware(middleware)
+            contributed_policies = provider.policies()
+            if contributed_policies:
+                self.policies(contributed_policies)
             contributed = provider.schedules()
             if contributed:
                 self.schedules(contributed)
@@ -309,8 +319,32 @@ class App:
 
         self._booted = True
         set_current_app(self)
+        self._wire_validation()
         self.events.dispatch("boot", app=self)
         return self
+
+    def _wire_validation(self) -> None:
+        """Back ``Rule.unique``/``Rule.exists`` with the app's repositories."""
+        from agentkit.foundation.validation import set_uniqueness_resolver
+
+        app = self
+
+        def resolver(model: type, filters: dict[str, Any]) -> bool:
+            from sqlmodel import func, select
+
+            from agentkit._sync import run_sync
+            from agentkit.foundation.db import session_scope
+
+            async def check() -> int:
+                async with session_scope(app) as repos:
+                    stmt: Any = select(func.count()).select_from(model)
+                    for field, value in filters.items():
+                        stmt = stmt.where(getattr(model, field) == value)
+                    return int((await repos.session.exec(stmt)).one())
+
+            return run_sync(check()) > 0
+
+        set_uniqueness_resolver(resolver)
 
     # -- agent ----------------------------------------------------------
     def agent(self, agent: Any = None) -> Any:
@@ -355,6 +389,22 @@ class App:
     def channels(self) -> dict[str, ChannelSpec]:
         return dict(self._channels)
 
+    def policies(self, policies: Any) -> App:
+        """Register authorization policies on the Gate (classes or instances)."""
+        if isinstance(policies, dict):
+            for subject, policy_class in policies.items():
+                self.gate.policy(subject, policy_class)
+            return self
+        for policy in policies:
+            subject = getattr(policy, "model", None) or type(policy).__name__.removesuffix("Policy")
+            self.gate.policy(subject, policy)
+        return self
+
+    def tool_policy(self, policy: Any) -> App:
+        """Install a tool-RBAC policy on this app's Gate."""
+        self.gate.tool_policy(policy)
+        return self
+
     def commands(self, commands: Any) -> App:
         if isinstance(commands, dict):
             self._commands.update(commands)
@@ -363,12 +413,30 @@ class App:
                 if isinstance(command, str):
                     self._commands[command] = command
                     continue
-                name = getattr(command, "name", None) or type(command).__name__
-                self._commands[name] = command
+                name = getattr(command, "name", None)
+                if not name and hasattr(command, "command_name"):
+                    try:
+                        name = command.command_name()
+                    except Exception:  # pragma: no cover - defensive
+                        name = None
+                self._commands[name or type(command).__name__] = command
         return self
 
     def command(self, command: Any) -> App:
         return self.commands([command])
+
+    def listeners(self, listeners: Any) -> App:
+        """Register event listeners (classes or instances)."""
+        if isinstance(listeners, (Listener, type)):
+            listeners = [listeners]
+        for listener in listeners:
+            instance = listener() if isinstance(listener, type) else listener
+            names = instance.events() if hasattr(instance, "events") else []
+            if not names and isinstance(getattr(instance, "event", None), str):
+                names = [instance.event]
+            for name in names:
+                self.events.listen(name, instance)
+        return self
 
     def command_names(self) -> list[str]:
         return sorted(self._commands)
@@ -379,6 +447,12 @@ class App:
 
         commands = [c for c in self._commands.values() if not isinstance(c, str)]
         install(typer_app, commands)
+
+    def console(self, base_path: str | Path = ".") -> Any:
+        """A :class:`~agentkit.foundation.console.Kernel` for this app's commands."""
+        from agentkit.foundation.console import Kernel
+
+        return Kernel(self, base_path)
 
     def schedules(self, schedules: Any) -> App:
         self._schedules.extend(schedules)
@@ -476,13 +550,27 @@ class App:
         return section
 
     # -- events + middleware -------------------------------------------
-    def on(self, event: str, listener: Any) -> App:
-        self.events.listen(event, listener)
-        return self
-
     def middleware(self, middleware: Any) -> App:
+        """Register turn middleware, a named alias, or a :class:`MiddlewareGroup`."""
+        from agentkit.foundation.pipeline import MiddlewareGroup
+
+        if isinstance(middleware, MiddlewareGroup):
+            self._middleware_groups[middleware.name] = list(middleware.middlewares)
+            return self
+        if isinstance(middleware, str):
+            group = self._middleware_groups.get(middleware)
+            if group is None:
+                raise KeyError(f"unknown middleware group: {middleware!r}")
+            self._middlewares.extend(group)
+            return self
         self._middlewares.append(middleware)
         return self
+
+    def middleware_group(self, name: str, *middlewares: Any) -> App:
+        """Declare a named middleware group (usable by alias)."""
+        from agentkit.foundation.pipeline import MiddlewareGroup
+
+        return self.middleware(MiddlewareGroup(name, list(middlewares)))
 
     def history_processor(self, processor: Any) -> App:
         """Set a callable ``messages -> messages`` run before each turn (compaction)."""
@@ -692,16 +780,22 @@ class App:
     @property
     def cache(self) -> Any:
         """The configured cache driver (see the ``Cache`` facade; ``cache_driver``)."""
+        if "cache" in self._fakes:
+            return self._fakes["cache"]
         return self.manager("cache").driver()
 
     @property
     def storage(self) -> Any:
         """The configured file store (see the ``Storage`` facade; ``storage_driver``)."""
+        if "storage" in self._fakes:
+            return self._fakes["storage"]
         return self.manager("storage").driver()
 
     @property
     def notifier(self) -> Notifier:
         """The notifier; register channels with ``app.notifier.channel(name, sender)``."""
+        if "notifier" in self._fakes:
+            return self._fakes["notifier"]
         return self._notifier
 
     @property
@@ -718,7 +812,21 @@ class App:
     @property
     def queue(self) -> Any:
         """The configured job queue driver (see the ``Queue`` facade; ``queue_driver``)."""
+        if "queue" in self._fakes:
+            return self._fakes["queue"]
         return self.manager("queue").driver()
+
+    # -- test fakes -----------------------------------------------------
+    def fake(self, name: str, fake: Any = None) -> Any:
+        """Install (or read) a fake for a subsystem: ``queue``/``cache``/``storage``/``notifier``."""
+        if fake is None:
+            return self._fakes.get(name)
+        self._fakes[name] = fake
+        return fake
+
+    def restore_fakes(self) -> None:
+        """Drop every installed fake."""
+        self._fakes.clear()
 
     @property
     def pricing(self) -> Any:
@@ -857,7 +965,7 @@ class App:
 
     def notify(self, notification: Any, *, to: Any = None, conversation_id: str | None = None) -> Any:
         """Send a :class:`~agentkit.foundation.notifications.Notification`."""
-        return self._notifier.send(notification, to=to, conversation_id=conversation_id)
+        return self.notifier.send(notification, to=to, conversation_id=conversation_id)
 
     def _deliver_result(self, conversation_id: str, text: str) -> None:
         """Deliver a scheduled task's result to the conversation that scheduled it.
@@ -1076,13 +1184,21 @@ class App:
         return run_answer
 
     def channel_services(self) -> list[Any]:
+        from agentkit.foundation.channels import Channel
         from agentkit.supervise import Service
 
         services: list[Service] = []
         for spec in self._channels.values():
-            if spec.factory is None:
+            factory = spec.factory
+            if factory is None:
                 continue
-            services.extend(_as_services(spec.name, spec.factory(self)))
+            if isinstance(factory, type) and issubclass(factory, Channel):
+                produced = factory(self).services(self)
+            elif isinstance(factory, Channel):
+                produced = factory.services(self)
+            else:
+                produced = factory(self)
+            services.extend(_as_services(spec.name, produced))
         return services
 
     def serve(
@@ -1108,6 +1224,10 @@ class App:
 
     # -- internals ------------------------------------------------------
     def _bind_facades(self) -> None:
+        from agentkit.foundation.gate import Gate as GateManager
+
+        self.container.instance("app", self)
+        self.container.instance(type(self), self)
         self.container.instance("memory", MemoryService(self))
         self.container.instance("schedule", ScheduleService(self))
         self.container.instance("db", DBService(self))
@@ -1117,6 +1237,12 @@ class App:
         self.container.instance("cache", CacheService(self))
         self.container.instance("storage", StorageService(self))
         self.container.instance("queue", QueueService(self))
+        self.container.instance("gate", GateManager(self))
+
+    @property
+    def gate(self) -> Any:
+        """The app's authorization :class:`~agentkit.foundation.gate.Gate`."""
+        return self.make("gate")
 
 
 #: ``Application`` is the canonical container name; ``App`` stays as an alias.
@@ -1247,6 +1373,12 @@ class ApplicationBuilder:
         for name, factory in discovery.discover_channels(self.base_path):
             app.channel(name, factory)
         app.commands(discovery.discover_commands(self.base_path))
+        listeners = discovery.discover_listeners(self.base_path)
+        if listeners:
+            app.listeners(listeners)
+        policies = discovery.discover_policies(self.base_path)
+        if policies:
+            app.policies(policies)
         for section, schema in discovery.discover_config(self.base_path).items():
             app.config(section, schema)
 

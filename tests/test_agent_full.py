@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentkit import Agent, AgentRegistry
+from agentkit import AgentRegistry
 from agentkit.agents.handle import AgentHandle
 from agentkit.config import AgentSettings
+from agentkit.foundation.agent import Agent
 
 
 class EchoAgent:

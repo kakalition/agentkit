@@ -18,7 +18,7 @@ from typing import Any
 
 from agentkit.contracts.audio import Synthesizer, Transcriber
 from agentkit.errors import ConfigurationError
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import AudioDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -128,6 +128,8 @@ class AudioManager(Manager):
 
 
 @register_driver(DriverKind.AUDIO, AudioDriver.OPENAI)
-def _openai_speech_driver(app: Any) -> OpenAISpeech:
-    settings = getattr(app, "settings", None)
-    return OpenAISpeech(api_key=getattr(settings, "openai_api_key", None))
+class OpenaiSpeechDriver(Driver):
+    def build(self) -> OpenAISpeech:
+        app = self.app
+        settings = getattr(app, "settings", None)
+        return OpenAISpeech(api_key=getattr(settings, "openai_api_key", None))

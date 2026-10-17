@@ -7,7 +7,22 @@ import pytest
 from agentkit.config import AgentSettings
 from agentkit.db.repositories import Repositories
 from agentkit.deps import Deps
+from agentkit.foundation.events import Listener
 from agentkit.runtime import Runtime, build_runtime, repositories
+
+
+class Recorder(Listener):
+    """Test listener base: subclass with ``event`` and an optional ``transform``."""
+
+    event: object = ()
+    transform = None
+
+    def __init__(self, seen: list) -> None:
+        self.seen = seen
+
+    def handle(self, event) -> None:  # noqa: ANN001
+        value = self.transform(event) if self.transform else event
+        self.seen.append(value)
 
 
 @pytest.fixture

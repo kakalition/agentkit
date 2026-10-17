@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from click.testing import CliRunner
 from cryptography.fernet import Fernet
-from typer.testing import CliRunner
 
 from agentkit.cli import app as cli_app
 from agentkit.config import AgentSettings, get_settings

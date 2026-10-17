@@ -131,3 +131,9 @@ module = [
     "agentkit.foundation.storage",
 ]
 disable_error_code = ["arg-type", "attr-defined", "union-attr", "valid-type", "misc"]
+
+# Command subclasses narrow ``handle`` to the parameters they declare (the
+# signature drives the CLI), which mypy flags as an override mismatch.
+[[tool.mypy.overrides]]
+module = ["agentkit.cli.commands.*", "agentkit.foundation.console"]
+disable_error_code = ["override"]

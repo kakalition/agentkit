@@ -5,11 +5,14 @@ from dataclasses import dataclass
 
 import pytest
 import typer
+from click.testing import CliRunner
+from conftest import Recorder
 from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
-from typer.testing import CliRunner
+from typer.testing import CliRunner as TyperCliRunner
 
-from agentkit import Agent, App, Command, Section, Service
+from agentkit import App, Command, Section, Service
+from agentkit.foundation.agent import Agent
 from agentkit.foundation.application import _as_services
 from agentkit.foundation.facade import emit
 from agentkit.foundation.middleware import logging_middleware
@@ -180,7 +183,13 @@ async def test_emit_helper_with_and_without_app(runtime: Runtime):
     app = _app(runtime)
     app.boot()
     seen: list[str] = []
-    app.on("ping", lambda event: seen.append("pong"))
+    class _Ping(Recorder):
+        event = "ping"
+
+        def handle(self, event) -> None:
+            self.seen.append("pong")
+
+    app.listeners([_Ping(seen)])
     assert await emit("ping") is True
     assert seen == ["pong"]
 
@@ -220,7 +229,7 @@ def test_installed_command_end_to_end(tmp_path, monkeypatch):
     app.commands([_Recorder(), _Other()])
     cli = typer.Typer()
     app.install_commands(cli)
-    result = CliRunner().invoke(cli, ["record"])
+    result = TyperCliRunner().invoke(cli, ["record"])
     assert result.exit_code == 0
     assert COMMAND_RAN == ["yes"]
 

@@ -2,7 +2,7 @@
 
 A :class:`Planner` wraps an agent (or any object with ``run``)::
 
-    from agentkit import Agent
+    from agentkit.foundation.agent import Agent
     from agentkit.planning import Planner
 
     agent = Agent.make("ops").instructions("…").build()

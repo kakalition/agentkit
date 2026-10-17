@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from agentkit import Agent
 from agentkit.db.models import Feedback
 from agentkit.deps import Deps
+from agentkit.foundation.agent import Agent
 from agentkit.foundation.repository import Repository
 
 

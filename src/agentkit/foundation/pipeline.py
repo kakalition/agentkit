@@ -74,7 +74,25 @@ async def run_pipeline(middlewares: list[MiddlewareFunc], passable: Any, destina
     return await Pipeline(middlewares).send(passable).then(destination)
 
 
-__all__ = ["Middleware", "MiddlewareFunc", "Pipeline", "run_pipeline"]
+__all__ = ["Middleware", "MiddlewareFunc", "MiddlewareGroup", "Pipeline", "run_pipeline"]
+
+
+class MiddlewareGroup:
+    """A named bundle of middleware (Laravel's middleware groups).
+
+        app.middleware(MiddlewareGroup("web", [logging_middleware, auth]))
+        app.middleware("web")   # expands to the group's members
+    """
+
+    def __init__(self, name: str, middlewares: list[Any] | None = None) -> None:
+        self.name = name
+        self.middlewares = list(middlewares or [])
+
+    def __iter__(self) -> Any:
+        return iter(self.middlewares)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"MiddlewareGroup({self.name!r}, {len(self.middlewares)} middleware)"
 
 
 class Middleware:

@@ -21,16 +21,17 @@ from __future__ import annotations
 import importlib
 import inspect
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlmodel import Field, select
 
 from agentkit.contracts.queue import QueueDriver
+from agentkit.foundation.clock import now
 from agentkit.foundation.model import Model
 from agentkit.foundation.repository import Repository
 from agentkit.logging import get_logger
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, QueueDriverKind
 from agentkit.support.manager import Manager
 
@@ -44,6 +45,7 @@ __all__ = [
     "QueueManager",
     "QueueRepo",
     "QueuedJob",
+    "QueuedListenerJob",
     "SyncQueue",
     "deserialize_job",
     "serialize_job",
@@ -67,14 +69,47 @@ class Job:
     def handle(self, app: Any) -> Any:
         raise NotImplementedError
 
+    def middleware(self) -> list[Any]:
+        """Job middleware: ``async def mw(job, app, call_next)`` wrappers."""
+        return []
+
+    def failed(self, app: Any, error: BaseException) -> None:
+        """Called when the job raises (default: re-raise)."""
+        raise error
+
     async def dispatch(self, app: Any) -> Any:
-        result = self.handle(app)
-        if inspect.isawaitable(result):
-            return await result
-        return result
+        async def run() -> Any:
+            result = self.handle(app)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+
+        chain = run
+        for middleware in reversed(self.middleware()):
+            chain = _wrap_job_middleware(middleware, self, app, chain)
+        try:
+            return await chain()
+        except BaseException as exc:  # noqa: BLE001 - routed through failed()
+            self.failed(app, exc)
+            raise
 
     def to_payload(self) -> dict[str, Any]:
         return serialize_job(self)
+
+
+def _wrap_job_middleware(
+    middleware: Any, job: Job, app: Any, nxt: Any
+) -> Any:
+    async def handler() -> Any:
+        async def call_next() -> Any:
+            return await nxt()
+
+        result = middleware(job, app, call_next)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    return handler
 
 
 def serialize_job(job: Job) -> dict[str, Any]:
@@ -104,6 +139,34 @@ def deserialize_job(payload: dict[str, Any]) -> Job:
         raise DeserializationError(f"cannot rebuild job {reference!r}: {exc}") from exc
 
 
+class QueuedListenerJob(Job):
+    """A ``ShouldQueue`` event listener dispatched onto the durable queue.
+
+    The listener is referenced by ``module:ClassName`` (it must be
+    default-constructible) and the event is replayed with its payload.
+    """
+
+    def __init__(self, listener_path: str = "", name: str = "", payload: dict[str, Any] | None = None) -> None:
+        self.listener_path = listener_path
+        self.name = name
+        self.payload = dict(payload or {})
+
+    def handle(self, app: Any) -> Any:
+        from agentkit.foundation.events import Event
+
+        module_name, _, qualname = self.listener_path.partition(":")
+        target: Any = importlib.import_module(module_name)
+        for part in qualname.split("."):
+            target = getattr(target, part)
+        listener = target() if isinstance(target, type) else target
+        result = listener(Event(self.name, app, dict(self.payload)))
+        if inspect.isawaitable(result):
+            from agentkit._sync import run_sync
+
+            return run_sync(result)  # type: ignore[arg-type]
+        return result
+
+
 class QueuedJob(Model, table=True):
     """A stored job awaiting processing."""
 
@@ -116,12 +179,12 @@ class QueuedJob(Model, table=True):
     payload: str = "{}"
     attempts: int = 0
     max_retries: int = 3
-    available_at: datetime = Field(default_factory=lambda: datetime.now(UTC), index=True)
+    available_at: datetime = Field(default_factory=lambda: now(), index=True)
     reserved_at: datetime | None = Field(default=None)
     failed: bool = False
     error: str = ""
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=lambda: now())
+    updated_at: datetime = Field(default_factory=lambda: now())
 
 
 class QueueRepo(Repository[QueuedJob]):
@@ -169,14 +232,14 @@ class Queue:
     ) -> int:
         """Persist a job; returns its id."""
         payload = job.to_payload() if hasattr(job, "to_payload") else serialize_job(job)
-        now = datetime.now(UTC)
+        current = now()
         async with self.app.repositories() as repos:
             record = await repos.queue.create(
                 queue=queue or getattr(job, "queue", self.default),
                 job=payload["job"],
                 payload=json.dumps(payload),
                 max_retries=max_retries if max_retries is not None else getattr(job, "max_retries", 3),
-                available_at=now + timedelta(seconds=delay),
+                available_at=current + timedelta(seconds=delay),
             )
             return int(record.id)
 
@@ -202,8 +265,8 @@ class Queue:
             record.attempts = 0
             record.error = ""
             record.reserved_at = None
-            record.available_at = datetime.now(UTC)
-            record.updated_at = datetime.now(UTC)
+            record.available_at = now()
+            record.updated_at = now()
             repos.session.add(record)
             await repos.session.flush()
             return True
@@ -239,15 +302,15 @@ class Queue:
         return True
 
     async def _reserve(self, queue: str) -> QueuedJob | None:
-        now = datetime.now(UTC)
+        current = now()
         async with self.app.repositories() as repos:
-            candidates = await repos.queue.ready(queue, now, limit=1)
+            candidates = await repos.queue.ready(queue, current, limit=1)
             if not candidates:
                 return None
             record = candidates[0]
-            record.reserved_at = now
+            record.reserved_at = current
             record.attempts += 1
-            record.updated_at = now
+            record.updated_at = current
             repos.session.add(record)
             await repos.session.flush()
             await repos.session.refresh(record)
@@ -266,11 +329,11 @@ class Queue:
                 return
             record.error = error
             record.reserved_at = None
-            record.updated_at = datetime.now(UTC)
+            record.updated_at = now()
             if record.attempts >= record.max_retries:
                 record.failed = True
             else:
-                record.available_at = datetime.now(UTC)
+                record.available_at = now()
             repos.session.add(record)
             await repos.session.flush()
 
@@ -313,10 +376,12 @@ class QueueManager(Manager):
 
 
 @register_driver(DriverKind.QUEUE, QueueDriverKind.DATABASE)
-def _database_queue_driver(app: Any) -> Queue:
-    return Queue(app)
-
-
+class DatabaseQueueDriver(Driver):
+    def build(self) -> Queue:
+        app = self.app
+        return Queue(app)
 @register_driver(DriverKind.QUEUE, QueueDriverKind.SYNC)
-def _sync_queue_driver(app: Any) -> SyncQueue:
-    return SyncQueue(app)
+class SyncQueueDriver(Driver):
+    def build(self) -> SyncQueue:
+        app = self.app
+        return SyncQueue(app)

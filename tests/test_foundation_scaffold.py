@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 from agentkit import package_name, scaffold_project
 from agentkit.cli import app as cli_app
@@ -81,7 +81,7 @@ def test_scaffold_full_vs_minimal(tmp_path: Path):
     assert (full / "app" / "Channels" / "Example.py").is_file()
     assert (full / "config" / "memory.py").is_file()
     assert "FullStackProvider" in (full / "bootstrap.py").read_text()
-    assert ".full()" in (full / "app" / "Agents" / "assistant.py").read_text()
+    assert "full = True" in (full / "app" / "Agents" / "assistant.py").read_text()
 
     minimal = scaffold_project("min-app", tmp_path, full=False)
     assert not (minimal / "app" / "Channels").exists()

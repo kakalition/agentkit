@@ -15,10 +15,10 @@ from agentkit.deps import Deps
 from agentkit.knowledge import chunk_text
 from agentkit.toolkits._common import emit_event, repos_of
 
-__all__ = ["attach_knowledge_admin"]
+__all__ = ["_attach_knowledge_admin"]
 
 
-def attach_knowledge_admin(agent: Any, *, flag: str = "knowledge_admin_enabled") -> Any:
+def _attach_knowledge_admin(agent: Any, *, flag: str = "knowledge_admin_enabled") -> Any:
     """Register the knowledge-admin tools on a built PydanticAI agent (idempotent)."""
     if getattr(agent, "_agentkit_knowledge_admin_attached", False):
         return agent

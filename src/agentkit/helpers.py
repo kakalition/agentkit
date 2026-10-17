@@ -23,17 +23,21 @@ from agentkit.logging import get_logger
 
 __all__ = [
     "app",
+    "authorize",
     "cache",
+    "can",
     "config",
     "dispatch",
     "env",
     "event",
     "logger",
     "notify",
+    "policy",
     "queue",
     "report",
     "resolve",
     "storage",
+    "tool_policy",
 ]
 
 
@@ -112,3 +116,24 @@ def logger(name: str = "agentkit") -> Any:
 def report(exception: BaseException) -> None:
     """Report an exception to the log (Laravel's ``report``)."""
     get_logger("agentkit").exception("unhandled: %s", exception)
+
+
+def can(ability: str, *arguments: Any, actor: Any = None) -> bool:
+    """Whether the current actor may perform ``ability`` (``Gate.allows``)."""
+    return bool(current_app().gate.allows(ability, *arguments, actor=actor))
+
+
+def authorize(ability: str, *arguments: Any, actor: Any = None) -> bool:
+    """Authorize ``ability`` or raise ``PermissionDenied`` (``Gate.authorize``)."""
+    return bool(current_app().gate.authorize(ability, *arguments, actor=actor))
+
+
+def policy(spec: Any, policy_class: Any = None) -> Any:
+    """Register a ``Policy`` class (by its ``model`` or class name) on the Gate."""
+    gate = current_app().gate
+    return gate.policy(spec, policy_class)
+
+
+def tool_policy(policy: Any) -> Any:
+    """Install a tool-RBAC policy on the current app's Gate."""
+    return current_app().gate.tool_policy(policy)

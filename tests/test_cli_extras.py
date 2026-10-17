@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 from agentkit.cli import app as cli_app
 from agentkit.config import get_settings
@@ -35,7 +35,8 @@ def test_cli_knowledge_add_search_list(tmp_path, monkeypatch):
 def test_cli_eval_runs_suite(tmp_path, monkeypatch):
     module = tmp_path / "eval_bootstrap.py"
     module.write_text(
-        "from agentkit import Agent, App\n"
+        "from agentkit import App\n"
+        "from agentkit.foundation.agent import Agent\n"
         "from pydantic_ai.messages import ModelResponse, TextPart\n"
         "from pydantic_ai.models.function import FunctionModel\n"
         "app = App('ev', discover=False)\n"
@@ -59,7 +60,8 @@ def test_cli_eval_runs_suite(tmp_path, monkeypatch):
 def test_cli_eval_failure_exits_nonzero(tmp_path, monkeypatch):
     module = tmp_path / "eval_fail_bootstrap.py"
     module.write_text(
-        "from agentkit import Agent, App\n"
+        "from agentkit import App\n"
+        "from agentkit.foundation.agent import Agent\n"
         "from pydantic_ai.messages import ModelResponse, TextPart\n"
         "from pydantic_ai.models.function import FunctionModel\n"
         "app = App('ev', discover=False)\n"

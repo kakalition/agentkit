@@ -2,8 +2,8 @@
 
     from agentkit.toolkits.computer import attach_computer_tools
 
-    attach_computer_tools(agent)          # uses the configured computer driver
-    attach_computer_tools(agent, LoopbackComputer(), requires_approval=False)
+    _attach_computer_tools(agent)          # uses the configured computer driver
+    _attach_computer_tools(agent, LoopbackComputer(), requires_approval=False)
 
 Every tool is approval-gated by default; egress policy still applies.
 """
@@ -17,7 +17,7 @@ from pydantic_ai import RunContext
 from agentkit.deps import Deps
 from agentkit.toolkits._common import app_of
 
-__all__ = ["attach_computer_tools"]
+__all__ = ["_attach_computer_tools"]
 
 
 def _computer_of(ctx: RunContext[Deps], fallback: Any) -> Any:
@@ -32,7 +32,7 @@ def _computer_of(ctx: RunContext[Deps], fallback: Any) -> Any:
     return None
 
 
-def attach_computer_tools(
+def _attach_computer_tools(
     agent: Any, computer: Any = None, *, requires_approval: bool = True
 ) -> Any:
     """Register ``browser_*`` tools on ``agent`` (approval-gated by default)."""

@@ -9,6 +9,7 @@ from pydantic_ai.models.function import FunctionModel
 
 from agentkit import scheduler
 from agentkit.config import AgentSettings
+from agentkit.foundation.agent import Agent
 from agentkit.runtime import build_runtime, repositories
 from agentkit.session import ChatResult, serialize_message
 from agentkit.webui.app import build_webui_app
@@ -242,7 +243,6 @@ def test_lessons_review_regression(client):
 
 
 def test_ephemeral_chat_writes_nothing(tmp_path):
-    from agentkit import Agent
     from agentkit.foundation.application import App
 
     settings = AgentSettings(agent_home=tmp_path, agent_name="ephemeral", memory_embedding_backend="hash")

@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
-from agentkit import Agent
 from agentkit.deps import Deps
+from agentkit.foundation.agent import Agent
 
 
 def _fn(agent, name):

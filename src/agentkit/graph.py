@@ -34,7 +34,7 @@ from typing import Any
 from pydantic_graph import GraphBuilder
 
 from agentkit.contracts.graph import GraphExecutor
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, GraphDriver
 from agentkit.support.manager import Manager
 
@@ -344,21 +344,21 @@ class GraphManager(Manager):
 
 
 @register_driver(DriverKind.GRAPH, GraphDriver.SEQUENTIAL)
-def _sequential_graph_driver(app: Any) -> SequentialGraphExecutor:
-    return SequentialGraphExecutor()
-
-
+class SequentialGraphDriver(Driver):
+    def build(self) -> SequentialGraphExecutor:
+        return SequentialGraphExecutor()
 @register_driver(DriverKind.GRAPH, GraphDriver.PARALLEL)
-def _parallel_graph_driver(app: Any) -> ParallelGraphExecutor:
-    return ParallelGraphExecutor()
-
-
+class ParallelGraphDriver(Driver):
+    def build(self) -> ParallelGraphExecutor:
+        return ParallelGraphExecutor()
 @register_driver(DriverKind.GRAPH, GraphDriver.CHECKPOINTED)
-def _checkpointed_graph_driver(app: Any) -> CheckpointedGraphExecutor:
-    store = None
-    try:
-        if bool(getattr(app.settings, "checkpoints_enabled", False)):
-            store = app.manager("checkpoint").driver()
-    except Exception:  # pragma: no cover - checkpoint store is best-effort
+class CheckpointedGraphDriver(Driver):
+    def build(self) -> CheckpointedGraphExecutor:
+        app = self.app
         store = None
-    return CheckpointedGraphExecutor(store)
+        try:
+            if bool(getattr(app.settings, "checkpoints_enabled", False)):
+                store = app.manager("checkpoint").driver()
+        except Exception:  # pragma: no cover - checkpoint store is best-effort
+            store = None
+        return CheckpointedGraphExecutor(store)

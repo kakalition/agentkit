@@ -18,8 +18,9 @@ from typing import Any
 
 from pydantic_ai import Agent, RunContext
 
+from agentkit.capability import Capability
 from agentkit.contracts.memory import MemoryStore, RecallStrategy
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, MemoryDriver, RecallDriver
 from agentkit.support.manager import Manager
 
@@ -108,130 +109,133 @@ async def memory_digest(repos: Any, *, limit: int = DEFAULT_DIGEST_LIMIT) -> str
     return "\n".join(lines)
 
 
-def attach_memory(agent: Agent[Any, Any]) -> Agent[Any, Any]:
-    """Register memory tools + a dynamic memory digest on ``agent`` (idempotent)."""
-    if getattr(agent, "_agentkit_memory_attached", False):
+class MemoryCapability(Capability):
+    name = "memory"
+
+    def install(self, agent: Agent[Any, Any]) -> Agent[Any, Any]:
+        """Register memory tools + a dynamic memory digest on ``agent`` (idempotent)."""
+        if getattr(agent, "_agentkit_memory_attached", False):
+            return agent
+
+        @agent.tool
+        async def remember(ctx: RunContext[Any], fact: str, kind: str = "fact") -> str:
+            """Save a durable fact about the user (their name, preferences, dates, …).
+
+            Args:
+                fact: The fact to remember (short and factual).
+                kind: One of fact, preference, person, date, episodic, procedural.
+            """
+            store = _store(ctx.deps)
+            if store is None or not _writable(ctx.deps):
+                return "memory is unavailable"
+            try:
+                row = await store.add(fact, kind=kind)
+            except ValueError as exc:
+                return f"could not remember: {exc}"
+            return f"remembered as #{row.id}"
+
+        @agent.tool
+        async def remember_person(ctx: RunContext[Any], name: str, note: str = "") -> str:
+            """Remember a person the user mentions.
+
+            Args:
+                name: The person's name.
+                note: An optional detail about them.
+            """
+            store = _store(ctx.deps)
+            if store is None or not _writable(ctx.deps):
+                return "memory is unavailable"
+            content = f"{name} — {note}" if note else name
+            row = await store.add(content, kind="person")
+            return f"remembered {name} as #{row.id}"
+
+        @agent.tool
+        async def recall(ctx: RunContext[Any], query: str, kind: str | None = None) -> str:
+            """Look up what you already remember about the user.
+
+            Args:
+                query: What to look for.
+                kind: Optionally restrict to one memory kind.
+            """
+            store = _store(ctx.deps)
+            if store is None or not _enabled(ctx.deps):
+                return "(memory unavailable)"
+            hits = await store.search(query, kind=kind)
+            if not hits:
+                return "(nothing remembered about that)"
+            await store.record_use(hits)
+            return "\n".join(f"{row.id}: {row.content}" for row in hits)
+
+        @agent.tool
+        async def forget_memory(ctx: RunContext[Any], memory_id: int) -> str:
+            """Delete a remembered fact by its id."""
+            store = _store(ctx.deps)
+            if store is None or not _writable(ctx.deps):
+                return "memory is unavailable"
+            return "forgotten" if await store.forget(memory_id) else "no such memory"
+
+        @agent.tool
+        async def update_profile(
+            ctx: RunContext[Any],
+            name: str | None = None,
+            timezone: str | None = None,
+            locale: str | None = None,
+            notes: str | None = None,
+            preferences: dict[str, str] | None = None,
+        ) -> str:
+            """Update the owner's profile (only the fields you pass are changed)."""
+            store = _profile_store(ctx.deps)
+            if store is None or not _writable(ctx.deps):
+                return "profile is unavailable"
+            fields: dict[str, Any] = {}
+            for key, value in (
+                ("name", name),
+                ("timezone", timezone),
+                ("locale", locale),
+                ("notes", notes),
+                ("preferences", preferences),
+            ):
+                if value is not None:
+                    fields[key] = value
+            if not fields:
+                return "nothing to update"
+            await store.set(**fields)
+            return f"profile updated: {', '.join(sorted(fields))}"
+
+        @agent.tool
+        async def get_profile(ctx: RunContext[Any]) -> str:
+            """Show the owner's stored profile."""
+            store = _profile_store(ctx.deps)
+            if store is None or not _enabled(ctx.deps):
+                return "profile is unavailable"
+            profile = await store.get()
+            if profile is None:
+                return "(no profile yet)"
+            return (
+                f"name={profile.name!r} timezone={profile.timezone!r} locale={profile.locale!r} "
+                f"preferences={profile.preferences} notes={profile.notes!r}"
+            )
+
+        @agent.instructions
+        async def _memory_instructions(ctx: RunContext[Any]) -> str | None:
+            if not _enabled(ctx.deps):
+                return None
+            owner_name = getattr(getattr(ctx.deps, "settings", None), "owner_name", None)
+            parts = [MEMORY_GUIDE]
+            if owner_name and owner_name != "Owner":
+                parts.append(f"The user's name is {owner_name}.")
+            digest = await memory_digest(ctx.deps.repos)
+            if digest:
+                parts.append(digest)
+            return "\n\n".join(parts)
+
+        agent._agentkit_memory_attached = True  # type: ignore[attr-defined]
         return agent
 
-    @agent.tool
-    async def remember(ctx: RunContext[Any], fact: str, kind: str = "fact") -> str:
-        """Save a durable fact about the user (their name, preferences, dates, …).
 
-        Args:
-            fact: The fact to remember (short and factual).
-            kind: One of fact, preference, person, date, episodic, procedural.
-        """
-        store = _store(ctx.deps)
-        if store is None or not _writable(ctx.deps):
-            return "memory is unavailable"
-        try:
-            row = await store.add(fact, kind=kind)
-        except ValueError as exc:
-            return f"could not remember: {exc}"
-        return f"remembered as #{row.id}"
-
-    @agent.tool
-    async def remember_person(ctx: RunContext[Any], name: str, note: str = "") -> str:
-        """Remember a person the user mentions.
-
-        Args:
-            name: The person's name.
-            note: An optional detail about them.
-        """
-        store = _store(ctx.deps)
-        if store is None or not _writable(ctx.deps):
-            return "memory is unavailable"
-        content = f"{name} — {note}" if note else name
-        row = await store.add(content, kind="person")
-        return f"remembered {name} as #{row.id}"
-
-    @agent.tool
-    async def recall(ctx: RunContext[Any], query: str, kind: str | None = None) -> str:
-        """Look up what you already remember about the user.
-
-        Args:
-            query: What to look for.
-            kind: Optionally restrict to one memory kind.
-        """
-        store = _store(ctx.deps)
-        if store is None or not _enabled(ctx.deps):
-            return "(memory unavailable)"
-        hits = await store.search(query, kind=kind)
-        if not hits:
-            return "(nothing remembered about that)"
-        await store.record_use(hits)
-        return "\n".join(f"{row.id}: {row.content}" for row in hits)
-
-    @agent.tool
-    async def forget_memory(ctx: RunContext[Any], memory_id: int) -> str:
-        """Delete a remembered fact by its id."""
-        store = _store(ctx.deps)
-        if store is None or not _writable(ctx.deps):
-            return "memory is unavailable"
-        return "forgotten" if await store.forget(memory_id) else "no such memory"
-
-    @agent.tool
-    async def update_profile(
-        ctx: RunContext[Any],
-        name: str | None = None,
-        timezone: str | None = None,
-        locale: str | None = None,
-        notes: str | None = None,
-        preferences: dict[str, str] | None = None,
-    ) -> str:
-        """Update the owner's profile (only the fields you pass are changed)."""
-        store = _profile_store(ctx.deps)
-        if store is None or not _writable(ctx.deps):
-            return "profile is unavailable"
-        fields: dict[str, Any] = {}
-        for key, value in (
-            ("name", name),
-            ("timezone", timezone),
-            ("locale", locale),
-            ("notes", notes),
-            ("preferences", preferences),
-        ):
-            if value is not None:
-                fields[key] = value
-        if not fields:
-            return "nothing to update"
-        await store.set(**fields)
-        return f"profile updated: {', '.join(sorted(fields))}"
-
-    @agent.tool
-    async def get_profile(ctx: RunContext[Any]) -> str:
-        """Show the owner's stored profile."""
-        store = _profile_store(ctx.deps)
-        if store is None or not _enabled(ctx.deps):
-            return "profile is unavailable"
-        profile = await store.get()
-        if profile is None:
-            return "(no profile yet)"
-        return (
-            f"name={profile.name!r} timezone={profile.timezone!r} locale={profile.locale!r} "
-            f"preferences={profile.preferences} notes={profile.notes!r}"
-        )
-
-    @agent.instructions
-    async def _memory_instructions(ctx: RunContext[Any]) -> str | None:
-        if not _enabled(ctx.deps):
-            return None
-        owner_name = getattr(getattr(ctx.deps, "settings", None), "owner_name", None)
-        parts = [MEMORY_GUIDE]
-        if owner_name and owner_name != "Owner":
-            parts.append(f"The user's name is {owner_name}.")
-        digest = await memory_digest(ctx.deps.repos)
-        if digest:
-            parts.append(digest)
-        return "\n\n".join(parts)
-
-    agent._agentkit_memory_attached = True  # type: ignore[attr-defined]
-    return agent
-
-
-# --------------------------------------------------------------------------
-# Drivers
-# --------------------------------------------------------------------------
+    # --------------------------------------------------------------------------
+    # Drivers
+    # --------------------------------------------------------------------------
 
 
 class InMemoryStore:
@@ -282,17 +286,16 @@ class MemoryManager(Manager):
 
 
 @register_driver(DriverKind.MEMORY, MemoryDriver.REPOSITORY)
-def _repository_memory_driver(app: Any) -> Any:
-    from agentkit.foundation.facades import MemoryService
+class RepositoryMemoryDriver(Driver):
+    def build(self) -> Any:
+        app = self.app
+        from agentkit.foundation.facades import MemoryService
 
-    return MemoryService(app)
-
-
+        return MemoryService(app)
 @register_driver(DriverKind.MEMORY, MemoryDriver.IN_MEMORY)
-def _in_memory_memory_driver(app: Any) -> InMemoryStore:
-    return InMemoryStore()
-
-
+class InMemoryMemoryDriver(Driver):
+    def build(self) -> InMemoryStore:
+        return InMemoryStore()
 def _recency(memory: Any, now: datetime, half_life_days: float) -> float:
     anchor = (
         getattr(memory, "last_used_at", None)
@@ -354,20 +357,19 @@ class MemoryRecallManager(Manager):
 
 
 @register_driver(DriverKind.MEMORY_RECALL, RecallDriver.HYBRID)
-def _hybrid_recall_driver(app: Any) -> HybridRecall:
-    return HybridRecall(getattr(app, "settings", None))
-
-
+class HybridRecallDriver(Driver):
+    def build(self) -> HybridRecall:
+        app = self.app
+        return HybridRecall(getattr(app, "settings", None))
 @register_driver(DriverKind.MEMORY_RECALL, RecallDriver.KEYWORD)
-def _keyword_recall_driver(app: Any) -> KeywordRecall:
-    return KeywordRecall()
-
-
+class KeywordRecallDriver(Driver):
+    def build(self) -> KeywordRecall:
+        return KeywordRecall()
 @register_driver(DriverKind.MEMORY_RECALL, RecallDriver.RECENCY)
-def _recency_recall_driver(app: Any) -> RecencyRecall:
-    return RecencyRecall(getattr(app, "settings", None))
-
-
+class RecencyRecallDriver(Driver):
+    def build(self) -> RecencyRecall:
+        app = self.app
+        return RecencyRecall(getattr(app, "settings", None))
 __all__ = [
     "DEFAULT_DIGEST_LIMIT",
     "MEMORY_GUIDE",
@@ -379,6 +381,6 @@ __all__ = [
     "MemoryStore",
     "RecallStrategy",
     "RecencyRecall",
-    "attach_memory",
+    "MemoryCapability",
     "memory_digest",
 ]

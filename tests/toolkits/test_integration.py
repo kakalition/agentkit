@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentkit import Agent, App
+from agentkit import App
 from agentkit.config import AgentSettings
 from agentkit.db.models import Feedback
+from agentkit.foundation.agent import Agent
 from agentkit.toolkits import RunRegisteredTask
 from agentkit.webui.introspect import stack_view
 

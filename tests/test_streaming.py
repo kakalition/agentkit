@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pydantic_ai.models.function import FunctionModel
 
-from agentkit import Agent, App, StreamEvent
+from agentkit import App, StreamEvent
+from agentkit.foundation.agent import Agent
 from agentkit.runtime import Runtime
 
 

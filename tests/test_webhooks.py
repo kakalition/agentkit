@@ -4,7 +4,7 @@ import asyncio
 import json
 
 import httpx
-from typer.testing import CliRunner
+from click.testing import CliRunner
 
 from agentkit.cli import app as cli_app
 from agentkit.config import AgentSettings, get_settings

@@ -38,8 +38,9 @@ def _build(root: Path) -> Path:
     )
     _write(
         root / "app" / "Channels" / "Example.py",
-        "from agentkit import Service\n\n\ndef ExampleChannel(app):\n"
-        "    return Service('example', lambda: None)\n",
+        "from agentkit import Channel, Service\n\n\nclass ExampleChannel(Channel):\n"
+        "    name = 'example'\n\n"
+        "    def handle(self):\n        return Service('example', lambda: None)\n",
     )
     _write(
         root / "app" / "Console" / "Commands" / "Ping.py",

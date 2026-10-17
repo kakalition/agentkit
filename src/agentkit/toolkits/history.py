@@ -10,7 +10,7 @@ from pydantic_ai import RunContext
 from agentkit.deps import Deps
 from agentkit.toolkits._common import repos_of
 
-__all__ = ["attach_history"]
+__all__ = ["_attach_history"]
 
 MAX_LIMIT = 100
 
@@ -52,7 +52,7 @@ async def _search(ctx: RunContext[Deps], query: str, limit: int) -> str:
     )
 
 
-def attach_history(agent: Any, *, flag: str = "history_tools_enabled") -> Any:
+def _attach_history(agent: Any, *, flag: str = "history_tools_enabled") -> Any:
     """Register the history tools on a built PydanticAI agent (idempotent)."""
     if getattr(agent, "_agentkit_history_attached", False):
         return agent

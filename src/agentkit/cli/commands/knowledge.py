@@ -1,107 +1,111 @@
-"""Index and search the knowledge base (RAG)."""
+"""Index and search the knowledge base (RAG) — class-based."""
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
 import typer
 
-from agentkit.cli._app import knowledge_app
+from agentkit.foundation import Command
 
 
-@knowledge_app.command("add")
-def knowledge_add(
-    path: Path = typer.Argument(..., help="File or directory to index."),
-    pattern: str = typer.Option("**/*.md", help="Glob when indexing a directory."),
-) -> None:
-    """Index a file or directory into the knowledge base."""
+class KnowledgeAddCommand(Command):
+    group = 'knowledge'
+    signature = "knowledge:add {path} {--pattern=**/*.md}"
+    description = "Index a file or directory into the knowledge base."
 
-    from agentkit import KnowledgeBase
+    async def handle(self, path: Path, pattern: str = "**/*.md") -> None:
+        from agentkit import KnowledgeBase
 
-    kb = KnowledgeBase.from_settings()
-    if path.is_dir():
-        added = asyncio.run(kb.add_directory(path, pattern=pattern))
-    else:
-        added = asyncio.run(kb.add_file(path))
-    typer.echo(f"indexed {added} chunk(s)")
-
-
-@knowledge_app.command("add-file")
-def knowledge_add_file(
-    path: Path = typer.Argument(..., help="File to index (pdf/docx/html/txt/md/…)."),
-    source: str | None = typer.Option(None, "--source", help="Label (default: the path)."),
-) -> None:
-    """Extract text from a document and index it."""
-    from agentkit import KnowledgeBase
-    from agentkit.ingest import IngestError
-
-    try:
-        added = asyncio.run(KnowledgeBase.from_settings().add_file(path, source=source))
-    except (IngestError, OSError) as exc:
-        typer.echo(f"could not ingest {path}: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    typer.echo(f"indexed {added} chunk(s)")
+        kb = KnowledgeBase.from_settings()
+        if path.is_dir():
+            added = await kb.add_directory(path, pattern=pattern)
+        else:
+            added = await kb.add_file(path)
+        self.info(f"indexed {added} chunk(s)")
 
 
-@knowledge_app.command("add-url")
-def knowledge_add_url(
-    url: str = typer.Argument(..., help="URL to fetch and index."),
-    source: str | None = typer.Option(None, "--source", help="Label (default: the url)."),
-) -> None:
-    """Fetch a URL and index its text."""
-    from agentkit import KnowledgeBase
-    from agentkit.ingest import IngestError
+class KnowledgeAddFileCommand(Command):
+    group = 'knowledge'
+    signature = "knowledge:add-file {path} {--source=}"
+    description = "Extract text from a document and index it."
 
-    try:
-        added = asyncio.run(KnowledgeBase.from_settings().add_url(url, source=source))
-    except (IngestError, OSError) as exc:
-        typer.echo(f"could not ingest {url}: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    typer.echo(f"indexed {added} chunk(s)")
+    async def handle(self, path: Path, source: str | None = None) -> None:
+        from agentkit import KnowledgeBase
+        from agentkit.ingest import IngestError
 
-
-@knowledge_app.command("add-text")
-def knowledge_add_text(
-    text: str = typer.Argument(..., help="Text to index."),
-    source: str = typer.Option("", "--source", help="Label for this text."),
-) -> None:
-    """Index a literal string."""
-
-    from agentkit import KnowledgeBase
-
-    added = asyncio.run(KnowledgeBase.from_settings().add(text, source=source))
-    typer.echo(f"indexed {added} chunk(s)")
+        try:
+            added = await KnowledgeBase.from_settings().add_file(path, source=source)
+        except (IngestError, OSError) as exc:
+            self.error(f"could not ingest {path}: {exc}")
+            raise typer.Exit(code=1) from exc
+        self.info(f"indexed {added} chunk(s)")
 
 
-@knowledge_app.command("search")
-def knowledge_search(
-    query: str = typer.Argument(..., help="Query text."),
-    limit: int = typer.Option(5, help="Maximum passages."),
-) -> None:
-    """Search indexed knowledge."""
+class KnowledgeAddUrlCommand(Command):
+    group = 'knowledge'
+    signature = "knowledge:add-url {url} {--source=}"
+    description = "Fetch a URL and index its text."
 
-    from agentkit import KnowledgeBase
+    async def handle(self, url: str, source: str | None = None) -> None:
+        from agentkit import KnowledgeBase
+        from agentkit.ingest import IngestError
 
-    kb = KnowledgeBase.from_settings()
-    hits = asyncio.run(kb.search(query, limit=limit))
-    typer.echo(kb.format_hits(hits))
+        try:
+            added = await KnowledgeBase.from_settings().add_url(url, source=source)
+        except (IngestError, OSError) as exc:
+            self.error(f"could not ingest {url}: {exc}")
+            raise typer.Exit(code=1) from exc
+        self.info(f"indexed {added} chunk(s)")
 
 
-@knowledge_app.command("list")
-def knowledge_list() -> None:
-    """List indexed sources."""
+class KnowledgeAddTextCommand(Command):
+    group = 'knowledge'
+    signature = "knowledge:add-text {text} {--source=}"
+    description = "Index a literal string."
 
-    from agentkit import KnowledgeBase
+    async def handle(self, text: str, source: str = "") -> None:
+        from agentkit import KnowledgeBase
 
-    kb = KnowledgeBase.from_settings()
+        added = await KnowledgeBase.from_settings().add(text, source=source)
+        self.info(f"indexed {added} chunk(s)")
 
-    async def _list() -> list[tuple[str, int]]:
-        return [(source, await kb.count(source)) for source in await kb.sources()]
 
-    rows = asyncio.run(_list())
-    if not rows:
-        typer.echo("(nothing indexed)")
-        return
-    for source, count in rows:
-        typer.echo(f"  {source} ({count} chunks)")
+class KnowledgeSearchCommand(Command):
+    group = 'knowledge'
+    signature = "knowledge:search {query} {--limit=5}"
+    description = "Search indexed knowledge."
+
+    async def handle(self, query: str, limit: int = 5) -> None:
+        from agentkit import KnowledgeBase
+
+        kb = KnowledgeBase.from_settings()
+        hits = await kb.search(query, limit=limit)
+        self.info(kb.format_hits(hits))
+
+
+class KnowledgeListCommand(Command):
+    group = 'knowledge'
+    signature = "knowledge:list"
+    description = "List indexed sources."
+
+    async def handle(self) -> None:
+        from agentkit import KnowledgeBase
+
+        kb = KnowledgeBase.from_settings()
+        rows = [(source, await kb.count(source)) for source in await kb.sources()]
+        if not rows:
+            self.info("(nothing indexed)")
+            return
+        for source, count in rows:
+            self.info(f"  {source} ({count} chunks)")
+
+
+COMMANDS: list[type] = [
+    KnowledgeAddCommand,
+    KnowledgeAddFileCommand,
+    KnowledgeAddUrlCommand,
+    KnowledgeAddTextCommand,
+    KnowledgeSearchCommand,
+    KnowledgeListCommand,
+]

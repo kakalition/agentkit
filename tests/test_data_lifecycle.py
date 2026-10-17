@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 
+from click.testing import CliRunner
 from fastapi.testclient import TestClient
 from pydantic_ai.messages import ModelRequest, UserPromptPart
-from typer.testing import CliRunner
 
 from agentkit.cli import app as cli_app
 from agentkit.config import AgentSettings, get_settings

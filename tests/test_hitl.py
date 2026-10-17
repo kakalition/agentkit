@@ -3,8 +3,9 @@ from __future__ import annotations
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
 from pydantic_ai.models.function import FunctionModel
 
-from agentkit import Agent, App
+from agentkit import App
 from agentkit.deps import Deps
+from agentkit.foundation.agent import Agent
 from agentkit.hitl import clarification_tool
 from agentkit.runtime import Runtime
 

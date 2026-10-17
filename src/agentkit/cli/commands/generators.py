@@ -1,4 +1,4 @@
-"""Project scaffolding and ``make:*`` generators."""
+"""Project scaffolding and ``make:*`` generators (class-based commands)."""
 
 from __future__ import annotations
 
@@ -8,127 +8,113 @@ from pathlib import Path
 
 import typer
 
-from agentkit.cli._app import app
+from agentkit.foundation import Command
 from agentkit.foundation.generators import generate
 
 
-@app.command("new")
-def new_project(
-    name: str = typer.Argument(..., help="Project name, e.g. my-agent."),
-    path: Path = typer.Option(
-        Path("."), "--path", help="Parent directory to create the project in."
-    ),
-    force: bool = typer.Option(False, "--force", help="Write into a non-empty directory."),
-    git: bool = typer.Option(True, "--git/--no-git", help="Initialise a git repository."),
-    full: bool = typer.Option(
-        True, "--full/--minimal", help="Full-stack project (default) or the minimal skeleton."
-    ),
-    preset: str | None = typer.Option(
-        None, "--preset", help="Blueprint overlay: support | research | ops."
-    ),
-    posture: str | None = typer.Option(
-        None, "--posture", help="Agent posture: specialized | hybrid | free."
-    ),
-) -> None:
-    """Create a new agentkit project from the default skeleton."""
-    from agentkit.foundation.scaffold import scaffold_project
+class NewProjectCommand(Command):
+    signature = "new {name} {--path=.} {--force} {--git/--no-git} {--full/--minimal} {--preset=} {--posture=}"
+    description = "Create a new agentkit project from the default skeleton."
 
-    if preset is not None and not full:
-        typer.echo("--preset requires the full-stack project (drop --minimal)", err=True)
-        raise typer.Exit(code=2)
-    try:
-        target = scaffold_project(name, path, force=force, full=full, preset=preset, posture=posture)
-    except (FileExistsError, ValueError) as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
+    def handle(
+        self,
+        name: str,
+        path: Path = Path("."),
+        force: bool = False,
+        git: bool = True,
+        full: bool = True,
+        preset: str | None = None,
+        posture: str | None = None,
+    ) -> None:
+        from agentkit.foundation.scaffold import scaffold_project
 
-    if git:
-        with contextlib.suppress(Exception):
-            subprocess.run(["git", "init"], cwd=target, capture_output=True, check=False)
-            subprocess.run(["git", "add", "-A"], cwd=target, capture_output=True, check=False)
+        if preset is not None and not full:
+            self.error("--preset requires the full-stack project (drop --minimal)")
+            raise typer.Exit(code=2)
+        try:
+            target = scaffold_project(
+                name, Path(path), force=force, full=full, preset=preset, posture=posture
+            )
+        except (FileExistsError, ValueError) as exc:
+            self.error(str(exc))
+            raise typer.Exit(code=1) from exc
 
-    typer.echo(f"Created {target}")
-    typer.echo("Next steps:")
-    typer.echo(f"  cd {target}")
-    typer.echo("  cp .env.example .env   # then set OPENAI_API_KEY")
-    typer.echo("  uv sync                # or: pip install -e .")
-    typer.echo("  agentkit tinker        # chat with your agent")
+        if git:
+            with contextlib.suppress(Exception):
+                subprocess.run(["git", "init"], cwd=target, capture_output=True, check=False)
+                subprocess.run(["git", "add", "-A"], cwd=target, capture_output=True, check=False)
+
+        self.info(f"Created {target}")
+        self.info("Next steps:")
+        self.info(f"  cd {target}")
+        self.info("  cp .env.example .env   # then set OPENAI_API_KEY")
+        self.info("  uv sync                # or: pip install -e .")
+        self.info("  agentkit tinker        # chat with your agent")
 
 
-def _run_generate(kind: str, name: str, path: Path, force: bool) -> None:
-    try:
-        written = generate(kind, name, directory=path, force=force)
-    except FileExistsError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-    typer.echo(f"created {written}")
+class GeneratorCommand(Command):
+    """Base for the ``make:*`` scaffolding commands."""
+
+    kind: str = ""
+
+    def handle(self, name: str, path: Path = Path("."), force: bool = False) -> None:
+        try:
+            written = generate(self.kind, name, directory=Path(path), force=force)
+        except FileExistsError as exc:
+            self.error(str(exc))
+            raise typer.Exit(code=1) from exc
+        self.info(f"created {written}")
 
 
-@app.command("make:agent")
-def make_agent(
-    name: str = typer.Argument(..., help="Agent name, e.g. notes."),
-    path: Path = typer.Option(Path("."), "--path", help="Project directory to write into."),
-    force: bool = typer.Option(False, "--force", help="Overwrite an existing file."),
-) -> None:
-    """Scaffold an agent builder module."""
-    _run_generate("agent", name, path, force)
+class MakeAgentCommand(GeneratorCommand):
+    kind = "agent"
+    signature = "make:agent {name} {--path=.} {--force}"
+    description = "Scaffold an agent builder module."
 
 
-@app.command("make:provider")
-def make_provider(
-    name: str = typer.Argument(..., help="Provider name, e.g. notes."),
-    path: Path = typer.Option(Path("."), "--path"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    """Scaffold a service provider."""
-    _run_generate("provider", name, path, force)
+class MakeProviderCommand(GeneratorCommand):
+    kind = "provider"
+    signature = "make:provider {name} {--path=.} {--force}"
+    description = "Scaffold a service provider."
 
 
-@app.command("make:tool")
-def make_tool(
-    name: str = typer.Argument(..., help="Tool name, e.g. add_note."),
-    path: Path = typer.Option(Path("."), "--path"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    """Scaffold a tool function."""
-    _run_generate("tool", name, path, force)
+class MakeToolCommand(GeneratorCommand):
+    kind = "tool"
+    signature = "make:tool {name} {--path=.} {--force}"
+    description = "Scaffold a tool function."
 
 
-@app.command("make:policy")
-def make_policy(
-    name: str = typer.Argument(..., help="Policy name, e.g. Assistant."),
-    path: Path = typer.Option(Path("."), "--path"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    """Scaffold a tool policy."""
-    _run_generate("policy", name, path, force)
+class MakePolicyCommand(GeneratorCommand):
+    kind = "policy"
+    signature = "make:policy {name} {--path=.} {--force}"
+    description = "Scaffold a tool policy."
 
 
-@app.command("make:channel")
-def make_channel(
-    name: str = typer.Argument(..., help="Channel name, e.g. slack."),
-    path: Path = typer.Option(Path("."), "--path"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    """Scaffold a channel factory."""
-    _run_generate("channel", name, path, force)
+class MakeChannelCommand(GeneratorCommand):
+    kind = "channel"
+    signature = "make:channel {name} {--path=.} {--force}"
+    description = "Scaffold a channel factory."
 
 
-@app.command("make:command")
-def make_command(
-    name: str = typer.Argument(..., help="Command name, e.g. sync."),
-    path: Path = typer.Option(Path("."), "--path"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    """Scaffold a provider command."""
-    _run_generate("command", name, path, force)
+class MakeCommandCommand(GeneratorCommand):
+    kind = "command"
+    signature = "make:command {name} {--path=.} {--force}"
+    description = "Scaffold a provider command."
 
 
-@app.command("make:model")
-def make_model(
-    name: str = typer.Argument(..., help="Model name, e.g. note."),
-    path: Path = typer.Option(Path("."), "--path"),
-    force: bool = typer.Option(False, "--force"),
-) -> None:
-    """Scaffold a ``Model`` table."""
-    _run_generate("model", name, path, force)
+class MakeModelCommand(GeneratorCommand):
+    kind = "model"
+    signature = "make:model {name} {--path=.} {--force}"
+    description = "Scaffold a ``Model`` table."
+
+
+COMMANDS: list[type] = [
+    NewProjectCommand,
+    MakeAgentCommand,
+    MakeProviderCommand,
+    MakeToolCommand,
+    MakePolicyCommand,
+    MakeChannelCommand,
+    MakeCommandCommand,
+    MakeModelCommand,
+]

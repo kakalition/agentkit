@@ -1,4 +1,4 @@
-"""Memory commands: list, forget, profile, consolidate."""
+"""Memory commands: list, forget, profile, consolidate (class-based)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 
 import typer
 
-from agentkit.cli._app import app
+from agentkit.foundation import Command
 
 
 @contextlib.asynccontextmanager
@@ -19,93 +19,86 @@ async def _memory_scope():
         yield repos
 
 
-@app.command("memory:list")
-def memory_list(
-    kind: str | None = typer.Option(None, "--kind", help="Filter by memory kind."),
-    limit: int = typer.Option(50, "--limit", help="Maximum rows to show."),
-) -> None:
-    """List remembered facts (and the owner profile)."""
-    import asyncio
+class MemoryListCommand(Command):
+    signature = "memory:list {--kind=} {--limit=50}"
+    description = "List remembered facts (and the owner profile)."
 
-    async def _run() -> None:
+    async def handle(self, kind: str | None = None, limit: int = 50) -> None:
         async with _memory_scope() as repos:
             profile = await repos.profile.get()
             if profile is not None:
-                typer.echo(
+                self.info(
                     f"profile: name={profile.name!r} timezone={profile.timezone!r} "
                     f"locale={profile.locale!r} notes={profile.notes!r}"
                 )
             rows = await repos.memories.list(limit=limit, kind=kind)
             if not rows:
-                typer.echo("(no memories)")
+                self.info("(no memories)")
                 return
             for row in rows:
-                typer.echo(
+                self.info(
                     f"  #{row.id} [{row.kind}] {row.content} "
                     f"(importance {row.importance:.2f}, used {row.access_count}x)"
                 )
 
-    asyncio.run(_run())
 
+class MemoryForgetCommand(Command):
+    signature = "memory:forget {memory_id}"
+    description = "Delete a remembered fact by id."
 
-@app.command("memory:forget")
-def memory_forget(
-    memory_id: int = typer.Argument(..., help="The memory id to delete."),
-) -> None:
-    """Delete a remembered fact by id."""
-    import asyncio
-
-    async def _run() -> bool:
+    async def handle(self, memory_id: int) -> None:
         async with _memory_scope() as repos:
-            return await repos.memories.forget(memory_id)
+            deleted = await repos.memories.forget(memory_id)
+        if deleted:
+            self.info(f"forgotten #{memory_id}")
+        else:
+            self.error(f"no memory #{memory_id}")
+            raise typer.Exit(code=1)
 
-    if asyncio.run(_run()):
-        typer.echo(f"forgotten #{memory_id}")
-    else:
-        typer.echo(f"no memory #{memory_id}", err=True)
-        raise typer.Exit(code=1)
 
+class MemoryProfileCommand(Command):
+    signature = "memory:profile"
+    description = "Show the owner's stored profile."
 
-@app.command("memory:profile")
-def memory_profile() -> None:
-    """Show the owner's stored profile."""
-    import asyncio
-
-    async def _run() -> str:
+    async def handle(self) -> None:
         async with _memory_scope() as repos:
             profile = await repos.profile.get()
             if profile is None:
-                return "(no profile yet)"
-            return json.dumps(
-                {
-                    "name": profile.name,
-                    "timezone": profile.timezone,
-                    "locale": profile.locale,
-                    "preferences": profile.preferences,
-                    "notes": profile.notes,
-                },
-                indent=2,
+                self.info("(no profile yet)")
+                return
+            self.info(
+                json.dumps(
+                    {
+                        "name": profile.name,
+                        "timezone": profile.timezone,
+                        "locale": profile.locale,
+                        "preferences": profile.preferences,
+                        "notes": profile.notes,
+                    },
+                    indent=2,
+                )
             )
 
-    typer.echo(asyncio.run(_run()))
 
+class MemoryConsolidateCommand(Command):
+    signature = "memory:consolidate {--dry-run}"
+    description = "Dedupe, summarize, and prune memories (the daily durable task)."
 
-@app.command("memory:consolidate")
-def memory_consolidate(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Report without changing anything."),
-) -> None:
-    """Dedupe, summarize, and prune memories (the daily durable task)."""
-    import asyncio
+    async def handle(self, dry_run: bool = False) -> None:
+        from agentkit.consolidation import consolidate_memories
 
-    from agentkit.consolidation import consolidate_memories
-
-    async def _run() -> dict[str, int]:
         async with _memory_scope() as repos:
-            return await consolidate_memories(repos, dry_run=dry_run)
+            summary = await consolidate_memories(repos, dry_run=dry_run)
+        prefix = "would " if dry_run else ""
+        self.info(
+            f"{prefix}merge {summary['merged']}, {prefix}summarize {summary['summarized']}, "
+            f"{prefix}prune {summary['pruned']}"
+        )
 
-    summary = asyncio.run(_run())
-    prefix = "would " if dry_run else ""
-    typer.echo(
-        f"{prefix}merge {summary['merged']}, {prefix}summarize {summary['summarized']}, "
-        f"{prefix}prune {summary['pruned']}"
-    )
+
+COMMANDS: list[type] = [
+    MemoryListCommand,
+    MemoryForgetCommand,
+    MemoryProfileCommand,
+    MemoryConsolidateCommand,
+]

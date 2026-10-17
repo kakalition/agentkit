@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pydantic_ai import FunctionToolset, RunContext
 
-from agentkit import Agent, cached_tool
+from agentkit import cached_tool
 from agentkit.deps import Deps
+from agentkit.foundation.agent import Agent
 
 
 async def test_cached_tool_caches_by_arguments():

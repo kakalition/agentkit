@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from agentkit.contracts.guardrails import Scanner
 from agentkit.logging import redact as redact_secrets
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, GuardrailDriver
 from agentkit.support.manager import Manager
 
@@ -152,15 +152,13 @@ class GuardrailManager(Manager):
 
 
 @register_driver(DriverKind.GUARDRAILS, GuardrailDriver.REGEX)
-def _regex_guard_driver(app: Any) -> RegexGuard:
-    return RegexGuard()
-
-
+class RegexGuardDriver(Driver):
+    def build(self) -> RegexGuard:
+        return RegexGuard()
 @register_driver(DriverKind.GUARDRAILS, GuardrailDriver.MODERATION)
-def _moderation_guard_driver(app: Any) -> ModerationScanner:
-    return ModerationScanner()
-
-
+class ModerationGuardDriver(Driver):
+    def build(self) -> ModerationScanner:
+        return ModerationScanner()
 __all__ = [
     "GuardrailManager",
     "ModerationScanner",

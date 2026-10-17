@@ -15,7 +15,7 @@ from dbos import DBOS, DBOSClient, DBOSConfig, SetWorkflowID
 from agentkit.config import AgentSettings, get_settings
 from agentkit.contracts.durability import Durability
 from agentkit.errors import ConfigurationError
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, DurabilityDriver
 from agentkit.support.manager import Manager
 
@@ -194,22 +194,21 @@ class DurabilityManager(Manager):
 
 
 @register_driver(DriverKind.DURABILITY, DurabilityDriver.DBOS)
-def _dbos_durability_driver(app: Any) -> DBOSDurability:
-    return DBOSDurability(app)
-
-
+class DbosDurabilityDriver(Driver):
+    def build(self) -> DBOSDurability:
+        app = self.app
+        return DBOSDurability(app)
 @register_driver(DriverKind.DURABILITY, DurabilityDriver.TEMPORAL)
-def _temporal_durability_driver(app: Any) -> Any:
-    try:
-        import temporalio  # noqa: F401
-    except ImportError as exc:  # pragma: no cover - optional dependency
-        raise ConfigurationError(
-            "the temporal durability driver needs the 'temporalio' package "
-            "(pip install agentkit[temporal])"
-        ) from exc
-    raise ConfigurationError("the temporal durability driver is not implemented yet")
-
-
+class TemporalDurabilityDriver(Driver):
+    def build(self) -> Any:
+        try:
+            import temporalio  # noqa: F401
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise ConfigurationError(
+                "the temporal durability driver needs the 'temporalio' package "
+                "(pip install agentkit[temporal])"
+            ) from exc
+        raise ConfigurationError("the temporal durability driver is not implemented yet")
 def list_schedules() -> list[dict[str, Any]]:
     result = []
     for schedule in DBOS.list_schedules():

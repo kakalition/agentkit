@@ -5,6 +5,7 @@ import logging
 import pytest
 from fastapi.testclient import TestClient
 
+from agentkit import Driver
 from agentkit.config import AgentSettings
 from agentkit.extensions import (
     EXTENSIONS,
@@ -18,6 +19,11 @@ from agentkit.foundation import App
 from agentkit.runtime import build_runtime
 from agentkit.specs import SPECS, SpecModel
 from agentkit.webui.app import build_webui_app
+
+
+class PantryCacheDriver(Driver):
+    def build(self):
+        return {"pantry": True}
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +49,7 @@ def test_manifest_normalises_and_describes():
         specs=[("greeting", Greeting)],
         panels=[PanelSpec(id="greetings", spec_kind="greeting")],
         actions={"ping": lambda body, ctx: {"pong": True}},
-        drivers=[("cache", "pantry", lambda app: object())],
+        drivers=[("cache", "pantry", PantryCacheDriver)],
         codegen={"toml": lambda spec: "x"},
     )
     info = manifest.to_dict()
@@ -72,7 +78,7 @@ def test_boot_applies_specs_panels_and_drivers():
         name="demo",
         specs=[("greeting", Greeting)],
         panels=[PanelSpec(id="greetings", spec_kind="greeting")],
-        drivers=[("cache", "pantry", lambda app: {"pantry": True})],
+        drivers=[("cache", "pantry", PantryCacheDriver)],
     )
     app = App("demo", discover=False).extensions(manifest)
     app.boot()

@@ -22,7 +22,7 @@ from genai_prices import Usage as _Usage
 from genai_prices import calc_price as _calc_price
 
 from agentkit.contracts.pricing import PriceProvider
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, PricingDriver
 from agentkit.support.manager import Manager
 
@@ -190,15 +190,13 @@ class PricingManager(Manager):
 
 
 @register_driver(DriverKind.PRICING, PricingDriver.GENAI)
-def _genai_pricing_driver(app: Any) -> Pricing:
-    return Pricing()
-
-
+class GenaiPricingDriver(Driver):
+    def build(self) -> Pricing:
+        return Pricing()
 @register_driver(DriverKind.PRICING, PricingDriver.STATIC)
-def _static_pricing_driver(app: Any) -> StaticPriceProvider:
-    return StaticPriceProvider()
-
-
+class StaticPricingDriver(Driver):
+    def build(self) -> StaticPriceProvider:
+        return StaticPriceProvider()
 def usage_cost(run_usage: Any, model: str) -> float:
     """Prefer PydanticAI's own ``RunUsage.cost``; else estimate via genai_prices."""
     reported = getattr(run_usage, "cost", None)

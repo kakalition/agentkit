@@ -2,35 +2,46 @@
 
 ## Introduction
 
-`Agent.make(...)` is a fluent builder that assembles a PydanticAI agent from small,
-declarative pieces. It is the front door for constructing agents; internal modules
-keep importing PydanticAI directly.
+An agent is defined as a **class**. Subclass `AgentDefinition`, declare what the
+agent is with class attributes, and the framework assembles the PydanticAI agent
+from them. Any `app/Agents/*.py` subclass is discovered and registered
+automatically.
 
 ```python
-from agentkit import Agent
+from agentkit import AgentDefinition
 
-agent = (
-    Agent.make("nudge")             # name (and defaults)
-    .persona()                      # SOUL.md
-    .instructions("Be concise.")    # static instructions
-    .memory()                       # durable memory tools
-    .skills()                       # discover SKILL.md folders
-    .knowledge(path="./docs")       # retrieval-augmented generation
-    .tool(add_note)                 # a tool
-    .output(str)                    # output type
-    .build()                        # → pydantic_ai.Agent
-)
+class Assistant(AgentDefinition):
+    name = "assistant"
+    instructions = "You are a concise, helpful assistant."
+    tools = [current_time]
+    full = True                  # persona + memory + skills + HITL + safety
+    posture = "hybrid"           # or "specialized" / "free"
+    output = str
+
+agent = Assistant.build()        # → pydantic_ai.Agent
 ```
 
-::: tip `agentkit.Agent` is the builder
-Application code uses `agentkit.Agent`. If you need the raw PydanticAI class, import
-it explicitly:
+Every declaration maps to a builder call:
+
+| Declaration | Builder equivalent |
+| --- | --- |
+| `name` | `Agent.make(name)` |
+| `instructions` | `.instructions(...)` |
+| `persona` / `memory` / `skills` / `knowledge` / `approvals` / `safety` / `workspace` / `learning` / `todos` / `code` | the matching capability bundle |
+| `full = True` | `.full(...)` |
+| `posture` | `.posture(...)` |
+| `tools` / `toolsets` / `specialists` | `.tool(...)` / `.toolset(...)` / `.specialist(...)` |
+| `model` / `output` / `output_validators` / `retries` | `.model(...)` / `.output(...)` / `.output_validator(...)` / `.retries(...)` |
+
+Use `configure(self, agent)` (or the legacy `define(self, agent)`) as the escape
+hatch for anything not covered by a field. `AgentDefinition.build(...)` returns the
+built PydanticAI agent directly:
 
 ```python
-from pydantic_ai import Agent        # the PydanticAI agent
-from agentkit import Agent           # the fluent builder
+agent = Assistant.build()
 ```
-:::
+
+The fluent builder below remains fully supported; the class form is the primary API.
 
 ## Identity
 

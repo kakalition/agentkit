@@ -235,7 +235,7 @@ def test_listener_base(runtime: Runtime):
         def handle(self, event) -> None:
             seen.append(event.get("detail"))
 
-    app.on("ping", Ping())
+    app.listeners([Ping()])
     app.events.dispatch("ping", detail="hi")
     assert seen == ["hi"]
 
@@ -243,7 +243,7 @@ def test_listener_base(runtime: Runtime):
 async def test_middleware_base(runtime: Runtime):
     app = _app(runtime)
     app._model = FunctionModel(lambda m, i: ModelResponse(parts=[TextPart("ok")]))
-    from agentkit import Agent as _Agent
+    from agentkit.foundation.agent import Agent as _Agent
 
     app.agent(_Agent.make("prims").instructions("x").output(str))
     calls: list[str] = []

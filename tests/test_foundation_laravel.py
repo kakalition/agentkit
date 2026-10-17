@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from conftest import Recorder
 from sqlmodel import Field
 
 from agentkit import (
@@ -140,7 +141,14 @@ async def test_global_helpers(runtime: Runtime, tmp_path, monkeypatch):
     assert storage_helper("local").get("hello.txt") == "hi"
 
     seen: list[str] = []
-    app.on("greeting", lambda e: seen.append(e.get("detail")))
+    class _Greeting(Recorder):
+        event = "greeting"
+
+        @staticmethod
+        def transform(event):
+            return event.get("detail")
+
+    app.listeners([_Greeting(seen)])
     event_helper("greeting", detail="hi")
     assert seen == ["hi"]
 

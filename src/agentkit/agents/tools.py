@@ -11,9 +11,10 @@ from typing import Any
 
 from pydantic_ai import RunContext
 
+from agentkit.capability import Capability
 from agentkit.deps import Deps
 
-__all__ = ["attach_agents", "mailbox_tools"]
+__all__ = ["AgentsCapability", "mailbox_tools"]
 
 AGENTS_GUIDE = (
     "You can talk to other agents. Use `list_agents` to see who is available, "
@@ -69,30 +70,45 @@ def _self_name(ctx: RunContext[Deps]) -> str | None:
     return getattr(deps, "extras", {}).get("_agent_name") if deps is not None else None
 
 
-def attach_agents(
-    agent: Any,
-    registry: Any,
-    mailbox: Any,
-    *,
-    include_handoff: bool = True,
-    max_handoffs: int | None = None,
-) -> Any:
-    """Register the peer tools (and roster) on a PydanticAI agent (idempotent)."""
-    if getattr(agent, "_agentkit_agents_attached", False):
+class AgentsCapability(Capability):
+    """Registers the peer tools (and roster) on a PydanticAI agent (idempotent)."""
+
+    name = "agents"
+
+    def __init__(
+        self,
+        registry: Any,
+        mailbox: Any,
+        *,
+        include_handoff: bool = True,
+        max_handoffs: int | None = None,
+    ) -> None:
+        self.registry = registry
+        self.mailbox = mailbox
+        self.include_handoff = include_handoff
+        self.max_handoffs = max_handoffs
+
+    def install(self, agent: Any) -> Any:
+        registry = self.registry
+        mailbox = self.mailbox
+        include_handoff = self.include_handoff
+        max_handoffs = self.max_handoffs
+
+        if getattr(agent, "_agentkit_agents_attached", False):
+            return agent
+
+        for tool in mailbox_tools(mailbox, registry):
+            agent.tool(tool)
+
+        if include_handoff:
+            from agentkit.agents.handoff import handoff_tool
+
+            agent.tool(handoff_tool(registry, max_handoffs=max_handoffs))
+
+        @agent.instructions
+        def _agents_instructions(ctx: RunContext[Deps]) -> str:
+            roster = registry.roster()
+            return f"{AGENTS_GUIDE}\n\nAgents you can reach:\n{roster}" if roster else AGENTS_GUIDE
+
+        agent._agentkit_agents_attached = True  # type: ignore[attr-defined]
         return agent
-
-    for tool in mailbox_tools(mailbox, registry):
-        agent.tool(tool)
-
-    if include_handoff:
-        from agentkit.agents.handoff import handoff_tool
-
-        agent.tool(handoff_tool(registry, max_handoffs=max_handoffs))
-
-    @agent.instructions
-    def _agents_instructions(ctx: RunContext[Deps]) -> str:
-        roster = registry.roster()
-        return f"{AGENTS_GUIDE}\n\nAgents you can reach:\n{roster}" if roster else AGENTS_GUIDE
-
-    agent._agentkit_agents_attached = True  # type: ignore[attr-defined]
-    return agent

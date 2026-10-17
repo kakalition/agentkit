@@ -21,9 +21,10 @@ from typing import Any
 
 from pydantic_ai import RunContext
 
+from agentkit.capability import Capability
 from agentkit.contracts.codeexec import CodeExecutor, HibernatingExecutor
 from agentkit.errors import ConfigurationError, InvalidInput
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import CodeExecDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -41,7 +42,7 @@ __all__ = [
     "SingularityExecutor",
     "SSHExecutor",
     "VercelExecutor",
-    "attach_code_executor",
+    "CodeExecutorCapability",
 ]
 
 
@@ -408,76 +409,77 @@ class CodeExecManager(Manager):
 
 
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.LOCAL)
-def _local_executor_driver(app: Any) -> LocalSubprocessExecutor:
-    return LocalSubprocessExecutor()
-
-
+class LocalExecutorDriver(Driver):
+    def build(self) -> LocalSubprocessExecutor:
+        return LocalSubprocessExecutor()
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.DOCKER)
-def _docker_executor_driver(app: Any) -> DockerExecutor:
-    return DockerExecutor()
-
-
+class DockerExecutorDriver(Driver):
+    def build(self) -> DockerExecutor:
+        return DockerExecutor()
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.JUPYTER)
-def _jupyter_executor_driver(app: Any) -> JupyterExecutor:
-    return JupyterExecutor()
-
-
+class JupyterExecutorDriver(Driver):
+    def build(self) -> JupyterExecutor:
+        return JupyterExecutor()
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.E2B)
-def _e2b_executor_driver(app: Any) -> E2BExecutor:
-    return E2BExecutor()
-
-
+class E2bExecutorDriver(Driver):
+    def build(self) -> E2BExecutor:
+        return E2BExecutor()
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.SSH)
-def _ssh_executor_driver(app: Any) -> SSHExecutor:
-    return SSHExecutor(getattr(app.settings, "ssh_host", None))
-
-
+class SshExecutorDriver(Driver):
+    def build(self) -> SSHExecutor:
+        app = self.app
+        return SSHExecutor(getattr(app.settings, "ssh_host", None))
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.MODAL)
-def _modal_executor_driver(app: Any) -> ModalExecutor:
-    return ModalExecutor()
-
-
+class ModalExecutorDriver(Driver):
+    def build(self) -> ModalExecutor:
+        return ModalExecutor()
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.DAYTONA)
-def _daytona_executor_driver(app: Any) -> DaytonaExecutor:
-    return DaytonaExecutor()
-
-
+class DaytonaExecutorDriver(Driver):
+    def build(self) -> DaytonaExecutor:
+        return DaytonaExecutor()
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.VERCEL)
-def _vercel_executor_driver(app: Any) -> VercelExecutor:
-    return VercelExecutor()
-
-
+class VercelExecutorDriver(Driver):
+    def build(self) -> VercelExecutor:
+        return VercelExecutor()
 @register_driver(DriverKind.CODEEXEC, CodeExecDriver.SINGULARITY)
-def _singularity_executor_driver(app: Any) -> SingularityExecutor:
-    return SingularityExecutor(getattr(app.settings, "singularity_image", "python:3.12-slim"))
+class SingularityExecutorDriver(Driver):
+    def build(self) -> SingularityExecutor:
+        app = self.app
+        return SingularityExecutor(getattr(app.settings, "singularity_image", "python:3.12-slim"))
+class CodeExecutorCapability(Capability):
+    name = "code_executor"
 
+    def __init__(self, executor: Any = None) -> None:
+        self.executor = executor
 
-def attach_code_executor(agent: Any, *, executor: Any = None) -> Any:
-    """Register an approval-gated ``run_code`` tool on a built agent (idempotent)."""
-    if getattr(agent, "_agentkit_code_attached", False):
+    def install(self, agent: Any) -> Any:
+        executor = self.executor
+
+        """Register an approval-gated ``run_code`` tool on a built agent (idempotent)."""
+        if getattr(agent, "_agentkit_code_attached", False):
+            return agent
+        fallback = executor if executor is not None else LocalSubprocessExecutor()
+
+        def resolve(ctx: Any) -> Any:
+            deps = getattr(ctx, "deps", None)
+            extras = getattr(deps, "extras", None)
+            if isinstance(extras, dict) and extras.get("code_executor") is not None:
+                return extras["code_executor"]
+            return fallback
+
+        @agent.tool(requires_approval=True)
+        async def run_code(
+            ctx: RunContext[Any], code: str, language: str = "python", timeout: float = 10.0
+        ) -> str:
+            """Run a short snippet of code and return its output (requires approval).
+
+            Args:
+                code: The code to run.
+                language: The language (only ``python`` is supported locally).
+                timeout: Seconds before the run is killed.
+            """
+            result = await resolve(ctx).run(code, language=language, timeout=timeout)
+            return result.render()
+
+        agent._agentkit_code_attached = True  # type: ignore[attr-defined]
         return agent
-    fallback = executor if executor is not None else LocalSubprocessExecutor()
-
-    def resolve(ctx: Any) -> Any:
-        deps = getattr(ctx, "deps", None)
-        extras = getattr(deps, "extras", None)
-        if isinstance(extras, dict) and extras.get("code_executor") is not None:
-            return extras["code_executor"]
-        return fallback
-
-    @agent.tool(requires_approval=True)
-    async def run_code(
-        ctx: RunContext[Any], code: str, language: str = "python", timeout: float = 10.0
-    ) -> str:
-        """Run a short snippet of code and return its output (requires approval).
-
-        Args:
-            code: The code to run.
-            language: The language (only ``python`` is supported locally).
-            timeout: Seconds before the run is killed.
-        """
-        result = await resolve(ctx).run(code, language=language, timeout=timeout)
-        return result.render()
-
-    agent._agentkit_code_attached = True  # type: ignore[attr-defined]
-    return agent

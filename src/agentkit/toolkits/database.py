@@ -17,7 +17,7 @@ from agentkit.deps import Deps
 from agentkit.foundation.repository import Repository
 from agentkit.toolkits._common import actor_label, emit_event, repos_of, resolve_allow_list
 
-__all__ = ["attach_database"]
+__all__ = ["_attach_database"]
 
 MAX_LIMIT = 100
 _PREVIEW = 200
@@ -88,7 +88,7 @@ async def _audit(
         pass
 
 
-def attach_database(
+def _attach_database(
     agent: Any, models: dict[str, Any] | None = None, *, flag: str = "db_tools_enabled"
 ) -> Any:
     """Register the database tools on a built PydanticAI agent (idempotent)."""

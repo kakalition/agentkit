@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentkit import Agent
+from agentkit.foundation.agent import Agent
 
 
 def _fn(agent, name):

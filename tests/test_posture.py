@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from agentkit import Agent, Posture
+from agentkit import Posture
 from agentkit.config import AgentSettings
+from agentkit.foundation.agent import Agent
 from agentkit.policy import ALLOW, APPROVE, DENY, free_policy, specialized_policy
 from agentkit.posture import (
     PostureProfile,
@@ -115,7 +116,7 @@ def test_scaffold_posture_option(tmp_path: Path):
 
     target = scaffold_project("postured", tmp_path, posture="free")
     assistant = (target / "app" / "Agents" / "assistant.py").read_text()
-    assert '.posture("free").full()' in assistant
+    assert 'posture = "free"' in assistant
     with pytest.raises(ValueError):
         scaffold_project("bad", tmp_path, posture="bogus")
 

@@ -132,7 +132,56 @@ def logging_middleware(logger: Any = None) -> Any:
     return middleware
 
 
+class LoggingMiddleware:
+    """Class form of :func:`logging_middleware` (implements the turn ``Middleware``)."""
+
+    def __init__(self, logger: Any = None) -> None:
+        self.logger = logger or log
+
+    async def handle(self, turn: Any, call_next: Any) -> Any:
+        start = time.perf_counter()
+        result = await call_next()
+        self.logger.info(
+            "turn %s took %.3fs",
+            getattr(turn, "conversation_id", "?"),
+            time.perf_counter() - start,
+        )
+        return result
+
+    async def __call__(self, turn: Any, call_next: Any) -> Any:
+        return await self.handle(turn, call_next)
+
+
+class PolicyMiddleware:
+    """Class form of :func:`policy_hooks` (a tool-execution capability)."""
+
+    def __init__(self, policy: Any) -> None:
+        self.policy = policy
+
+    def hooks(self) -> Hooks:
+        return policy_hooks(self.policy)
+
+
+class GuardrailsMiddleware:
+    """Class form of :func:`guardrails_hooks` (a tool-execution capability)."""
+
+    def __init__(
+        self, on_injection: Any = None, *, wrap_untrusted: bool = False, label: str = "untrusted"
+    ) -> None:
+        self.on_injection = on_injection
+        self.wrap_untrusted = wrap_untrusted
+        self.label = label
+
+    def hooks(self) -> Hooks:
+        return guardrails_hooks(
+            self.on_injection, wrap_untrusted=self.wrap_untrusted, label=self.label
+        )
+
+
 __all__ = [
+    "GuardrailsMiddleware",
+    "LoggingMiddleware",
+    "PolicyMiddleware",
     "guardrails_hooks",
     "lifecycle_hooks",
     "logging_middleware",

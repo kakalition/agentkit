@@ -13,20 +13,14 @@ AGENT_TEMPLATE = '''"""The {pascal} agent (a discoverable ``AgentDefinition``)."
 
 from __future__ import annotations
 
-from agentkit import Agent, AgentDefinition
+from agentkit import AgentDefinition
 
 
 class {pascal}(AgentDefinition):
     name = "{name}"
-
-    def define(self, agent: Agent) -> Agent:
-        return (
-            agent
-            .persona()
-            .instructions("Describe what the {name} agent does.")
-            .memory()
-            .output(str)
-        )
+    instructions = "Describe what the {name} agent does."
+    memory = True
+    output = str
 '''
 
 PROVIDER_TEMPLATE = '''"""The {pascal} service provider."""
@@ -78,31 +72,102 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentkit import Service
+from agentkit import Channel, Service
 
 
-def {name}_channel(app: Any) -> Service:
-    def run() -> None:
-        raise NotImplementedError("wire up the {name} channel")
+class {pascal}Channel(Channel):
+    name = "{name}"
 
-    return Service("{name}", run)
+    def handle(self) -> Any:
+        def run() -> None:
+            raise NotImplementedError("wire up the {name} channel")
+
+        return Service("{name}", run)
 '''
 
 COMMAND_TEMPLATE = '''"""The {name} command."""
 
 from __future__ import annotations
 
-from typing import Any
-
 from agentkit import Command
 
 
 class {pascal}Command(Command):
-    name = "{name}"
-    help = "Describe the {name} command."
+    signature = "{name}"
+    description = "Describe the {name} command."
 
-    def run(self, app: Any) -> None:
+    def handle(self) -> None:
         raise NotImplementedError
+'''
+
+EVENT_TEMPLATE = '''"""The {pascal} event."""
+
+from __future__ import annotations
+
+
+class {pascal}:
+    """An application event."""
+
+    name = "{name}"
+'''
+
+LISTENER_TEMPLATE = '''"""The {pascal} listener."""
+
+from __future__ import annotations
+
+from agentkit import Event, Listener
+
+
+class {pascal}Listener(Listener):
+    event = "{name}"
+
+    def handle(self, event: Event) -> None:
+        return None
+'''
+
+MIGRATION_TEMPLATE = '''"""The {snake} migration."""
+
+from __future__ import annotations
+
+from agentkit import Migration, Schema
+
+
+class {pascal}(Migration):
+    name = "{snake}"
+
+    def up(self, schema: Schema) -> None:
+        schema.create("{table}", lambda t: (t.id(), t.timestamps()))
+
+    def down(self, schema: Schema) -> None:
+        schema.drop("{table}")
+'''
+
+FACTORY_TEMPLATE = '''"""The {pascal} factory."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from agentkit import Factory
+
+
+class {pascal}Factory(Factory):
+    model = None  # set to your model class
+
+    def definition(self) -> dict[str, Any]:
+        return {{}}
+'''
+
+SEEDER_TEMPLATE = '''"""The {pascal} seeder."""
+
+from __future__ import annotations
+
+from agentkit import Seeder
+
+
+class {pascal}Seeder(Seeder):
+    async def run(self) -> None:
+        return None
 '''
 
 MODEL_TEMPLATE = '''"""The {pascal} model."""
@@ -128,6 +193,11 @@ _GENERATORS: dict[str, tuple[str, str]] = {
     "channel": ("app/Channels/{pascal}Channel.py", CHANNEL_TEMPLATE),
     "command": ("app/Console/Commands/{pascal}Command.py", COMMAND_TEMPLATE),
     "model": ("app/Models/{pascal}.py", MODEL_TEMPLATE),
+    "event": ("app/Events/{pascal}.py", EVENT_TEMPLATE),
+    "listener": ("app/Listeners/{pascal}Listener.py", LISTENER_TEMPLATE),
+    "migration": ("database/migrations/{snake}.py", MIGRATION_TEMPLATE),
+    "factory": ("database/factories/{pascal}Factory.py", FACTORY_TEMPLATE),
+    "seeder": ("database/seeders/{pascal}Seeder.py", SEEDER_TEMPLATE),
 }
 
 KINDS = tuple(_GENERATORS)
@@ -146,7 +216,8 @@ def target_path(kind: str, name: str, directory: str | Path = ".") -> Path:
     if kind not in _GENERATORS:
         raise KeyError(kind)
     relative, _ = _GENERATORS[kind]
-    return Path(directory) / relative.format(name=_snake(name), pascal=_pascal(name))
+    snake = _snake(name)
+    return Path(directory) / relative.format(name=snake, pascal=_pascal(name), snake=snake)
 
 
 def generate(kind: str, name: str, *, directory: str | Path = ".", force: bool = False) -> Path:
@@ -155,12 +226,12 @@ def generate(kind: str, name: str, *, directory: str | Path = ".", force: bool =
         raise KeyError(f"unknown generator: {kind}")
     relative, template = _GENERATORS[kind]
     snake = _snake(name)
-    path = Path(directory) / relative.format(name=snake, pascal=_pascal(name))
+    path = Path(directory) / relative.format(name=snake, pascal=_pascal(name), snake=snake)
     if path.exists() and not force:
         raise FileExistsError(f"{path} already exists (pass force=True to overwrite)")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        template.format(name=snake, pascal=_pascal(name), table=snake),
+        template.format(name=snake, pascal=_pascal(name), table=snake, snake=snake),
         encoding="utf-8",
     )
     return path

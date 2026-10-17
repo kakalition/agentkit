@@ -21,11 +21,10 @@ Requires the optional ``observability`` extra (OpenTelemetry OTLP HTTP exporter)
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from agentkit.config import AgentSettings, get_settings
 from agentkit.contracts.observability import Tracer
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, ObservabilityDriver
 from agentkit.support.manager import Manager
 
@@ -176,20 +175,18 @@ class ObservabilityManager(Manager):
 
 
 @register_driver(DriverKind.OBSERVABILITY, ObservabilityDriver.PHOENIX)
-def _phoenix_tracer_driver(app: Any) -> _ModeTracer:
-    return _ModeTracer(ObservabilityDriver.PHOENIX)
-
-
+class PhoenixTracerDriver(Driver):
+    def build(self) -> _ModeTracer:
+        return _ModeTracer(ObservabilityDriver.PHOENIX)
 @register_driver(DriverKind.OBSERVABILITY, ObservabilityDriver.CONSOLE)
-def _console_tracer_driver(app: Any) -> _ModeTracer:
-    return _ModeTracer(ObservabilityDriver.CONSOLE)
-
-
+class ConsoleTracerDriver(Driver):
+    def build(self) -> _ModeTracer:
+        return _ModeTracer(ObservabilityDriver.CONSOLE)
 @register_driver(DriverKind.OBSERVABILITY, ObservabilityDriver.OTLP)
-def _otlp_tracer_driver(app: Any) -> _ModeTracer:
-    return _ModeTracer(ObservabilityDriver.OTLP)
-
-
+class OtlpTracerDriver(Driver):
+    def build(self) -> _ModeTracer:
+        return _ModeTracer(ObservabilityDriver.OTLP)
 @register_driver(DriverKind.OBSERVABILITY, ObservabilityDriver.OFF)
-def _off_tracer_driver(app: Any) -> _ModeTracer:
-    return _ModeTracer(ObservabilityDriver.OFF)
+class OffTracerDriver(Driver):
+    def build(self) -> _ModeTracer:
+        return _ModeTracer(ObservabilityDriver.OFF)

@@ -15,7 +15,7 @@ from typing import Any
 
 from agentkit.contracts.catalog import Catalog, CatalogItem
 from agentkit.logging import get_logger
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import CatalogDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -356,24 +356,26 @@ def catalog_source(name: str, app: Any = None) -> Any:
 
 
 @register_driver(DriverKind.CATALOG, CatalogDriver.LOCAL)
-def _local_catalog_driver(app: Any) -> LocalCatalog:
-    return LocalCatalog(getattr(app.settings, "catalog_dir", None) or "catalog")
-
-
+class LocalCatalogDriver(Driver):
+    def build(self) -> LocalCatalog:
+        app = self.app
+        return LocalCatalog(getattr(app.settings, "catalog_dir", None) or "catalog")
 @register_driver(DriverKind.CATALOG, CatalogDriver.SKILLS)
-def _skills_catalog_driver(app: Any) -> SkillsCatalog:
-    return SkillsCatalog(getattr(app.settings, "skills_dir", None) or "skills")
-
-
+class SkillsCatalogDriver(Driver):
+    def build(self) -> SkillsCatalog:
+        app = self.app
+        return SkillsCatalog(getattr(app.settings, "skills_dir", None) or "skills")
 @register_driver(DriverKind.CATALOG, CatalogDriver.HTTP)
-def _http_catalog_driver(app: Any) -> HttpCatalog:
-    return HttpCatalog(getattr(app.settings, "catalog_url", "") or "")
-
-
+class HttpCatalogDriver(Driver):
+    def build(self) -> HttpCatalog:
+        app = self.app
+        return HttpCatalog(getattr(app.settings, "catalog_url", "") or "")
 @register_driver(DriverKind.CATALOG, CatalogDriver.GIT)
-def _git_catalog_driver(app: Any) -> GitCatalog:
-    return GitCatalog(
-        getattr(app.settings, "catalog_repo", "") or "",
-        ref=getattr(app.settings, "catalog_ref", "main"),
-        path=getattr(app.settings, "catalog_path", "catalog.json"),
-    )
+class GitCatalogDriver(Driver):
+    def build(self) -> GitCatalog:
+        app = self.app
+        return GitCatalog(
+            getattr(app.settings, "catalog_repo", "") or "",
+            ref=getattr(app.settings, "catalog_ref", "main"),
+            path=getattr(app.settings, "catalog_path", "catalog.json"),
+        )

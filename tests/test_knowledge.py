@@ -9,7 +9,8 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from agentkit import Agent, App, KnowledgeBase, chunk_text
+from agentkit import App, KnowledgeBase, chunk_text
+from agentkit.foundation.agent import Agent
 from agentkit.runtime import Runtime
 
 

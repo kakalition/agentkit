@@ -6,9 +6,10 @@ import pytest
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai import RunContext
 
-from agentkit import Agent, App, Events, Log, Memory, Schedule, ToolPolicy
+from agentkit import App, Events, Log, Memory, Schedule, ToolPolicy
 from agentkit import scheduler as scheduler_mod
 from agentkit.deps import Deps
+from agentkit.foundation.agent import Agent
 from agentkit.foundation.commands import load_bootstrap
 from agentkit.foundation.db import active_repos, session_scope, using_repos
 from agentkit.foundation.events import Dispatcher, Event
@@ -38,7 +39,7 @@ async def test_events_facade_async_dispatch(runtime: Runtime):
     async def listener(event) -> None:  # noqa: ANN001
         seen.append(event.name)
 
-    Events.on("ping", listener)
+    Events.listen("ping", listener)
     await Events.dispatch_async("ping")
     assert seen == ["ping"]
 
@@ -201,7 +202,7 @@ async def test_tools_see_conversation_id(runtime: Runtime):
     from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
     from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-    from agentkit import Agent as _Agent
+    from agentkit.foundation.agent import Agent as _Agent
 
     seen: list[str] = []
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentkit import Agent
 from agentkit.agents.groupchat import GroupChatRunner
 from agentkit.agents.speaker import (
     AllSpeaker,
@@ -15,6 +14,7 @@ from agentkit.agents.speaker import (
 from agentkit.agents.team import ManagedTeam, TeamLedger
 from agentkit.comms import GroupChatSpeaker, GroupChatTopology
 from agentkit.config import AgentSettings
+from agentkit.foundation.agent import Agent
 from agentkit.teams import build_team, register_team, resolve_team, team_tool
 
 
@@ -237,7 +237,7 @@ async def test_ledger_tools_report_no_active_ledger():
 
 
 def test_attach_team_ledger_is_idempotent_and_noop_for_callables():
-    from agentkit.agents.ledger import attach_team_ledger
+    from agentkit.agents.ledger import TeamLedgerCapability
 
     class FakeAgent:
         def __init__(self):
@@ -247,14 +247,14 @@ def test_attach_team_ledger_is_idempotent_and_noop_for_callables():
             self.tools.append(function.__name__)
 
     agent = FakeAgent()
-    attach_team_ledger(agent, name="a")
-    attach_team_ledger(agent, name="a")
+    TeamLedgerCapability(name="a").install(agent)
+    TeamLedgerCapability(name="a").install(agent)
     assert agent.tools == ["read_ledger", "write_ledger"]
 
     async def callable_member(prompt: str) -> str:
         return prompt
 
-    assert attach_team_ledger(callable_member) is callable_member
+    assert TeamLedgerCapability().install(callable_member) is callable_member
 
 
 async def test_member_ledger_write_suppresses_heuristic():

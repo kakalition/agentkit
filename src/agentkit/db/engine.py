@@ -23,7 +23,7 @@ from sqlalchemy.pool import NullPool
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from agentkit.contracts.database import Dialect
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DatabaseDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -132,10 +132,10 @@ class DatabaseManager(Manager):
 
 
 @register_driver(DriverKind.DATABASE, DatabaseDriver.SQLITE)
-def _sqlite_dialect_driver(app: Any) -> SQLiteDialect:
-    return SQLiteDialect()
-
-
+class SqliteDialectDriver(Driver):
+    def build(self) -> SQLiteDialect:
+        return SQLiteDialect()
 @register_driver(DriverKind.DATABASE, DatabaseDriver.POSTGRES)
-def _postgres_dialect_driver(app: Any) -> PostgresDialect:
-    return PostgresDialect()
+class PostgresDialectDriver(Driver):
+    def build(self) -> PostgresDialect:
+        return PostgresDialect()

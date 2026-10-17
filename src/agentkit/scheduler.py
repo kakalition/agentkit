@@ -32,7 +32,7 @@ from agentkit._sync import run_sync
 from agentkit.config import AgentSettings, get_settings
 from agentkit.db.repositories import Repositories
 from agentkit.runtime import Runtime, build_runtime, repositories
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, SchedulerDriver
 from agentkit.support.manager import Manager
 
@@ -439,10 +439,12 @@ class SchedulerManager(Manager):
 
 
 @register_driver(DriverKind.SCHEDULER, SchedulerDriver.DBOS)
-def _dbos_scheduler_driver(app: Any) -> DBOSCronScheduler:
-    return DBOSCronScheduler(app)
-
-
+class DbosSchedulerDriver(Driver):
+    def build(self) -> DBOSCronScheduler:
+        app = self.app
+        return DBOSCronScheduler(app)
 @register_driver(DriverKind.SCHEDULER, SchedulerDriver.MEMORY)
-def _memory_scheduler_driver(app: Any) -> MemoryScheduler:
-    return MemoryScheduler(app)
+class MemorySchedulerDriver(Driver):
+    def build(self) -> MemoryScheduler:
+        app = self.app
+        return MemoryScheduler(app)

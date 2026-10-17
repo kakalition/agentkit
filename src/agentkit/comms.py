@@ -19,7 +19,7 @@ from enum import StrEnum
 from typing import Any
 
 from agentkit.contracts.comms import Topology
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import CommsDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -309,60 +309,54 @@ def _topology_events(app: Any) -> Any:
 
 
 @register_driver(DriverKind.COMMS, CommsDriver.MAILBOX)
-def _mailbox_topology_driver(app: Any) -> MailboxTopology:
-    return MailboxTopology(events=_topology_events(app))
-
-
+class MailboxTopologyDriver(Driver):
+    def build(self) -> MailboxTopology:
+        app = self.app
+        return MailboxTopology(events=_topology_events(app))
 @register_driver(DriverKind.COMMS, CommsDriver.BROADCAST)
-def _broadcast_topology_driver(app: Any) -> BroadcastTopology:
-    return BroadcastTopology(events=_topology_events(app))
-
-
+class BroadcastTopologyDriver(Driver):
+    def build(self) -> BroadcastTopology:
+        app = self.app
+        return BroadcastTopology(events=_topology_events(app))
 @register_driver(DriverKind.COMMS, CommsDriver.SWARM)
-def _swarm_topology_driver(app: Any) -> SwarmTopology:
-    return SwarmTopology(events=_topology_events(app))
-
-
+class SwarmTopologyDriver(Driver):
+    def build(self) -> SwarmTopology:
+        app = self.app
+        return SwarmTopology(events=_topology_events(app))
 @register_driver(DriverKind.COMMS, CommsDriver.PIPELINE)
-def _pipeline_topology_driver(app: Any) -> PipelineTopology:
-    return PipelineTopology()
-
-
+class PipelineTopologyDriver(Driver):
+    def build(self) -> PipelineTopology:
+        return PipelineTopology()
 @register_driver(DriverKind.COMMS, CommsDriver.HANDOFF)
-def _handoff_topology_driver(app: Any) -> HandoffTopology:
-    return HandoffTopology()
-
-
+class HandoffTopologyDriver(Driver):
+    def build(self) -> HandoffTopology:
+        return HandoffTopology()
 @register_driver(DriverKind.COMMS, CommsDriver.HUB)
-def _hub_topology_driver(app: Any) -> HubTopology:
-    return HubTopology()
-
-
+class HubTopologyDriver(Driver):
+    def build(self) -> HubTopology:
+        return HubTopology()
 @register_driver(DriverKind.COMMS, CommsDriver.MESH)
-def _mesh_topology_driver(app: Any) -> MeshTopology:
-    return MeshTopology(events=_topology_events(app))
-
-
+class MeshTopologyDriver(Driver):
+    def build(self) -> MeshTopology:
+        app = self.app
+        return MeshTopology(events=_topology_events(app))
 @register_driver(DriverKind.COMMS, CommsDriver.HIERARCHY)
-def _hierarchy_topology_driver(app: Any) -> HierarchyTopology:
-    return HierarchyTopology()
-
-
+class HierarchyTopologyDriver(Driver):
+    def build(self) -> HierarchyTopology:
+        return HierarchyTopology()
 @register_driver(DriverKind.COMMS, CommsDriver.OUTBOX)
-def _outbox_topology_driver(app: Any) -> OutboxTopology:
-    return OutboxTopology()
-
-
+class OutboxTopologyDriver(Driver):
+    def build(self) -> OutboxTopology:
+        return OutboxTopology()
 @register_driver(DriverKind.COMMS, CommsDriver.BLACKBOARD)
-def _blackboard_topology_driver(app: Any) -> BlackboardTopology:
-    return BlackboardTopology()
-
-
+class BlackboardTopologyDriver(Driver):
+    def build(self) -> BlackboardTopology:
+        return BlackboardTopology()
 @register_driver(DriverKind.COMMS, CommsDriver.PUBSUB)
-def _pubsub_topology_driver(app: Any) -> PubSubTopology:
-    return PubSubTopology()
-
-
+class PubsubTopologyDriver(Driver):
+    def build(self) -> PubSubTopology:
+        return PubSubTopology()
 @register_driver(DriverKind.COMMS, CommsDriver.GROUPCHAT)
-def _groupchat_topology_driver(app: Any) -> GroupChatTopology:
-    return GroupChatTopology()
+class GroupchatTopologyDriver(Driver):
+    def build(self) -> GroupChatTopology:
+        return GroupChatTopology()

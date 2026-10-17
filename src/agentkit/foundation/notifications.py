@@ -23,12 +23,15 @@ way.
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
 from agentkit.contracts.channels import NotificationChannel
+from agentkit.foundation.events import ShouldQueue
+from agentkit.foundation.queue import Job
 from agentkit.logging import get_logger
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, NotificationChannelDriver
 from agentkit.support.manager import Manager
 
@@ -39,6 +42,7 @@ __all__ = [
     "NotificationChannel",
     "NotificationChannelManager",
     "Notifier",
+    "QueuedNotificationJob",
     "SentNotification",
     "TelegramNotificationChannel",
 ]
@@ -54,11 +58,16 @@ class SentNotification:
 
 
 class Notification:
-    """Base class for a notification."""
+    """Base class for a notification.
+
+    Mix in :class:`~agentkit.ShouldQueue` to deliver through the durable queue.
+    """
 
     channels: ClassVar[tuple[str, ...]] = ("log",)
     conversation_id: str | None = None
     data: dict[str, Any] = {}
+    queue: ClassVar[str | None] = None
+    delay: ClassVar[float | None] = None
 
     def content(self) -> str:
         """The notification's body. Override this (or the ``to_*`` methods)."""
@@ -108,9 +117,17 @@ class Notifier:
         *,
         to: str | list[str] | None = None,
         conversation_id: str | None = None,
+        _queued: bool = False,
     ) -> list[SentNotification]:
-        channels = _as_list(to) or list(notification.channels)
         conversation_id = conversation_id or getattr(notification, "conversation_id", None)
+        if (
+            not _queued
+            and isinstance(notification, ShouldQueue)
+            and self.app is not None
+            and self._enqueue(notification, to=to, conversation_id=conversation_id)
+        ):
+            return []
+        channels = _as_list(to) or list(notification.channels)
         sent: list[SentNotification] = []
         for channel in channels:
             sender = self._channels.get(channel)
@@ -120,6 +137,31 @@ class Notifier:
             detail = sender(notification, conversation_id=conversation_id) or ""
             sent.append(SentNotification(notification, channel, str(detail)))
         return sent
+
+    def _enqueue(
+        self,
+        notification: Notification,
+        *,
+        to: str | list[str] | None,
+        conversation_id: str | None,
+    ) -> bool:
+        from agentkit._sync import run_sync
+
+        queue = getattr(self.app, "queue", None)
+        if queue is None:
+            return False
+        job = QueuedNotificationJob(
+            notification_path=f"{type(notification).__module__}:{type(notification).__qualname__}",
+            kwargs=_notification_kwargs(notification),
+            channels=_as_list(to) or list(notification.channels),
+            conversation_id=conversation_id,
+        )
+        try:
+            run_sync(queue.push(job))
+        except Exception:  # pragma: no cover - fall back to inline
+            _log.exception("could not queue notification %r", type(notification).__name__)
+            return False
+        return True
 
     # -- built-in channels ---------------------------------------------
     @staticmethod
@@ -159,6 +201,53 @@ def _assistant_message(text: str) -> Any:
     from pydantic_ai.messages import ModelResponse, TextPart
 
     return ModelResponse(parts=[TextPart(text)])
+
+
+def _notification_kwargs(notification: Notification) -> dict[str, Any]:
+    signature = inspect.signature(type(notification).__init__)
+    kwargs: dict[str, Any] = {}
+    for name, parameter in signature.parameters.items():
+        if name == "self" or parameter.kind in (
+            parameter.VAR_POSITIONAL,
+            parameter.VAR_KEYWORD,
+        ):
+            continue
+        if hasattr(notification, name):
+            kwargs[name] = getattr(notification, name)
+    return kwargs
+
+
+class QueuedNotificationJob(Job):
+    """Rebuild a ``ShouldQueue`` notification on the worker and deliver it."""
+
+    queue: str = "default"
+
+    def __init__(
+        self,
+        notification_path: str = "",
+        kwargs: dict[str, Any] | None = None,
+        channels: list[str] | None = None,
+        conversation_id: str | None = None,
+    ) -> None:
+        self.notification_path = notification_path
+        self.kwargs = dict(kwargs or {})
+        self.channels = list(channels or [])
+        self.conversation_id = conversation_id
+
+    def handle(self, app: Any) -> Any:
+        import importlib
+
+        module_name, _, qualname = self.notification_path.partition(":")
+        target: Any = importlib.import_module(module_name)
+        for part in qualname.split("."):
+            target = getattr(target, part)
+        notification = target(**self.kwargs)
+        return app.notifier.send(
+            notification,
+            to=self.channels or None,
+            conversation_id=self.conversation_id,
+            _queued=True,
+        )
 
 
 def _as_list(value: str | list[str] | None) -> list[str]:
@@ -210,15 +299,18 @@ class NotificationChannelManager(Manager):
 
 
 @register_driver(DriverKind.NOTIFICATION_CHANNEL, NotificationChannelDriver.LOG)
-def _log_notification_channel_driver(app: Any) -> LogNotificationChannel:
-    return LogNotificationChannel(getattr(app, "notifier", None))
+class LogNotificationChannelDriver(Driver):
+    def build(self) -> LogNotificationChannel:
+        return LogNotificationChannel(getattr(self.app, "notifier", None))
 
 
 @register_driver(DriverKind.NOTIFICATION_CHANNEL, NotificationChannelDriver.CONVERSATION)
-def _conversation_notification_channel_driver(app: Any) -> ConversationNotificationChannel:
-    return ConversationNotificationChannel(app.notifier)
+class ConversationNotificationChannelDriver(Driver):
+    def build(self) -> ConversationNotificationChannel:
+        return ConversationNotificationChannel(self.app.notifier)
 
 
 @register_driver(DriverKind.NOTIFICATION_CHANNEL, NotificationChannelDriver.TELEGRAM)
-def _telegram_notification_channel_driver(app: Any) -> TelegramNotificationChannel:
-    return TelegramNotificationChannel(app.notifier)
+class TelegramNotificationChannelDriver(Driver):
+    def build(self) -> TelegramNotificationChannel:
+        return TelegramNotificationChannel(self.app.notifier)

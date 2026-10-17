@@ -7,10 +7,10 @@ import httpx
 import jwt
 import pytest
 from a2a import types as t
+from click.testing import CliRunner
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
-from typer.testing import CliRunner
 
 from agentkit.a2a.server import TaskAgentExecutor, build_a2a_app, build_card
 from agentkit.a2a.task_store import SQLAlchemyTaskStore

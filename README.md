@@ -27,6 +27,13 @@ console for exploring and operating the running agent.
   per-concern config, discoverable **skills** (`SKILL.md`), an Artisan-style
   `make:*` CLI, and a thin `Model`/`DB` layer — all additive over the building
   blocks below.
+- **Class-based, Laravel-shaped.** Agents, commands, models, migrations, factories,
+  seeders, validation rules, policies, events, listeners, middleware, jobs, tools,
+  toolkits, and channels are all **classes** you extend — `AgentDefinition`,
+  `Command`, `Model` (Eloquent-ish relationships, casts, scopes, soft deletes),
+  `Migration`/`Factory`/`Seeder`, `Policy`/`Gate`, `Listener`, `Tool`/`Toolkit`,
+  `Channel`. Test with `agentkit.testing` fakes. See the
+  [Laravel → agentkit](/guide/class-based) map.
 - **Contracts + drivers.** Every subsystem — cache, memory, knowledge, storage,
   queue, scheduler, durability, observability, pricing, rate limits, auth, vault,
   guardrails, prompts, channels, comms topologies, and more — exposes a

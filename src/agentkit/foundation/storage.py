@@ -16,7 +16,7 @@ from typing import Any
 
 from agentkit.contracts.storage import FileSystem
 from agentkit.errors import ConfigurationError, InvalidInput
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, StorageDriver
 from agentkit.support.manager import Manager
 
@@ -356,24 +356,25 @@ class CompositeFileSystem:
 
 
 @register_driver(DriverKind.STORAGE, StorageDriver.LOCAL)
-def _local_storage_driver(app: Any) -> Filesystem:
-    return Filesystem(app.settings.home / "storage")
-
-
+class LocalStorageDriver(Driver):
+    def build(self) -> Filesystem:
+        app = self.app
+        return Filesystem(app.settings.home / "storage")
 @register_driver(DriverKind.STORAGE, StorageDriver.MEMORY)
-def _memory_storage_driver(app: Any) -> MemoryFilesystem:
-    return MemoryFilesystem()
-
-
+class MemoryStorageDriver(Driver):
+    def build(self) -> MemoryFilesystem:
+        return MemoryFilesystem()
 @register_driver(DriverKind.STORAGE, StorageDriver.S3)
-def _s3_storage_driver(app: Any) -> S3FileSystem:
-    settings = app.settings
-    bucket = getattr(settings, "s3_bucket", None)
-    if not bucket:
-        raise ConfigurationError("storage_driver=s3 requires S3_BUCKET to be set")
-    return S3FileSystem(
-        bucket,
-        prefix=getattr(settings, "s3_prefix", ""),
-        region=getattr(settings, "s3_region", None),
-        endpoint_url=getattr(settings, "s3_endpoint_url", None),
-    )
+class S3StorageDriver(Driver):
+    def build(self) -> S3FileSystem:
+        app = self.app
+        settings = app.settings
+        bucket = getattr(settings, "s3_bucket", None)
+        if not bucket:
+            raise ConfigurationError("storage_driver=s3 requires S3_BUCKET to be set")
+        return S3FileSystem(
+            bucket,
+            prefix=getattr(settings, "s3_prefix", ""),
+            region=getattr(settings, "s3_region", None),
+            endpoint_url=getattr(settings, "s3_endpoint_url", None),
+        )

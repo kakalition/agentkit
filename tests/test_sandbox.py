@@ -12,7 +12,8 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from agentkit import Agent, App, Sandbox, SandboxError
+from agentkit import App, Sandbox, SandboxError
+from agentkit.foundation.agent import Agent
 from agentkit.runtime import Runtime
 
 

@@ -1,4 +1,4 @@
-"""Manage outbound webhook subscriptions."""
+"""Manage outbound webhook subscriptions (class-based)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import contextlib
 
 import typer
 
-from agentkit.cli._app import webhook_app
+from agentkit.foundation import Command
 
 
 @contextlib.asynccontextmanager
@@ -18,54 +18,51 @@ async def _webhook_scope():
         yield repos
 
 
-@webhook_app.command("add")
-def webhook_add(
-    url: str = typer.Argument(..., help="The delivery URL."),
-    events: str = typer.Option("*", "--events", help="Comma-separated event names ('*' = all)."),
-    secret: str = typer.Option("", "--secret", help="HMAC signing secret."),
-) -> None:
-    """Register an outbound webhook."""
-    import asyncio
+class WebhookAddCommand(Command):
+    group = 'webhook'
+    signature = "webhook:add {url} {--events=\"*\"} {--secret=}"
+    description = "Register an outbound webhook."
 
-    names = [part.strip() for part in events.replace(",", " ").split() if part.strip()]
-
-    async def _run() -> int | None:
+    async def handle(self, url: str, events: str = "*", secret: str = "") -> None:
+        names = [part.strip() for part in events.replace(",", " ").split() if part.strip()]
         async with _webhook_scope() as repos:
             row = await repos.webhooks.add(url, events=names or ["*"], secret=secret)
-            return row.id
-
-    typer.echo(f"added webhook #{asyncio.run(_run())} -> {url}")
+        self.info(f"added webhook #{row.id} -> {url}")
 
 
-@webhook_app.command("list")
-def webhook_list() -> None:
-    """List outbound webhooks."""
-    import asyncio
+class WebhookListCommand(Command):
+    group = 'webhook'
+    signature = "webhook:list"
+    description = "List outbound webhooks."
 
-    async def _run() -> list:
+    async def handle(self) -> None:
         async with _webhook_scope() as repos:
-            return await repos.webhooks.list()
-
-    rows = asyncio.run(_run())
-    if not rows:
-        typer.echo("(no webhooks)")
-        return
-    for row in rows:
-        state = "on" if row.enabled else "off"
-        typer.echo(f"#{row.id} [{state}] {row.url} events={row.events}")
+            rows = await repos.webhooks.list()
+        if not rows:
+            self.info("(no webhooks)")
+            return
+        for row in rows:
+            state = "on" if row.enabled else "off"
+            self.info(f"#{row.id} [{state}] {row.url} events={row.events}")
 
 
-@webhook_app.command("delete")
-def webhook_delete(webhook_id: int = typer.Argument(..., help="The webhook id.")) -> None:
-    """Delete an outbound webhook."""
-    import asyncio
+class WebhookDeleteCommand(Command):
+    group = 'webhook'
+    signature = "webhook:delete {webhook_id}"
+    description = "Delete an outbound webhook."
 
-    async def _run() -> bool:
+    async def handle(self, webhook_id: int) -> None:
         async with _webhook_scope() as repos:
-            return await repos.webhooks.delete(webhook_id)
+            deleted = await repos.webhooks.delete(webhook_id)
+        if deleted:
+            self.info(f"deleted #{webhook_id}")
+        else:
+            self.error(f"no webhook #{webhook_id}")
+            raise typer.Exit(code=1)
 
-    if asyncio.run(_run()):
-        typer.echo(f"deleted #{webhook_id}")
-    else:
-        typer.echo(f"no webhook #{webhook_id}", err=True)
-        raise typer.Exit(code=1)
+
+COMMANDS: list[type] = [
+    WebhookAddCommand,
+    WebhookListCommand,
+    WebhookDeleteCommand,
+]

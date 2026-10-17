@@ -115,11 +115,16 @@ app = (
     .create()
 )
 ''',
-        "app/Agents/assistant.py": '''"""The agent, defined as a discoverable class (``Agent.make(...).full()``)."""
+        "app/Agents/assistant.py": '''"""The agent, defined as a discoverable class.
+
+The agent is declared with class attributes; ``full = True`` expands the whole
+capability stack (persona + memory + skills + HITL + safety + todos), and each
+layer is skipped when its settings flag disables it.
+"""
 
 from __future__ import annotations
 
-from agentkit import Agent, AgentDefinition
+from agentkit import AgentDefinition
 
 from app.Policies.AssistantPolicy import assistant_policy
 from app.Tools.notes import add_note, current_time, list_notes
@@ -134,26 +139,15 @@ INSTRUCTIONS = (
 class Assistant(AgentDefinition):
     name = "{{project}}"
     posture = "hybrid"
-
-    def define(self, agent: Agent) -> Agent:
-        return (
-            agent
-            .instructions(INSTRUCTIONS)
-            .tool(current_time)
-            .tool(add_note)
-            .tool(list_notes)
-            # Native toolkits are opt-in per capability; allow-lists stay empty by default.
-            # .database({"note": Note})          # expose allow-listed models to the agent
-            # .scheduler(["sync_notes"])         # expose allow-listed tasks
-            # .queue()                           # enqueue allow-listed jobs/tasks
-            .learning()                          # reflect -> learn -> apply (review-gated)
-            # The whole agent stack: persona + memory + skills + HITL + safety + todos
-            # (each layer skipped when its settings flag disables it).
-            .full()
-            # .code_execution()                  # opt in to the approval-gated run_code tool
-            .policy(assistant_policy())
-            .output(str)
-        )
+    instructions = INSTRUCTIONS
+    tools = [current_time, add_note, list_notes]
+    # Native toolkits are opt-in per capability: database = {"note": Note},
+    # scheduler = ["sync_notes"], queue = {}; allow-lists stay empty by default.
+    learning = True                      # reflect -> learn -> apply (review-gated)
+    full = True                          # persona + memory + skills + HITL + safety + todos
+    # code = True                        # opt in to the approval-gated run_code tool
+    policy = assistant_policy()
+    output = str
 ''',
         "app/Console/Kernel.py": '''"""The console kernel: the schedule and the command list.
 
@@ -255,7 +249,7 @@ def _assistant_template(instructions: str, traits: str) -> str:
 
 from __future__ import annotations
 
-from agentkit import Agent, AgentDefinition
+from agentkit import AgentDefinition
 
 from app.Policies.AssistantPolicy import assistant_policy
 from app.Tools.notes import add_note, current_time, list_notes
@@ -268,20 +262,12 @@ INSTRUCTIONS = (
 class Assistant(AgentDefinition):
     name = "{{{{project}}}}"
     posture = "hybrid"
-
-    def define(self, agent: Agent) -> Agent:
-        return (
-            agent
-            .instructions(INSTRUCTIONS)
-            .tool(current_time)
-            .tool(add_note)
-            .tool(list_notes)
-{traits}
-            .learning()
-            .full()
-            .policy(assistant_policy())
-            .output(str)
-        )
+    instructions = INSTRUCTIONS
+    tools = [current_time, add_note, list_notes]
+{traits}    learning = True
+    full = True
+    policy = assistant_policy()
+    output = str
 '''
 
 
@@ -290,7 +276,7 @@ _PRESETS: dict[str, dict[str, str]] = {
         "app/Agents/assistant.py": _assistant_template(
             "You are {{project}}, a calm support agent. Acknowledge the issue, "
             "answer from indexed knowledge, and escalate with a clear summary when unsure.",
-            "            .knowledge()  # search the knowledge base before answering\n",
+            "    knowledge = True  # search the knowledge base before answering\n",
         ),
         "evals/support.json": (
             "{\n"
@@ -306,7 +292,7 @@ _PRESETS: dict[str, dict[str, str]] = {
         "app/Agents/assistant.py": _assistant_template(
             "You are {{project}}, a research assistant. Gather sources, cite them, "
             "and prefer precise, well-structured summaries over speculation.",
-            "            .knowledge()  # search the knowledge base before answering\n",
+            "    knowledge = True  # search the knowledge base before answering\n",
         ),
         "evals/research.json": (
             "{\n"
@@ -322,7 +308,7 @@ _PRESETS: dict[str, dict[str, str]] = {
             "You are {{project}}, an operations agent. Diagnose from tools and audit "
             "trails, propose safe remediations, and never take destructive actions "
             "without approval.",
-            "            # .database(...) / .scheduler([...])  # opt in to allow-listed ops\n",
+            "    # database = {'note': Note}; scheduler = ['sync_notes']  # allow-listed ops\n",
         ),
         "evals/ops.json": (
             "{\n"
@@ -360,9 +346,9 @@ def scaffold_project(
 
     ``full=True`` (the default) writes the full-stack project; ``full=False`` writes
     the minimal skeleton. ``preset`` overlays a composed blueprint
-    (``support`` | ``research`` | ``ops``). ``posture`` wires the generated agent's
-    ``.posture("<name>").full()`` (``specialized`` | ``hybrid`` | ``free``). Refuses
-    to write into a non-empty target unless ``force=True``.
+    (``support`` | ``research`` | ``ops``). ``posture`` sets the generated agent's
+    declarative ``posture`` attribute (``specialized`` | ``hybrid`` | ``free``).
+    Refuses to write into a non-empty target unless ``force=True``.
     """
     package = package_name(name)
     target = Path(directory).expanduser() / name
@@ -378,10 +364,8 @@ def scaffold_project(
         resolve_posture(posture)  # validate the posture name
         agent_file = "app/Agents/assistant.py"
         if agent_file in files:
-            files[agent_file] = (
-                files[agent_file]
-                .replace('posture = "hybrid"', f'posture = "{posture}"')
-                .replace(".full()", f'.posture("{posture}").full()')
+            files[agent_file] = files[agent_file].replace(
+                'posture = "hybrid"', f'posture = "{posture}"'
             )
     replacements = {
         "{{project}}": name,

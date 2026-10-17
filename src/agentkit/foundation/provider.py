@@ -51,6 +51,18 @@ class Provider:
         """Extra CLI commands contributed by this provider."""
         return []
 
+    def listeners(self) -> list[Any]:
+        """Extra event listeners (classes or instances) contributed by this provider."""
+        return []
+
+    def middleware(self) -> list[Any]:
+        """Turn middleware (instances/groups) contributed by this provider."""
+        return []
+
+    def policies(self) -> list[Any]:
+        """Authorization policies (classes/instances) contributed by this provider."""
+        return []
+
     def schedules(self) -> list[Any]:
         """Extra schedule definitions contributed by this provider."""
         return []

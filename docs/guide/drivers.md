@@ -233,12 +233,19 @@ Then select it: `CACHE_DRIVER=redis`.
 the global registry for everyone:
 
 ```python
-from agentkit import DriverKind, register_driver
+from agentkit import Driver, DriverKind, register_driver
 
 @register_driver(DriverKind.CACHE, "redis")
-def _redis(app):
-    return RedisCache(app.settings.redis_url)
+class RedisCacheDriver(Driver):
+    kind = DriverKind.CACHE
+    name = "redis"
+
+    def build(self):
+        return RedisCache(self.app.settings.redis_url)
 ```
+
+Drivers are **class-only**: the registry rejects a plain `factory(app)` function.
+Subclass `Driver` and implement `build()`.
 
 A driver needs **no base class**. It just needs the contract's methods. For the
 cache that is `get`, `put`, `remember`, `has`, `forget`, `flush`:

@@ -267,10 +267,7 @@ LISTENERS = [LogNoteSaved]
 
 class EventServiceProvider(Provider):
     def register(self, app: Any) -> None:
-        for listener_class in LISTENERS:
-            listener = listener_class()
-            for name in type(listener).events():
-                app.on(name, listener)
+        app.listeners(LISTENERS)
 ''',
         # -- Console -----------------------------------------------------------
         "app/Console/__init__.py": '''"""Console kernel and commands."""
@@ -416,7 +413,7 @@ selects the default layer profile for ``.full()``.
 
 from __future__ import annotations
 
-from agentkit import Agent, AgentDefinition
+from agentkit import AgentDefinition
 
 from app.Policies.AssistantPolicy import assistant_policy
 from app.Tools.notes import add_note, current_time, list_notes
@@ -431,20 +428,13 @@ INSTRUCTIONS = (
 class Assistant(AgentDefinition):
     name = "{{project}}"
     posture = "hybrid"
-
-    def define(self, agent: Agent) -> Agent:
-        return (
-            agent
-            .persona()                       # reads <AGENT_HOME>/SOUL.md
-            .instructions(INSTRUCTIONS)
-            .memory()                        # remember / recall / forget tools
-            .skills()                        # discover skills/*/SKILL.md
-            .tool(current_time)
-            .tool(add_note)
-            .tool(list_notes)
-            .policy(assistant_policy())      # safety policy
-            .output(str)
-        )
+    persona = True                       # reads <AGENT_HOME>/SOUL.md
+    instructions = INSTRUCTIONS
+    memory = True                        # remember / recall / forget tools
+    skills = True                        # discover skills/*/SKILL.md
+    tools = [current_time, add_note, list_notes]
+    policy = assistant_policy()          # safety policy
+    output = str
 ''',
         "app/Tools/__init__.py": '''"""Tool functions — how your agent acts."""
 ''',

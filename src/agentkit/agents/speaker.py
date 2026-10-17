@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentkit.contracts.speaker import SpeakerStrategy
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, SpeakerDriver
 from agentkit.support.manager import Manager
 
@@ -129,25 +129,22 @@ class SpeakerManager(Manager):
 
 
 @register_driver(DriverKind.SPEAKER, SpeakerDriver.ROUND_ROBIN)
-def _round_robin_speaker(app: Any) -> RoundRobinSpeaker:
-    return RoundRobinSpeaker()
-
-
+class RoundRobinSpeakerDriver(Driver):
+    def build(self) -> RoundRobinSpeaker:
+        return RoundRobinSpeaker()
 @register_driver(DriverKind.SPEAKER, SpeakerDriver.MODERATOR)
-def _moderator_speaker(app: Any) -> ModeratorSpeaker:
-    return ModeratorSpeaker()
-
-
+class ModeratorSpeakerDriver(Driver):
+    def build(self) -> ModeratorSpeaker:
+        return ModeratorSpeaker()
 @register_driver(DriverKind.SPEAKER, SpeakerDriver.ALL)
-def _all_speaker(app: Any) -> AllSpeaker:
-    return AllSpeaker()
-
-
+class AllSpeakerDriver(Driver):
+    def build(self) -> AllSpeaker:
+        return AllSpeaker()
 @register_driver(DriverKind.SPEAKER, SpeakerDriver.SELECTOR)
-def _selector_speaker(app: Any) -> SelectorSpeaker:
-    return SelectorSpeaker()
-
-
+class SelectorSpeakerDriver(Driver):
+    def build(self) -> SelectorSpeaker:
+        return SelectorSpeaker()
 @register_driver(DriverKind.SPEAKER, SpeakerDriver.MANUAL)
-def _manual_speaker(app: Any) -> ManualSpeaker:
-    return ManualSpeaker()
+class ManualSpeakerDriver(Driver):
+    def build(self) -> ManualSpeaker:
+        return ManualSpeaker()

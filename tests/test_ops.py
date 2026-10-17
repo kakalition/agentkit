@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 
+from click.testing import CliRunner
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
-from typer.testing import CliRunner
 
 from agentkit import metrics
 from agentkit.cli import app as cli_app

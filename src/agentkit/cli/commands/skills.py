@@ -1,4 +1,4 @@
-"""Inspect discovered skills."""
+"""Inspect discovered skills (class-based)."""
 
 from __future__ import annotations
 
@@ -6,41 +6,46 @@ from pathlib import Path
 
 import typer
 
-from agentkit.cli._app import skills_app
+from agentkit.foundation import Command
 
 
-@skills_app.command("list")
-def skills_list(
-    path: list[Path] | None = typer.Option(
-        None, "--path", help="Skill root (repeatable; default: settings roots)."
-    ),
-) -> None:
-    """List the skills discovered under the configured roots."""
-    from agentkit.skills import SkillRegistry
+class SkillsListCommand(Command):
+    group = 'skills'
+    signature = "skills:list {--path=}"
+    description = "List the skills discovered under the configured roots."
 
-    registry = (
-        SkillRegistry.from_paths(path) if path else SkillRegistry.from_settings()
-    ).discover()
-    if len(registry) == 0:
-        typer.echo("(no skills found)")
-        return
-    for skill in registry.all():
-        typer.echo(f"  {skill.name:<24} {skill.description}  ({skill.path})")
+    def handle(self, path: list[Path] | None = None) -> None:
+        from agentkit.skills import SkillRegistry
+
+        registry = (
+            SkillRegistry.from_paths(path) if path else SkillRegistry.from_settings()
+        ).discover()
+        if len(registry) == 0:
+            self.info("(no skills found)")
+            return
+        for skill in registry.all():
+            self.info(f"  {skill.name:<24} {skill.description}  ({skill.path})")
 
 
-@skills_app.command("show")
-def skills_show(
-    name: str = typer.Argument(..., help="Skill name."),
-    path: list[Path] | None = typer.Option(None, "--path", help="Skill root (repeatable)."),
-) -> None:
-    """Show one skill's full instructions (and bundled files)."""
-    from agentkit.skills import SkillRegistry
+class SkillsShowCommand(Command):
+    group = 'skills'
+    signature = "skills:show {name} {--path=}"
+    description = "Show one skill's full instructions (and bundled files)."
 
-    registry = (
-        SkillRegistry.from_paths(path) if path else SkillRegistry.from_settings()
-    ).discover()
-    skill = registry.get(name)
-    if skill is None:
-        typer.echo(f"no skill named {name!r}", err=True)
-        raise typer.Exit(code=1)
-    typer.echo(skill.render())
+    def handle(self, name: str, path: list[Path] | None = None) -> None:
+        from agentkit.skills import SkillRegistry
+
+        registry = (
+            SkillRegistry.from_paths(path) if path else SkillRegistry.from_settings()
+        ).discover()
+        skill = registry.get(name)
+        if skill is None:
+            self.error(f"no skill named {name!r}")
+            raise typer.Exit(code=1)
+        self.info(skill.render())
+
+
+COMMANDS: list[type] = [
+    SkillsListCommand,
+    SkillsShowCommand,
+]

@@ -5,8 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentkit import Agent, AgentSettings
+from agentkit import AgentSettings
 from agentkit.errors import ConfigurationError
+from agentkit.foundation.agent import Agent
 from agentkit.foundation.application import App
 from agentkit.gateways.base import GatewayError
 from agentkit.gateways.linear import LinearGateway

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agentkit.agents.groupchat import GroupChatRunner
-from agentkit.agents.ledger import attach_team_ledger
+from agentkit.agents.ledger import TeamLedgerCapability
 from agentkit.agents.speaker import RoundRobinSpeaker
 
 __all__ = ["ManagedTeam", "TeamLedger", "TeamRunResult"]
@@ -178,7 +178,7 @@ class ManagedTeam:
             return
         deps.extras["team_ledger"] = self.ledger
         for member_name, member in self.roster.items():
-            attach_team_ledger(member, name=member_name)
+            TeamLedgerCapability(name=member_name).install(member)
 
     @staticmethod
     def _deps_extras(ctx: Any) -> dict[str, Any] | None:

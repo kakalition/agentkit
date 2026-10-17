@@ -12,7 +12,7 @@ import json
 from typing import Any
 
 from agentkit.contracts.eval_dataset import Grader, GradeResult
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, EvalGraderDriver
 from agentkit.support.manager import Manager
 
@@ -244,20 +244,19 @@ def grader_by_name(name: str) -> Any:
 
 
 @register_driver(DriverKind.EVAL_GRADER, EvalGraderDriver.EXACT)
-def _exact_grader_driver(app: Any) -> ExactMatchGrader:
-    return ExactMatchGrader()
-
-
+class ExactGraderDriver(Driver):
+    def build(self) -> ExactMatchGrader:
+        return ExactMatchGrader()
 @register_driver(DriverKind.EVAL_GRADER, EvalGraderDriver.CONTAINS)
-def _contains_grader_driver(app: Any) -> ContainsGrader:
-    return ContainsGrader()
-
-
+class ContainsGraderDriver(Driver):
+    def build(self) -> ContainsGrader:
+        return ContainsGrader()
 @register_driver(DriverKind.EVAL_GRADER, EvalGraderDriver.SCHEMA)
-def _schema_grader_driver(app: Any) -> SchemaGrader:
-    return SchemaGrader()
-
-
+class SchemaGraderDriver(Driver):
+    def build(self) -> SchemaGrader:
+        return SchemaGrader()
 @register_driver(DriverKind.EVAL_GRADER, EvalGraderDriver.LLM_JUDGE)
-def _llm_judge_grader_driver(app: Any) -> LLMJudgeGrader:
-    return LLMJudgeGrader(getattr(app, "_model", None))
+class LlmJudgeGraderDriver(Driver):
+    def build(self) -> LLMJudgeGrader:
+        app = self.app
+        return LLMJudgeGrader(getattr(app, "_model", None))

@@ -4,8 +4,8 @@ from pathlib import Path
 
 from pydantic_ai.messages import ModelRequest, ToolReturnPart
 
-from agentkit import Agent
 from agentkit.config import AgentSettings
+from agentkit.foundation.agent import Agent
 from agentkit.offload import offload_messages
 
 

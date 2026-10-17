@@ -11,7 +11,7 @@ from pydantic_ai import RunContext
 from agentkit.deps import Deps
 from agentkit.toolkits._common import repos_of
 
-__all__ = ["attach_usage"]
+__all__ = ["_attach_usage"]
 
 MAX_LIMIT = 1000
 _WINDOWS = {"all": None, "today": 1, "24h": 1, "7d": 7, "30d": 30}
@@ -24,7 +24,7 @@ def _since(window: str) -> datetime | None:
     return datetime.now(UTC) - timedelta(days=days)
 
 
-def attach_usage(agent: Any, *, flag: str = "usage_tools_enabled") -> Any:
+def _attach_usage(agent: Any, *, flag: str = "usage_tools_enabled") -> Any:
     """Register the usage/audit tools on a built PydanticAI agent (idempotent)."""
     if getattr(agent, "_agentkit_usage_attached", False):
         return agent

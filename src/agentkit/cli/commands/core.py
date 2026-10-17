@@ -2,45 +2,57 @@
 
 from __future__ import annotations
 
-import typer
-
 from agentkit import __version__
-from agentkit.cli._app import app
 from agentkit.config import get_settings
+from agentkit.foundation import Command
 
 
-@app.command()
-def version() -> None:
-    """Print the agentkit version."""
-    typer.echo(f"agentkit {__version__}")
+class VersionCommand(Command):
+    signature = "version"
+    description = "Print the agentkit version."
+
+    def handle(self) -> None:
+        self.info(f"agentkit {__version__}")
 
 
-@app.command()
-def about() -> None:
-    """Show the agentkit version and the resolved agent home/model."""
-    settings = get_settings()
-    typer.echo(f"agentkit {__version__}")
-    typer.echo(f"agent home: {settings.home}")
-    typer.echo(f"model: {settings.model_name}")
+class AboutCommand(Command):
+    signature = "about"
+    description = "Show the agentkit version and the resolved agent home/model."
+
+    def handle(self) -> None:
+        settings = get_settings()
+        self.info(f"agentkit {__version__}")
+        self.info(f"agent home: {settings.home}")
+        self.info(f"model: {settings.model_name}")
 
 
-@app.command()
-def webui(
-    host: str | None = typer.Option(None, help="Bind host (default: settings)."),
-    port: int | None = typer.Option(None, help="Bind port (default: settings)."),
-) -> None:
-    """Serve the operator web UI for the agent in the current environment."""
-    from agentkit.webui.server import serve_webui
+class WebuiCommand(Command):
+    signature = "webui {--host=} {--port=}"
+    description = "Serve the operator web UI for the agent in the current environment."
 
-    settings = get_settings()
-    typer.echo(f"agentkit webui at http://{host or settings.webui_host}:{port or settings.webui_port}")
-    serve_webui(settings=settings, host=host, port=port)
+    def handle(self) -> None:
+        from agentkit.webui.server import serve_webui
+
+        settings = get_settings()
+        host = self.option("host")
+        port = self.option("port")
+        self.info(
+            f"agentkit webui at http://{host or settings.webui_host}:{port or settings.webui_port}"
+        )
+        serve_webui(settings=settings, host=host, port=port)
 
 
-@app.command()
-def api(
-    host: str | None = typer.Option(None, help="Bind host (default: settings)."),
-    port: int | None = typer.Option(None, help="Bind port (default: settings)."),
-) -> None:
-    """Alias for ``webui`` (serve the API + SPA)."""
-    webui(host=host, port=port)
+class ApiCommand(Command):
+    signature = "api {--host=} {--port=}"
+    description = "Alias for ``webui`` (serve the API + SPA)."
+
+    def handle(self) -> None:
+        WebuiCommand().invoke(host=self.option("host"), port=self.option("port"))
+
+
+COMMANDS: list[type] = [
+    VersionCommand,
+    AboutCommand,
+    WebuiCommand,
+    ApiCommand,
+]

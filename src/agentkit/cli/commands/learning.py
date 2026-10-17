@@ -1,4 +1,4 @@
-"""Self-learning commands: reflect, list lessons, forget a lesson."""
+"""Self-learning commands: reflect, list lessons, forget a lesson (class-based)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 
 import typer
 
-from agentkit.cli._app import app
+from agentkit.foundation import Command
 
 
 @contextlib.asynccontextmanager
@@ -19,101 +19,89 @@ async def _learning_scope():
         yield repos
 
 
-@app.command("learning:reflect")
-def learning_reflect(
-    conversation: str | None = typer.Option(None, "--conversation", help="Conversation id (default: most recent)."),
-    window: int = typer.Option(20, "--window", help="How many recent messages to review."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Report without changing anything."),
-) -> None:
-    """Distil lessons/preferences/facts from a conversation (the durable task)."""
-    import asyncio
+class LearningReflectCommand(Command):
+    signature = "learning:reflect {--conversation=} {--window=20} {--dry-run}"
+    description = "Distil lessons/preferences/facts from a conversation (the durable task)."
 
-    from agentkit.learning import reflect
+    async def handle(
+        self, conversation: str | None = None, window: int = 20, dry_run: bool = False
+    ) -> None:
+        from agentkit.learning import reflect
 
-    async def _run() -> dict:
         async with _learning_scope() as repos:
-            return await reflect(
+            summary = await reflect(
                 repos, conversation_id=conversation, window=window, dry_run=dry_run
             )
-
-    summary = asyncio.run(_run())
-    if summary.get("skipped"):
-        typer.echo("nothing new to reflect on (already processed)")
-        return
-    prefix = "would learn " if dry_run else "learned "
-    typer.echo(
-        f"{prefix}{summary['lessons']} lesson(s), {summary['preferences']} preference(s), "
-        f"{summary['facts']} fact(s); merged {summary['merged']}"
-    )
-    if summary.get("skill_candidates"):
-        typer.echo(f"skill candidates: {json.dumps(summary['skill_candidates'], default=str)}")
+        if summary.get("skipped"):
+            self.info("nothing new to reflect on (already processed)")
+            return
+        prefix = "would learn " if dry_run else "learned "
+        self.info(
+            f"{prefix}{summary['lessons']} lesson(s), {summary['preferences']} preference(s), "
+            f"{summary['facts']} fact(s); merged {summary['merged']}"
+        )
+        if summary.get("skill_candidates"):
+            self.info(f"skill candidates: {json.dumps(summary['skill_candidates'], default=str)}")
 
 
-@app.command("learning:lessons")
-def learning_lessons(
-    limit: int = typer.Option(50, "--limit", help="Maximum lessons to show."),
-    status: str = typer.Option("active", "--status", help="active | proposed | rejected | all."),
-) -> None:
-    """List the lessons the agent has learned."""
-    import asyncio
+class LearningLessonsCommand(Command):
+    signature = "learning:lessons {--limit=50} {--status=active}"
+    description = "List the lessons the agent has learned."
 
-    wanted = None if status == "all" else status
-
-    async def _run() -> list[str]:
+    async def handle(self, limit: int = 50, status: str = "active") -> None:
+        wanted = None if status == "all" else status
         async with _learning_scope() as repos:
             rows = await repos.memories.list(limit=limit, kind="procedural", status=wanted)
             rows.sort(key=lambda row: float(row.importance or 0.0), reverse=True)
-            return [f"#{row.id} [{row.status}] {row.content}" for row in rows]
-
-    lines = asyncio.run(_run())
-    if not lines:
-        typer.echo("(no lessons)")
-        return
-    for line in lines:
-        typer.echo(line)
+            lines = [f"#{row.id} [{row.status}] {row.content}" for row in rows]
+        if not lines:
+            self.info("(no lessons)")
+            return
+        for line in lines:
+            self.info(line)
 
 
-@app.command("learning:review")
-def learning_review(
-    action: str = typer.Argument(..., help="approve | reject."),
-    lesson_id: int = typer.Argument(..., help="The proposed lesson id."),
-) -> None:
-    """Approve or reject a proposed lesson (see ``learning:lessons --status proposed``)."""
-    import asyncio
+class LearningReviewCommand(Command):
+    signature = "learning:review {action} {lesson_id}"
+    description = "Approve or reject a proposed lesson."
 
-    from agentkit.learning import approve_lesson, reject_lesson
+    async def handle(self, action: str, lesson_id: int) -> None:
+        from agentkit.learning import approve_lesson, reject_lesson
 
-    normalised = action.strip().lower()
-    if normalised not in {"approve", "reject"}:
-        typer.echo("action must be 'approve' or 'reject'", err=True)
-        raise typer.Exit(code=2)
+        normalised = action.strip().lower()
+        if normalised not in {"approve", "reject"}:
+            self.error("action must be 'approve' or 'reject'")
+            raise typer.Exit(code=2)
 
-    async def _run() -> bool:
         async with _learning_scope() as repos:
             if normalised == "approve":
-                return await approve_lesson(repos, lesson_id)
-            return await reject_lesson(repos, lesson_id)
+                ok = await approve_lesson(repos, lesson_id)
+            else:
+                ok = await reject_lesson(repos, lesson_id)
+        if ok:
+            self.info(f"{normalised}d #{lesson_id}")
+        else:
+            self.error(f"no lesson #{lesson_id}")
+            raise typer.Exit(code=1)
 
-    if asyncio.run(_run()):
-        typer.echo(f"{normalised}d #{lesson_id}")
-    else:
-        typer.echo(f"no lesson #{lesson_id}", err=True)
-        raise typer.Exit(code=1)
 
+class LearningForgetCommand(Command):
+    signature = "learning:forget {lesson_id}"
+    description = "Delete a learned lesson by id."
 
-@app.command("learning:forget")
-def learning_forget(
-    lesson_id: int = typer.Argument(..., help="The lesson id to delete."),
-) -> None:
-    """Delete a learned lesson by id."""
-    import asyncio
-
-    async def _run() -> bool:
+    async def handle(self, lesson_id: int) -> None:
         async with _learning_scope() as repos:
-            return await repos.memories.forget(lesson_id)
+            deleted = await repos.memories.forget(lesson_id)
+        if deleted:
+            self.info(f"forgotten #{lesson_id}")
+        else:
+            self.error(f"no lesson #{lesson_id}")
+            raise typer.Exit(code=1)
 
-    if asyncio.run(_run()):
-        typer.echo(f"forgotten #{lesson_id}")
-    else:
-        typer.echo(f"no lesson #{lesson_id}", err=True)
-        raise typer.Exit(code=1)
+
+COMMANDS: list[type] = [
+    LearningReflectCommand,
+    LearningLessonsCommand,
+    LearningReviewCommand,
+    LearningForgetCommand,
+]

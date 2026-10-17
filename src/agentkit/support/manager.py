@@ -17,15 +17,17 @@ Adding a driver::
     from agentkit.support.kinds import CacheDriver
 
     @register_driver(DriverKind.CACHE, CacheDriver.REDIS)
-    def _redis(app):
-        return RedisCache(app.settings.redis_url)
+    class RedisDriver(Driver):
+        def build(self) -> Any:
+            app = self.app
+            return RedisCache(app.settings.redis_url)
 
-    class CacheManager(Manager):
-        kind = DriverKind.CACHE
-        default_driver = CacheDriver.ARRAY
+        class CacheManager(Manager):
+            kind = DriverKind.CACHE
+            default_driver = CacheDriver.ARRAY
 
-        def create_array_driver(self, app):
-            return CacheStore()
+            def create_array_driver(self, app):
+                return CacheStore()
 """
 
 from __future__ import annotations

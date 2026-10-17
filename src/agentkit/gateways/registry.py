@@ -11,7 +11,7 @@ from typing import Any
 
 from agentkit.gateways.base import Gateway
 from agentkit.logging import get_logger
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import ChannelDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -38,54 +38,56 @@ class ChannelManager(Manager):
 
 
 @register_driver(DriverKind.CHANNEL, ChannelDriver.LOG)
-def _log_channel_driver(app: Any) -> LogChannel:
-    return LogChannel(app, settings=getattr(app, "settings", None))
-
-
+class LogChannelDriver(Driver):
+    def build(self) -> LogChannel:
+        app = self.app
+        return LogChannel(app, settings=getattr(app, "settings", None))
 @register_driver(DriverKind.CHANNEL, ChannelDriver.TELEGRAM)
-def _telegram_channel_driver(app: Any) -> Any:
-    from agentkit.gateways.telegram import TelegramGateway
+class TelegramChannelDriver(Driver):
+    def build(self) -> Any:
+        app = self.app
+        from agentkit.gateways.telegram import TelegramGateway
 
-    return TelegramGateway(app, settings=getattr(app, "settings", None))
-
-
+        return TelegramGateway(app, settings=getattr(app, "settings", None))
 @register_driver(DriverKind.CHANNEL, ChannelDriver.SLACK)
-def _slack_channel_driver(app: Any) -> Any:
-    from agentkit.gateways.slack import SlackGateway
+class SlackChannelDriver(Driver):
+    def build(self) -> Any:
+        app = self.app
+        from agentkit.gateways.slack import SlackGateway
 
-    return SlackGateway(app, settings=getattr(app, "settings", None))
-
-
+        return SlackGateway(app, settings=getattr(app, "settings", None))
 @register_driver(DriverKind.CHANNEL, ChannelDriver.EMAIL)
-def _email_channel_driver(app: Any) -> Any:
-    from agentkit.gateways.email import EmailGateway
+class EmailChannelDriver(Driver):
+    def build(self) -> Any:
+        app = self.app
+        from agentkit.gateways.email import EmailGateway
 
-    return EmailGateway(app, settings=getattr(app, "settings", None))
-
-
+        return EmailGateway(app, settings=getattr(app, "settings", None))
 @register_driver(DriverKind.CHANNEL, ChannelDriver.DISCORD)
-def _discord_channel_driver(app: Any) -> Any:
-    from agentkit.gateways.discord import DiscordGateway
+class DiscordChannelDriver(Driver):
+    def build(self) -> Any:
+        app = self.app
+        from agentkit.gateways.discord import DiscordGateway
 
-    return DiscordGateway(app, settings=getattr(app, "settings", None))
-
-
+        return DiscordGateway(app, settings=getattr(app, "settings", None))
 @register_driver(DriverKind.CHANNEL, ChannelDriver.MATTERMOST)
-def _mattermost_channel_driver(app: Any) -> Any:
-    from agentkit.gateways.mattermost import MattermostGateway
+class MattermostChannelDriver(Driver):
+    def build(self) -> Any:
+        app = self.app
+        from agentkit.gateways.mattermost import MattermostGateway
 
-    return MattermostGateway(app, settings=getattr(app, "settings", None))
-
-
+        return MattermostGateway(app, settings=getattr(app, "settings", None))
 @register_driver(DriverKind.CHANNEL, ChannelDriver.LINEAR)
-def _linear_channel_driver(app: Any) -> Any:
-    from agentkit.gateways.linear import LinearGateway
+class LinearChannelDriver(Driver):
+    def build(self) -> Any:
+        app = self.app
+        from agentkit.gateways.linear import LinearGateway
 
-    return LinearGateway(app, settings=getattr(app, "settings", None))
-
-
+        return LinearGateway(app, settings=getattr(app, "settings", None))
 @register_driver(DriverKind.CHANNEL, ChannelDriver.WEBHOOK)
-def _webhook_channel_driver(app: Any) -> Any:
-    from agentkit.gateways.webhook import WebhookGateway
+class WebhookChannelDriver(Driver):
+    def build(self) -> Any:
+        app = self.app
+        from agentkit.gateways.webhook import WebhookGateway
 
-    return WebhookGateway(app, settings=getattr(app, "settings", None))
+        return WebhookGateway(app, settings=getattr(app, "settings", None))

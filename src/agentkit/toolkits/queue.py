@@ -17,7 +17,7 @@ from agentkit.deps import Deps
 from agentkit.foundation.queue import Job
 from agentkit.toolkits._common import app_of, emit_event, resolve_allow_list, resolve_list
 
-__all__ = ["RunRegisteredTask", "attach_queue"]
+__all__ = ["RunRegisteredTask", "_attach_queue"]
 
 
 class RunRegisteredTask(Job):
@@ -43,7 +43,7 @@ def _job_view(record: Any) -> dict[str, Any]:
     }
 
 
-def attach_queue(
+def _attach_queue(
     agent: Any,
     jobs: dict[str, Any] | None = None,
     tasks: list[str] | None = None,

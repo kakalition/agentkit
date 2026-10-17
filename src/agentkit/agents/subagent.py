@@ -20,7 +20,7 @@ from typing import Any
 from pydantic_ai import RunContext
 
 from agentkit.contracts.subagent import ContextStrategy
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import ContextDriver, DriverKind
 from agentkit.support.manager import Manager
 
@@ -66,20 +66,17 @@ class ContextManager(Manager):
 
 
 @register_driver(DriverKind.CONTEXT, ContextDriver.ISOLATED)
-def _isolated_context_driver(app: Any) -> IsolatedContext:
-    return IsolatedContext()
-
-
+class IsolatedContextDriver(Driver):
+    def build(self) -> IsolatedContext:
+        return IsolatedContext()
 @register_driver(DriverKind.CONTEXT, ContextDriver.SHARED)
-def _shared_context_driver(app: Any) -> SharedContext:
-    return SharedContext()
-
-
+class SharedContextDriver(Driver):
+    def build(self) -> SharedContext:
+        return SharedContext()
 @register_driver(DriverKind.CONTEXT, ContextDriver.SUMMARIZED)
-def _summarized_context_driver(app: Any) -> SummarizedContext:
-    return SummarizedContext()
-
-
+class SummarizedContextDriver(Driver):
+    def build(self) -> SummarizedContext:
+        return SummarizedContext()
 def subagent_tool(registry: Any, *, strategy: Any = None) -> Any:
     """A ``task(subagent, prompt)`` tool backed by ``registry`` and a context strategy."""
     strategy = strategy or IsolatedContext()

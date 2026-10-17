@@ -34,7 +34,7 @@ from pydantic_evals.reporting import EvaluationReport
 
 from agentkit.contracts.evals import Reporter
 from agentkit.session import ChatResult
-from agentkit.support import register_driver
+from agentkit.support import Driver, register_driver
 from agentkit.support.kinds import DriverKind, EvalsReporterDriver
 from agentkit.support.manager import Manager
 
@@ -414,20 +414,17 @@ class EvalReporterManager(Manager):
 
 
 @register_driver(DriverKind.EVALS_REPORTER, EvalsReporterDriver.TEXT)
-def _text_reporter_driver(app: Any) -> TextReporter:
-    return TextReporter()
-
-
+class TextReporterDriver(Driver):
+    def build(self) -> TextReporter:
+        return TextReporter()
 @register_driver(DriverKind.EVALS_REPORTER, EvalsReporterDriver.JSON)
-def _json_reporter_driver(app: Any) -> JsonReporter:
-    return JsonReporter()
-
-
+class JsonReporterDriver(Driver):
+    def build(self) -> JsonReporter:
+        return JsonReporter()
 @register_driver(DriverKind.EVALS_REPORTER, EvalsReporterDriver.PYDANTIC)
-def _pydantic_reporter_driver(app: Any) -> PydanticReporter:
-    return PydanticReporter()
-
-
+class PydanticReporterDriver(Driver):
+    def build(self) -> PydanticReporter:
+        return PydanticReporter()
 def assert_trajectory(
     result: Any,
     *,
